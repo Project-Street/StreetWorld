@@ -1,22 +1,19 @@
 import math
 from collections import deque
-from typing import Union, List
+from typing import List, Union
 
 import numpy as np
-from panda3d.bullet import BulletVehicle, BulletBoxShape, ZUp
-from panda3d.core import Vec3, TransformState
+import torch
+from panda3d.bullet import BulletBoxShape, BulletVehicle, ZUp
+from panda3d.core import TransformState, Vec3
 
 from streetworld.base_class.base_object import BaseObject
-
-# from metadrive.component.navigation_module.node_network_navigation import NodeNetworkNavigation
-from streetworld.component.pg_space import VehicleParameterSpace, ParameterSpace
-from streetworld.constants import MetaDriveType, CollisionGroup
-from streetworld.constants import Semantics
-from streetworld.utils.logger import get_logger
+from streetworld.component.pg_space import ParameterSpace, VehicleParameterSpace
+from streetworld.constants import CollisionGroup, MetaDriveType, Semantics
 from streetworld.engine.physics_node import BaseRigidBodyNode
 from streetworld.utils import Config, safe_clip_for_small_array
+from streetworld.utils.logger import get_logger
 from streetworld.utils.math import norm
-import torch
 
 logger = get_logger()
 
@@ -146,7 +143,6 @@ class BaseVehicle(BaseObject, BaseVehicleState):
         self.on_lane = None
         self._init_step_info()
 
-        #
         self.break_down = False
         # if self.engine.current_map is not None:
         if _calling_reset:

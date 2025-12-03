@@ -1,35 +1,29 @@
 import time
 from collections import defaultdict
-from typing import Union, Dict, AnyStr, Tuple, Callable
-import torch
+from typing import AnyStr, Callable, Dict, Tuple, Union
+
 import gymnasium as gym
 import numpy as np
-from panda3d.core import PNMImage
+import torch
+from easydrive.engine.config import Config
+from panda3d.core import PNMImage, PythonCallbackObject
 
-from streetworld.constants import TerminationState
-from streetworld.utils.logger import get_logger
-from streetworld.manager.agent_manager import AgentManager, AgentState
-
-# from metadrive.manager.record_manager import RecordManager
-# from metadrive.manager.replay_manager import ReplayManager
-# from metadrive.obs.image_obs import ImageStateObservation
-from streetworld.obs.observation_base import DummyObservation
-
-# from metadrive.obs.state_obs import LidarStateObservation
-from streetworld.scenario.utils import convert_recorded_scenario_exported
-from streetworld.utils import get_np_random, concat_step_infos
-from streetworld.engine.core.physics_world import PhysicsWorld
-from streetworld.engine.step_counter import StepCounter
-from streetworld.engine.core.collision_callback import collision_callback
-from panda3d.core import PythonCallbackObject
 from streetworld.component.traffic_participants.cyclist import Cyclist
 from streetworld.component.traffic_participants.pedestrian import Pedestrian
 from streetworld.component.vehicle.vehicle_type import get_vehicle_type
+from streetworld.constants import TerminationState
+from streetworld.default_config import BASE_DEFAULT_CONFIG
+from streetworld.engine.core.collision_callback import collision_callback
+from streetworld.engine.core.physics_world import PhysicsWorld
+from streetworld.engine.step_counter import StepCounter
+from streetworld.manager.agent_manager import AgentManager, AgentState
 from streetworld.manager.scenario_data_manager import ScenarioDataManager
 from streetworld.manager.scenario_map_manager import ScenarioMapManager
+from streetworld.obs.observation_base import DummyObservation
 from streetworld.policy.replay_policy import ReplayPolicy
-from easydrive.engine.config import Config
-from streetworld.default_config import BASE_DEFAULT_CONFIG
+from streetworld.scenario.utils import convert_recorded_scenario_exported
+from streetworld.utils import concat_step_infos, get_np_random
+from streetworld.utils.logger import get_logger
 
 
 class BaseEnv(gym.Env):

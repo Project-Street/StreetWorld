@@ -4,10 +4,10 @@ This script demonstrates how to use the environment where traffic and road map a
 """
 
 import argparse
+
 from streetworld.constants import HELP_MESSAGE
 from streetworld.engine.asset_loader import AssetLoader
 from streetworld.envs.scenario_env import ScenarioEnv
-from easydrive.models.scenes.simulator_interface import SimulatorInterface
 from streetworld.viewer.viewer import Viewer
 
 RENDER_MESSAGE = {
@@ -40,6 +40,8 @@ if __name__ == "__main__":
             "image_observation": True,
         }
         cfg.update(additional_cfg)
+
+    from easydrive.models.scenes.simulator_interface import SimulatorInterface
 
     model = SimulatorInterface()
 
