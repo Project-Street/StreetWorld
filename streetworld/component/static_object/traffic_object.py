@@ -1,12 +1,10 @@
 import logging
 from typing import Tuple
 
-from panda3d.bullet import BulletBoxShape
-from panda3d.bullet import BulletCylinderShape
+from panda3d.bullet import BulletBoxShape, BulletCylinderShape
 
 from streetworld.component.static_object.base_static_object import BaseStaticObject
-from streetworld.constants import CollisionGroup
-from streetworld.constants import MetaDriveType, Semantics
+from streetworld.constants import CollisionGroup, MetaDriveType, Semantics
 from streetworld.engine.asset_loader import AssetLoader
 from streetworld.engine.physics_node import BaseRigidBodyNode
 

@@ -2,25 +2,38 @@
 import math
 import os
 import pathlib
-
-#
-#
 from abc import ABC
 
 import cv2
 import numpy as np
-from panda3d.bullet import BulletRigidBodyNode, BulletPlaneShape
-from panda3d.bullet import ZUp, BulletHeightfieldShape
-from panda3d.core import SamplerState, PNMImage, CardMaker, LQuaternionf, NodePath
-from panda3d.core import Vec3, ShaderTerrainMesh, Texture, TextureStage, Shader, Filename
+from panda3d.bullet import BulletHeightfieldShape, BulletPlaneShape, BulletRigidBodyNode, ZUp
+from panda3d.core import (
+    CardMaker,
+    Filename,
+    LQuaternionf,
+    NodePath,
+    PNMImage,
+    SamplerState,
+    Shader,
+    ShaderTerrainMesh,
+    Texture,
+    TextureStage,
+    Vec3,
+)
 
 from streetworld.base_class.base_object import BaseObject
-from streetworld.constants import CamMask, Semantics, MapTerrainSemanticColor
-from streetworld.constants import MetaDriveType, CollisionGroup
-from streetworld.constants import TerrainProperty, CameraTagStateKey
+from streetworld.constants import (
+    CameraTagStateKey,
+    CamMask,
+    CollisionGroup,
+    MapTerrainSemanticColor,
+    MetaDriveType,
+    Semantics,
+    TerrainProperty,
+)
 from streetworld.engine.asset_loader import AssetLoader
-from streetworld.utils.logger import get_logger
 from streetworld.third_party.diamond_square import diamond_square
+from streetworld.utils.logger import get_logger
 from streetworld.utils.utils import is_win
 
 logger = get_logger()

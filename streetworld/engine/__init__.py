@@ -1,3 +1,3 @@
-from streetworld.utils.logger import get_logger
 from streetworld.engine.asset_loader import AssetLoader
-from streetworld.engine.physics_node import BaseRigidBodyNode, BaseGhostBodyNode
+from streetworld.engine.physics_node import BaseGhostBodyNode, BaseRigidBodyNode
+from streetworld.utils.logger import get_logger

@@ -1,8 +1,8 @@
 from direct.directtools.DirectGeometry import LineNodePath
-from streetworld.engine.asset_loader import AssetLoader
-from panda3d.core import VBase4, NodePath, Material
+from panda3d.core import LVecBase4f, Material, NodePath, VBase4
+
 from streetworld.constants import CamMask
-from panda3d.core import LVecBase4f
+from streetworld.engine.asset_loader import AssetLoader
 
 
 class ColorLineNodePath(LineNodePath):

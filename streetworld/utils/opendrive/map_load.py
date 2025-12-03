@@ -1,6 +1,7 @@
-from streetworld.utils.opendrive.parser import parse_opendrive
-from streetworld.utils.opendrive.link_index import LinkIndex
 from lxml import etree
+
+from streetworld.utils.opendrive.link_index import LinkIndex
+from streetworld.utils.opendrive.parser import parse_opendrive
 
 
 def get_lane_width(lane):

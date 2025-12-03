@@ -5,7 +5,7 @@ calculation and tell Object about these results, inheriting from these BulletNod
 Physics Callbacks and Object class
 """
 
-from panda3d.bullet import BulletRigidBodyNode, BulletGhostNode
+from panda3d.bullet import BulletGhostNode, BulletRigidBodyNode
 
 
 class BaseRigidBodyNode(BulletRigidBodyNode):
@@ -28,8 +28,8 @@ class BaseRigidBodyNode(BulletRigidBodyNode):
         self.base_object_name = None
         self.clearPythonTag(self.getName())
         self._clear_python_tag = True
-    def __del__(self):
 
+    def __del__(self):
         assert self._clear_python_tag, "You should call destroy() of BaseRigidBodyNode!"
 
 
@@ -37,6 +37,7 @@ class BaseGhostBodyNode(BulletGhostNode):
     """
     Ghost node will not collide with any bodies, while contact information can still be accessed
     """
+
     def __init__(self, base_object_name, type_name):
         self.type_name = type_name
         super(BaseGhostBodyNode, self).__init__(type_name)

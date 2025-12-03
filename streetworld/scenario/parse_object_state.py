@@ -1,7 +1,8 @@
 import copy
+
 import torch
-from streetworld.utils.math import compute_angular_velocity
-from streetworld.utils.math import norm
+
+from streetworld.utils.math import compute_angular_velocity, norm
 
 
 def get_max_valid_indicis(track, current_index):

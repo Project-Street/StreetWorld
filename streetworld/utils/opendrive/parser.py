@@ -5,37 +5,33 @@ These scripts are copied from https://github.com/liuyf5231/opendriveparser. Cred
 
 import numpy as np
 from lxml import etree
-from streetworld.utils.opendrive.elements.opendrive import OpenDrive, Header
-from streetworld.utils.opendrive.elements.road import Road
-from streetworld.utils.opendrive.elements.roadLink import (
-    Predecessor as RoadLinkPredecessor,
-    Successor as RoadLinkSuccessor,
-    Neighbor as RoadLinkNeighbor,
-)
-from streetworld.utils.opendrive.elements.roadtype import (
-    RoadType,
-    Speed as RoadTypeSpeed,
-)
-from streetworld.utils.opendrive.elements.roadElevationProfile import (
-    ElevationRecord as RoadElevationProfile,
-)
-from streetworld.utils.opendrive.elements.roadLateralProfile import (
-    Superelevation as RoadLateralProfileSuperelevation,
-    Crossfall as RoadLateralProfileCrossfall,
-    Shape as RoadLateralProfileShape,
-)
-from streetworld.utils.opendrive.elements.roadLanes import (
-    LaneOffset as RoadLanesLaneOffset,
-    Lane as RoadLaneSectionLane,
-    LaneSection as RoadLanesSection,
-    LaneWidth as RoadLaneSectionLaneWidth,
-    LaneBorder as RoadLaneSectionLaneBorder,
-)
+
 from streetworld.utils.opendrive.elements.junction import (
-    Junction,
     Connection as JunctionConnection,
+    Junction,
     LaneLink as JunctionConnectionLaneLink,
 )
+from streetworld.utils.opendrive.elements.opendrive import Header, OpenDrive
+from streetworld.utils.opendrive.elements.road import Road
+from streetworld.utils.opendrive.elements.roadElevationProfile import ElevationRecord as RoadElevationProfile
+from streetworld.utils.opendrive.elements.roadLanes import (
+    Lane as RoadLaneSectionLane,
+    LaneBorder as RoadLaneSectionLaneBorder,
+    LaneOffset as RoadLanesLaneOffset,
+    LaneSection as RoadLanesSection,
+    LaneWidth as RoadLaneSectionLaneWidth,
+)
+from streetworld.utils.opendrive.elements.roadLateralProfile import (
+    Crossfall as RoadLateralProfileCrossfall,
+    Shape as RoadLateralProfileShape,
+    Superelevation as RoadLateralProfileSuperelevation,
+)
+from streetworld.utils.opendrive.elements.roadLink import (
+    Neighbor as RoadLinkNeighbor,
+    Predecessor as RoadLinkPredecessor,
+    Successor as RoadLinkSuccessor,
+)
+from streetworld.utils.opendrive.elements.roadtype import RoadType, Speed as RoadTypeSpeed
 
 __author__ = "Benjamin Orthen, Stefan Urban"
 __copyright__ = "TUM Cyber-Physical Systems Group"

@@ -1,7 +1,8 @@
 from collections import deque
 
-from streetworld.engine.engine_utils import get_engine
 import numpy as np
+
+from streetworld.engine.engine_utils import get_engine
 
 
 def _clear_if_necessary(obj, depth=0):

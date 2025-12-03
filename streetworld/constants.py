@@ -4,8 +4,7 @@ from typing import List, Tuple
 
 import numpy as np
 from panda3d.bullet import BulletWorld
-from panda3d.core import Vec3
-from panda3d.core import Vec4, BitMask32
+from panda3d.core import BitMask32, Vec3, Vec4
 
 from streetworld.type import MetaDriveType
 from streetworld.version import VERSION

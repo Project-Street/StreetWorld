@@ -1,11 +1,8 @@
+from panda3d.bullet import BulletTriangleMesh, BulletTriangleMeshShape
 from panda3d.core import Loader, NodePath
-from panda3d.bullet import (
-    BulletTriangleMesh,
-    BulletTriangleMeshShape,
-)
-from streetworld.constants import MetaDriveType, CollisionGroup
 
 from streetworld.base_class.base_object import BaseObject
+from streetworld.constants import CollisionGroup, MetaDriveType
 from streetworld.engine.physics_node import BaseRigidBodyNode
 
 

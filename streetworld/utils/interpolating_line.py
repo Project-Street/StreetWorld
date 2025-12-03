@@ -2,7 +2,7 @@ import math
 
 import numpy as np
 
-from streetworld.utils.math import norm, get_vertical_vector
+from streetworld.utils.math import get_vertical_vector, norm
 
 
 class InterpolatingLine:

@@ -1,8 +1,8 @@
 import gymnasium as gym
 import numpy as np
+import torch
 
 from streetworld.obs.observation_base import BaseObservation
-import torch
 
 
 class GaussianObservation(BaseObservation):

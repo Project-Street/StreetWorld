@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.pyplot import figure
 
-from streetworld.component.static_object.traffic_object import TrafficCone, TrafficBarrier
+from streetworld.component.static_object.traffic_object import TrafficBarrier, TrafficCone
 from streetworld.component.traffic_participants.cyclist import Cyclist
 from streetworld.component.traffic_participants.pedestrian import Pedestrian
 from streetworld.component.vehicle.base_vehicle import BaseVehicle

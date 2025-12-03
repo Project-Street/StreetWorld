@@ -1,9 +1,9 @@
-import numpy as np
+import cv2
 import matplotlib.pyplot as plt
+import numpy as np
 from matplotlib.patches import Polygon
 from trajdata.utils import map_utils
-import cv2
-import numpy as np
+
 
 def project_points_on_image(img, k, w2c, h, w, points, color=(0, 255, 0)):
     """
@@ -42,7 +42,7 @@ def project_points_on_image(img, k, w2c, h, w, points, color=(0, 255, 0)):
     out_img = img.copy()
 
     # === 4. 画点 ===
-    for (x, y) in zip(u, v):
+    for x, y in zip(u, v):
         cv2.circle(out_img, (x, y), radius=2, color=color, thickness=-1)
 
     # === 5. 连线 ===
@@ -53,14 +53,10 @@ def project_points_on_image(img, k, w2c, h, w, points, color=(0, 255, 0)):
 
     return out_img
 
-def render_vehicle_trajectories(vec_map,
-                                trajectories,
-                                vehicle_boxes,
-                                vehicle_colors,
-                                box_min,
-                                box_max,
-                                resolution=2.0,
-                                figsize=(8, 8)):
+
+def render_vehicle_trajectories(
+    vec_map, trajectories, vehicle_boxes, vehicle_colors, box_min, box_max, resolution=2.0, figsize=(8, 8)
+):
     """
     Args:
         vec_map (VectorMap): trajdata.maps.vec_map.VectorMap 实例。
@@ -72,8 +68,7 @@ def render_vehicle_trajectories(vec_map,
         resolution (float): 栅格化时的像素/米，越大越清晰。
         figsize (Tuple[int, int]): Matplotlib figure 大小。
     """
-    assert len(trajectories) == len(vehicle_boxes) == len(vehicle_colors), \
-        "输入的轨迹/包络尺寸/颜色数量需要一致"
+    assert len(trajectories) == len(vehicle_boxes) == len(vehicle_colors), "输入的轨迹/包络尺寸/颜色数量需要一致"
 
     # 1) 栅格化整张地图并获取世界→像素的齐次变换矩阵 (vec_map.rasterize, see src/trajdata/maps/vec_map.py:449-563)
     map_img, raster_from_world = vec_map.rasterize(
@@ -141,9 +136,7 @@ def render_vehicle_trajectories(vec_map,
 
         rect_world = rectangle_from_center(start, length, width, heading)
         rect_pix = world_to_cropped_pix(rect_world)
-        ax.add_patch(
-            Polygon(rect_pix, closed=True, facecolor=color, alpha=0.6, edgecolor="k", linewidth=1.0, zorder=3)
-        )
+        ax.add_patch(Polygon(rect_pix, closed=True, facecolor=color, alpha=0.6, edgecolor="k", linewidth=1.0, zorder=3))
 
         # 4) 轨迹折线
         traj_pix = world_to_cropped_pix(traj)

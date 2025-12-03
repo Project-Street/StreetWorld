@@ -1,12 +1,14 @@
 import math
-import numpy as np
+from collections import deque
+
 import gymnasium as gym
+import numpy as np
 from trajdata import VectorMap
 from trajdata.maps.vec_map_elements import RoadLane
-from streetworld.obs.observation_base import BaseObservation
+
 from streetworld.base_class.randomizable import Randomizable
+from streetworld.obs.observation_base import BaseObservation
 from streetworld.utils.navigation_utils import nearest_front_index
-from collections import deque
 
 lane_follow_length = 200.0  # meters
 
@@ -35,9 +37,9 @@ class NavigationObservation(BaseObservation, Randomizable):
 
     def reset(self, trajdata_map: VectorMap, init_state, state, controller, seed=None, **kwargs):
         if self.navigating_type in ["lane_following", "destination_following"]:
-            assert isinstance(trajdata_map, VectorMap), (
-                "trajdata_map must be provided for lane_following or destination_following navigation type."
-            )
+            assert isinstance(
+                trajdata_map, VectorMap
+            ), "trajdata_map must be provided for lane_following or destination_following navigation type."
 
         if seed is not None:
             self.seed(int(seed))
@@ -118,7 +120,7 @@ class NavigationObservation(BaseObservation, Randomizable):
             sum = np.sum(c[k : k + 5])
             if sum == 5:
                 return 1
-            elif sum == -5:  #
+            elif sum == -5:
                 return -1
 
         return 0

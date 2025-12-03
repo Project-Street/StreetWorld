@@ -1,12 +1,14 @@
 import copy
 import os
+
 import numpy as np
 import torch
-from streetworld.manager.base_manager import BaseManager
-from streetworld.scenario.scenario_description import ScenarioDescription as SD, MetaDriveType
-from streetworld.scenario.utils import read_scenario_data
-from streetworld.scenario.parse_object_state import parse_object_state
+
 from streetworld.component.vehicle.vehicle_type import random_vehicle_type
+from streetworld.manager.base_manager import BaseManager
+from streetworld.scenario.parse_object_state import parse_object_state
+from streetworld.scenario.scenario_description import MetaDriveType, ScenarioDescription as SD
+from streetworld.scenario.utils import read_scenario_data
 from streetworld.utils.trajectory import Trajectory
 
 

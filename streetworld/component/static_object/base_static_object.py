@@ -1,10 +1,10 @@
 from typing import Sequence, Tuple
-from streetworld.constants import CamMask
-from streetworld.type import MetaDriveType
 
 from panda3d.core import NodePath
 
 from streetworld.base_class.base_object import BaseObject
+from streetworld.constants import CamMask
+from streetworld.type import MetaDriveType
 
 LaneIndex = Tuple[str, str, int]
 

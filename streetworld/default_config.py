@@ -1,14 +1,14 @@
 import logging
 
-from streetworld.constants import DEFAULT_AGENT
-from streetworld.policy.env_input_policy import EnvInputPolicy
-from streetworld.policy.replay_policy import ReplayPolicy
 from streetworld.component.vehicle.vehicle_type import DefaultVehicle
+from streetworld.constants import DEFAULT_AGENT
+from streetworld.obs.assembly_obs import AssemblyObservation
 from streetworld.obs.gaussian_obs import GaussianObservation
 from streetworld.obs.navigation_obs import NavigationObservation
-from streetworld.obs.state_obs import StateObservation
-from streetworld.obs.assembly_obs import AssemblyObservation
 from streetworld.obs.observation_base import DefaultObservation
+from streetworld.obs.state_obs import StateObservation
+from streetworld.policy.env_input_policy import EnvInputPolicy
+from streetworld.policy.replay_policy import ReplayPolicy
 
 BASE_DEFAULT_CONFIG = dict(
     # ===== agent =====

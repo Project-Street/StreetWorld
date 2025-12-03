@@ -2,11 +2,10 @@
 This environment can load all scenarios exported from other environments via env.export_scenarios()
 """
 
-from streetworld.manager.agent_manager import AgentState
 from streetworld.engine.asset_loader import AssetLoader
 from streetworld.envs.base_env import BaseEnv
+from streetworld.manager.agent_manager import AgentManager, AgentState
 from streetworld.manager.scenario_data_manager import ScenarioOnlineDataManager
-from streetworld.manager.agent_manager import AgentManager
 
 SCENARIO_ENV_CONFIG = dict(
     # ===== Scenario Config =====
@@ -77,16 +76,16 @@ class ScenarioEnv(BaseEnv):
     def __init__(self, model, config=None):
         super(ScenarioEnv, self).__init__(model, config)
         if self.config["curriculum_level"] > 1:
-            assert self.config["num_scenarios"] % self.config["curriculum_level"] == 0, (
-                "Each level should have the same number of scenarios"
-            )
+            assert (
+                self.config["num_scenarios"] % self.config["curriculum_level"] == 0
+            ), "Each level should have the same number of scenarios"
             if self.config["num_workers"] > 1:
                 num = int(self.config["num_scenarios"] / self.config["curriculum_level"])
                 assert num % self.config["num_workers"] == 0
         if self.config["num_workers"] > 1:
-            assert self.config["sequential_seed"], (
-                "If using > 1 workers, you have to allow sequential_seed for consistency!"
-            )
+            assert self.config[
+                "sequential_seed"
+            ], "If using > 1 workers, you have to allow sequential_seed for consistency!"
 
     def _post_process_config(self, config):
         config = super(ScenarioEnv, self)._post_process_config(config)
@@ -205,9 +204,9 @@ class ScenarioOnlineEnv(ScenarioEnv):
         super(ScenarioOnlineEnv, self).__init__(config)
         self.lazy_init()
 
-        assert self.config["store_map"] is False, (
-            "ScenarioOnlineEnv should not store map. Please set store_map=False in config"
-        )
+        assert (
+            self.config["store_map"] is False
+        ), "ScenarioOnlineEnv should not store map. Please set store_map=False in config"
 
     def _setup(self):
         """Overwrite the data_manager by ScenarioOnlineDataManager"""

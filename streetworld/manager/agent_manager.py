@@ -1,11 +1,13 @@
 import math
+
 from gymnasium.spaces import Space
-from streetworld.utils.logger import get_logger
+
 from streetworld.component.vehicle.base_vehicle import BaseVehicle
 from streetworld.manager.base_manager import BaseManager
+from streetworld.obs.navigation_obs import NavigationObservation
 from streetworld.policy.env_input_policy import EnvInputPolicy
 from streetworld.policy.replay_policy import ReplayPolicy
-from streetworld.obs.navigation_obs import NavigationObservation
+from streetworld.utils.logger import get_logger
 
 logger = get_logger()
 
@@ -119,8 +121,6 @@ class AgentManager(BaseManager):
                 self.controller.move(state_info=action)
             else:
                 self.controller.move(action=action)
-
-        return
 
     def update_state(self):
         """

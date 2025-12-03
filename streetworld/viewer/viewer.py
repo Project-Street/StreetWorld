@@ -1,17 +1,18 @@
-import torch
+import ctypes
+import platform
 import threading
 from typing import Union
 
 import glfw
-import ctypes
 import numpy as np
-import platform
 import OpenGL.GL as gl
-from imgui_bundle import imgui
+import torch
 from easydrive.utils.console_utils import *
+from imgui_bundle import imgui
+
 from streetworld.viewer.client import Client
-from streetworld.viewer.server import WebSocketServer
 from streetworld.viewer.manual_controller import get_controller
+from streetworld.viewer.server import WebSocketServer
 
 
 class Viewer:

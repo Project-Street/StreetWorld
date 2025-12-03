@@ -1,4 +1,5 @@
 import math
+
 import numpy as np
 
 from streetworld.obs.observation_base import BaseObservation

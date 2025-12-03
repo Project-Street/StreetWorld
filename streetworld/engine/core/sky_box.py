@@ -1,4 +1,4 @@
-from panda3d.core import SamplerState, Shader, ConfigVariableString, Texture
+from panda3d.core import ConfigVariableString, SamplerState, Shader, Texture
 
 from streetworld.base_class.base_object import BaseObject
 from streetworld.constants import CamMask, Semantics

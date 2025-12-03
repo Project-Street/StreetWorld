@@ -30,7 +30,6 @@ class MyApp(ShowBase):
         self.disable_mouse()
         self.camera.set_pos(0.0, 15.0, 100.0)
         self.camera.look_at(0.0, 0.0, 0.0)
-        #
         points = [
             [236.70966602, -79.94476767],
             [235.48608421, -81.79984158],

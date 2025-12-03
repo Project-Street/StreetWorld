@@ -1,7 +1,9 @@
 import copy
-import torch
+
 import gymnasium as gym
 import numpy as np
+import torch
+
 from streetworld.base_class.configurable import Configurable
 from streetworld.base_class.randomizable import Randomizable
 

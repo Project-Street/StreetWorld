@@ -1,7 +1,7 @@
 import math
 
-import numpy as np
 import glfw
+import numpy as np
 
 from streetworld.utils import is_win
 
@@ -133,7 +133,7 @@ class SteeringWheelController(Controller):
     def __init__(self):
         try:
             import evdev
-            from evdev import ecodes, InputDevice
+            from evdev import InputDevice, ecodes
         except ImportError:
             print(
                 "Fail to load evdev, which is required for steering wheel control. Install evdev via pip install evdev"
@@ -224,7 +224,7 @@ class XboxController(Controller):
     def __init__(self):
         try:
             import evdev
-            from evdev import ecodes, InputDevice
+            from evdev import InputDevice, ecodes
         except ImportError:
             print(
                 "Fail to load evdev, which is required for steering wheel control. Install evdev via pip install evdev"

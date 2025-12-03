@@ -15,7 +15,7 @@
 
 import math
 
-from streetworld.third_party.kitsunetsuki.base.armature import is_left_bone, is_bone_matches
+from streetworld.third_party.kitsunetsuki.base.armature import is_bone_matches, is_left_bone
 from streetworld.third_party.kitsunetsuki.base.objects import get_parent
 
 

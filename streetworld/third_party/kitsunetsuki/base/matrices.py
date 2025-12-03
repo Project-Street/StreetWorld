@@ -13,8 +13,9 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-import bpy
 import itertools
+
+import bpy
 
 
 def quat_to_list(quat):
@@ -47,7 +48,7 @@ def get_object_matrix(obj, armature=None):
     if armature is None:
         return obj.matrix_local
     else:  # skinned mesh/object
-        return (obj.matrix_world @ armature.matrix_world @ armature.matrix_world.inverted())
+        return obj.matrix_world @ armature.matrix_world @ armature.matrix_world.inverted()
 
 
 def get_inverse_bind_matrix(bone, armature):

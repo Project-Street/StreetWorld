@@ -3,7 +3,7 @@ from typing import Optional, Union
 from direct.showbase import OnScreenDebug
 from panda3d.core import Vec4
 
-from streetworld.constants import HELP_MESSAGE, DEBUG_MESSAGE
+from streetworld.constants import DEBUG_MESSAGE, HELP_MESSAGE
 
 
 class ScreenMessage(OnScreenDebug.OnScreenDebug):

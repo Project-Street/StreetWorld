@@ -7,6 +7,7 @@ def _initialize_registry():
     _metadrive_class_list = []
 
     # Register all PG blocks
+    from streetworld.component.pgblock.bidirection import Bidirection
     from streetworld.component.pgblock.bottleneck import Merge, Split
     from streetworld.component.pgblock.curve import Curve
     from streetworld.component.pgblock.fork import InFork, OutFork
@@ -17,7 +18,6 @@ def _initialize_registry():
     from streetworld.component.pgblock.std_t_intersection import StdTInterSection
     from streetworld.component.pgblock.straight import Straight
     from streetworld.component.pgblock.tollgate import TollGate
-    from streetworld.component.pgblock.bidirection import Bidirection
 
     _metadrive_class_list.extend(
         [

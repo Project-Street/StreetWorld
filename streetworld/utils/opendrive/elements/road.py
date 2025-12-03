@@ -1,13 +1,11 @@
 # -*- coding: utf-8 -*-
 
-from streetworld.utils.opendrive.elements.roadPlanView import PlanView
-from streetworld.utils.opendrive.elements.roadLink import Link
-from streetworld.utils.opendrive.elements.roadLanes import Lanes
-from streetworld.utils.opendrive.elements.roadElevationProfile import (
-    ElevationProfile,
-)
-from streetworld.utils.opendrive.elements.roadLateralProfile import LateralProfile
 from streetworld.utils.opendrive.elements.junction import Junction
+from streetworld.utils.opendrive.elements.roadElevationProfile import ElevationProfile
+from streetworld.utils.opendrive.elements.roadLanes import Lanes
+from streetworld.utils.opendrive.elements.roadLateralProfile import LateralProfile
+from streetworld.utils.opendrive.elements.roadLink import Link
+from streetworld.utils.opendrive.elements.roadPlanView import PlanView
 
 
 class Road:

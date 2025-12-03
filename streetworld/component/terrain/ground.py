@@ -1,10 +1,10 @@
-from typing import Tuple, Sequence
+from typing import Sequence, Tuple
 
-from panda3d.core import LVector3
 from panda3d.bullet import BulletPlaneShape
-from streetworld.constants import MetaDriveType, CollisionGroup
+from panda3d.core import LVector3
 
 from streetworld.base_class.base_object import BaseObject
+from streetworld.constants import CollisionGroup, MetaDriveType
 from streetworld.engine.physics_node import BaseRigidBodyNode
 
 LaneIndex = Tuple[str, str, int]

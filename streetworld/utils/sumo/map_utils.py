@@ -5,6 +5,7 @@ from __future__ import (
 import logging
 
 import numpy as np
+
 from streetworld.scenario import ScenarioDescription as SD
 from streetworld.type import MetaDriveType
 
@@ -12,7 +13,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 from dataclasses import dataclass
-from typing import List, Dict, Optional
+from typing import Dict, List, Optional
 
 try:
     import sumolib

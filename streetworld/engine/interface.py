@@ -2,9 +2,9 @@ import math
 import time
 
 import numpy as np
-from panda3d.core import NodePath, TextNode, LQuaternionf
+from panda3d.core import LQuaternionf, NodePath, TextNode
 
-from streetworld.constants import COLLISION_INFO_COLOR, COLOR, MetaDriveType, CamMask, RENDER_MODE_NONE
+from streetworld.constants import COLLISION_INFO_COLOR, COLOR, RENDER_MODE_NONE, CamMask, MetaDriveType
 from streetworld.engine.asset_loader import AssetLoader
 
 
@@ -40,9 +40,9 @@ class Interface:
             and base_engine.global_config["show_interface"]
         )
         if base_engine.mode == RENDER_MODE_NONE:
-            assert self.need_interface is False, (
-                "We should not using interface with extra cameras when in offscreen mode!"
-            )
+            assert (
+                self.need_interface is False
+            ), "We should not using interface with extra cameras when in offscreen mode!"
         self._init_interface()
         self._is_showing_arrow = True  # store the state of navigation mark
 

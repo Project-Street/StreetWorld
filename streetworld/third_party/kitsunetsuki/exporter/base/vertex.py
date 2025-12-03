@@ -15,7 +15,7 @@
 
 import mathutils  # make sure to "import bpy" before
 
-from streetworld.third_party.kitsunetsuki.base.vertex import uv_equals, normal_equals
+from streetworld.third_party.kitsunetsuki.base.vertex import normal_equals, uv_equals
 
 
 class VertexMixin(object):
