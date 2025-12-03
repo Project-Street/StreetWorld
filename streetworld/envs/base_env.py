@@ -5,7 +5,6 @@ from typing import AnyStr, Callable, Dict, Tuple, Union
 import gymnasium as gym
 import numpy as np
 import torch
-from easydrive.engine.config import Config
 from panda3d.core import PNMImage, PythonCallbackObject
 
 from streetworld.component.traffic_participants.cyclist import Cyclist
@@ -13,6 +12,7 @@ from streetworld.component.traffic_participants.pedestrian import Pedestrian
 from streetworld.component.vehicle.vehicle_type import get_vehicle_type
 from streetworld.constants import TerminationState
 from streetworld.default_config import BASE_DEFAULT_CONFIG
+from streetworld.engine.config import Config
 from streetworld.engine.core.collision_callback import collision_callback
 from streetworld.engine.core.physics_world import PhysicsWorld
 from streetworld.engine.step_counter import StepCounter
@@ -194,9 +194,9 @@ class BaseEnv(gym.Env):
             # if body.getName() in ["detector_mask", "debug"]:
             #     continue
             filtered.append(body)
-        assert len(filtered) == 0, (
-            "Physics Bodies should be cleaned before manager.reset() is called. Uncleared bodies: {}".format(filtered)
-        )
+        assert (
+            len(filtered) == 0
+        ), "Physics Bodies should be cleaned before manager.reset() is called. Uncleared bodies: {}".format(filtered)
 
     def _reset_agents(self, scenario_data, scene_map):
         camera_params = scenario_data["camera_params"]
@@ -437,9 +437,9 @@ class BaseEnv(gym.Env):
         if self.is_multi_agent:
             assert isinstance(policies, dict), "In MARL setting, policies should be mapped to agents according to id"
         else:
-            assert isinstance(policies, Callable), (
-                "In single agent case, policy should be a callable object, takingobservation as input."
-            )
+            assert isinstance(
+                policies, Callable
+            ), "In single agent case, policy should be a callable object, takingobservation as input."
         scenarios_to_export = dict()
         if isinstance(scenario_index, int):
             scenario_index = [scenario_index]

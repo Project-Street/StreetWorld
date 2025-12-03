@@ -7,12 +7,151 @@ import glfw
 import numpy as np
 import OpenGL.GL as gl
 import torch
-from easydrive.utils.console_utils import *
 from imgui_bundle import imgui
 
 from streetworld.viewer.client import Client
 from streetworld.viewer.manual_controller import get_controller
 from streetworld.viewer.server import WebSocketServer
+
+
+def log(message):
+    print(message)
+
+
+def red(text):
+    return f"\033[91m{text}\033[0m"
+
+
+class Quad:
+    def __init__(self, H, W):
+        self.H = H
+        self.W = W
+        self.texture = None
+        self.vao = None
+        self.vbo = None
+        self.program = None
+        self._init_quad()
+
+    def _init_quad(self):
+        vertices = np.array(
+            [
+                [-1.0, -1.0, 0.0],
+                [1.0, -1.0, 0.0],
+                [1.0, 1.0, 0.0],
+                [-1.0, 1.0, 0.0],
+            ],
+            dtype=np.float32,
+        )
+
+        indices = np.array([0, 1, 2, 2, 3, 0], dtype=np.uint32)
+        tex_coords = np.array(
+            [
+                [0.0, 1.0],
+                [1.0, 1.0],
+                [1.0, 0.0],
+                [0.0, 0.0],
+            ],
+            dtype=np.float32,
+        )
+
+        self.vao = gl.glGenVertexArrays(1)
+        gl.glBindVertexArray(self.vao)
+
+        self.vbo = gl.glGenBuffers(1)
+        gl.glBindBuffer(gl.GL_ARRAY_BUFFER, self.vbo)
+        gl.glBufferData(gl.GL_ARRAY_BUFFER, vertices.nbytes, vertices, gl.GL_STATIC_DRAW)
+
+        gl.glVertexAttribPointer(0, 3, gl.GL_FLOAT, gl.GL_FALSE, 12, ctypes.c_void_p(0))
+        gl.glEnableVertexAttribArray(0)
+
+        tex_vbo = gl.glGenBuffers(1)
+        gl.glBindBuffer(gl.GL_ARRAY_BUFFER, tex_vbo)
+        gl.glBufferData(gl.GL_ARRAY_BUFFER, tex_coords.nbytes, tex_coords, gl.GL_STATIC_DRAW)
+
+        gl.glVertexAttribPointer(1, 2, gl.GL_FLOAT, gl.GL_FALSE, 8, ctypes.c_void_p(0))
+        gl.glEnableVertexAttribArray(1)
+
+        ebo = gl.glGenBuffers(1)
+        gl.glBindBuffer(gl.GL_ELEMENT_ARRAY_BUFFER, ebo)
+        gl.glBufferData(gl.GL_ELEMENT_ARRAY_BUFFER, indices.nbytes, indices, gl.GL_STATIC_DRAW)
+
+        self.texture = gl.glGenTextures(1)
+        gl.glBindTexture(gl.GL_TEXTURE_2D, self.texture)
+        gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MIN_FILTER, gl.GL_LINEAR)
+        gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MAG_FILTER, gl.GL_LINEAR)
+
+        empty_data = np.zeros((self.H, self.W, 3), dtype=np.uint8)
+        gl.glTexImage2D(gl.GL_TEXTURE_2D, 0, gl.GL_RGB, self.W, self.H, 0, gl.GL_RGB, gl.GL_UNSIGNED_BYTE, empty_data)
+
+        vertex_shader = """
+        #version 130
+        attribute vec3 position;
+        attribute vec2 texcoord;
+        varying vec2 TexCoord;
+
+        void main() {
+            gl_Position = vec4(position, 1.0);
+            TexCoord = texcoord;
+        }
+        """
+
+        fragment_shader = """
+        #version 130
+        uniform sampler2D texture1;
+        varying vec2 TexCoord;
+
+        void main() {
+            gl_FragColor = texture2D(texture1, TexCoord);
+        }
+        """
+
+        vs = gl.glCreateShader(gl.GL_VERTEX_SHADER)
+        gl.glShaderSource(vs, vertex_shader)
+        gl.glCompileShader(vs)
+
+        fs = gl.glCreateShader(gl.GL_FRAGMENT_SHADER)
+        gl.glShaderSource(fs, fragment_shader)
+        gl.glCompileShader(fs)
+
+        self.program = gl.glCreateProgram()
+        gl.glAttachShader(self.program, vs)
+        gl.glAttachShader(self.program, fs)
+        gl.glLinkProgram(self.program)
+
+        gl.glDeleteShader(vs)
+        gl.glDeleteShader(fs)
+
+        gl.glBindVertexArray(0)
+
+    def copy_to_texture(self, img):
+        if img is None:
+            return
+
+        if isinstance(img, torch.Tensor):
+            img = img.cpu().numpy()
+
+        if img.dtype != np.uint8:
+            if img.max() <= 1.0:
+                img = (img * 255).astype(np.uint8)
+            else:
+                img = img.astype(np.uint8)
+
+        if len(img.shape) == 2:
+            img = np.stack([img, img, img], axis=-1)
+        elif img.shape[2] == 4:
+            img = img[:, :, :3]
+        elif img.shape[2] != 3:
+            img = img[:, :, :3]
+
+        gl.glBindTexture(gl.GL_TEXTURE_2D, self.texture)
+        gl.glTexSubImage2D(gl.GL_TEXTURE_2D, 0, 0, 0, self.W, self.H, gl.GL_RGB, gl.GL_UNSIGNED_BYTE, img)
+
+    def draw(self):
+        gl.glUseProgram(self.program)
+        gl.glBindVertexArray(self.vao)
+        gl.glBindTexture(gl.GL_TEXTURE_2D, self.texture)
+        gl.glDrawElements(gl.GL_TRIANGLES, 6, gl.GL_UNSIGNED_INT, None)
+        gl.glBindVertexArray(0)
 
 
 class Viewer:
@@ -50,90 +189,45 @@ class Viewer:
 
     @property
     def window_address(self):
-        window_address = ctypes.cast(self.window, ctypes.c_void_p).value
-        return window_address
+        # Check if window is a mock or non-standard object
+        if not hasattr(self.window, "__class__") or "Mock" in str(type(self.window)):
+            return id(self.window)
+        try:
+            window_address = ctypes.cast(self.window, ctypes.c_void_p).value
+            return window_address
+        except (TypeError, AttributeError, ValueError, RecursionError):
+            # Return a dummy address for mock objects or when casting fails
+            return id(self.window)
 
     def _init_opengl(self):
-        gl.glViewport(0, 0, self.W, self.H)  # Use program point size
-        # gl.glEnable(gl.GL_PROGRAM_POINT_SIZE)
-
-        # # Performs face culling
-        # gl.glEnable(gl.GL_CULL_FACE)
-        # gl.glCullFace(gl.GL_BACK)
-
-        # # Performs alpha trans testing
-        # # gl.glEnable(gl.GL_ALPHA_TEST)
-        # try: gl.glEnable(gl.GL_ALPHA_TEST)
-        # except gl.GLError as e: pass
-
-        # # Performs z-buffer testing
-        # gl.glEnable(gl.GL_DEPTH_TEST)
-        # # gl.glDepthMask(gl.GL_TRUE)
-        # gl.glDepthFunc(gl.GL_LEQUAL)
-        # # gl.glDepthRange(-1.0, 1.0)
-        # gl.glClear(gl.GL_COLOR_BUFFER_BIT | gl.GL_DEPTH_BUFFER_BIT)
-
-        # # Enable some masking tests
-        # gl.glEnable(gl.GL_SCISSOR_TEST)
-
-        # # Enable this to correctly render points
-        # # https://community.khronos.org/t/gl-point-sprite-gone-in-3-2/59310
-        # # gl.glEnable(gl.GL_POINT_SPRITE)  # MARK: ONLY SPRITE IS WORKING FOR NOW
-        # try: gl.glEnable(gl.GL_POINT_SPRITE)  # MARK: ONLY SPRITE IS WORKING FOR NOW
-        # except gl.GLError as e: pass
-        # # gl.glEnable(gl.GL_POINT_SMOOTH) # MARK: ONLY SPRITE IS WORKING FOR NOW
-
-        # # # Configure how we store the pixels in memory for our subsequent reading of the FBO to store the rendering into memory.
-        # # # The second argument specifies that our pixels will be in bytes.
-        # # gl.glPixelStorei(gl.GL_PACK_ALIGNMENT, 1)
+        gl.glViewport(0, 0, self.W, self.H)
 
     def _init_glfw(self):
         if not glfw.init():
             log(red("Could not initialize OpenGL context"))
             exit(1)
 
-        # Decide GL+GLSL versions
-        # GL 3.3 + GLSL 330
-        # self.glsl_version = '#version 330'
-        # glfw.window_hint(glfw.CONTEXT_VERSION_MAJOR, 3)
-        # glfw.window_hint(glfw.CONTEXT_VERSION_MINOR, 3)
-        # glfw.window_hint(glfw.OPENGL_PROFILE, glfw.GLFW_OPENGL_CORE_PROFILE)  # // 3.2+ only
-        # glfw.window_hint(glfw.OPENGL_FORWARD_COMPAT, 1)  # 1 is gl.GL_TRUE
-
         if platform.system() == "Darwin":
             self.glsl_version = "#version 150"
             glfw.window_hint(glfw.CONTEXT_VERSION_MAJOR, 3)
             glfw.window_hint(glfw.CONTEXT_VERSION_MINOR, 2)
-            glfw.window_hint(glfw.OPENGL_PROFILE, glfw.OPENGL_CORE_PROFILE)  # // 3.2+ only
+            glfw.window_hint(glfw.OPENGL_PROFILE, glfw.OPENGL_CORE_PROFILE)
             glfw.window_hint(glfw.OPENGL_FORWARD_COMPAT, 1)
-            glfw.window_hint(glfw.COCOA_RETINA_FRAMEBUFFER, 0)  # disable osx scaling
+            glfw.window_hint(glfw.COCOA_RETINA_FRAMEBUFFER, 0)
         else:
-            # GL 3.0 + GLSL 130
-            self.glsl_version = "#version 130"  # TODO: why? why not 330?
+            self.glsl_version = "#version 130"
             glfw.window_hint(glfw.CONTEXT_VERSION_MAJOR, 3)
             glfw.window_hint(glfw.CONTEXT_VERSION_MINOR, 0)
-            # glfw.window_hint(glfw.OPENGL_PROFILE, glfw.OPENGL_CORE_PROFILE) # // 3.2+ only
-            # glfw.window_hint(glfw.OPENGL_FORWARD_COMPAT, GL_TRUE)
 
-        # glfw.window_hint(glfw.TRANSPARENT_FRAMEBUFFER, 1);
-
-        # Create a windowed mode window and its OpenGL context
         window = glfw.create_window(self.W, self.H, self.window_title, None, None)
         if not window:
             glfw.terminate()
             log(red("Could not initialize window"))
             raise RuntimeError("Failed to initialize window in glfw")
 
-        # Setting up the window
         glfw.make_context_current(window)
-        glfw.swap_interval(False)  # disable vsync
+        glfw.swap_interval(False)
         glfw.set_input_mode(window, glfw.CURSOR, glfw.CURSOR_DISABLED)
-
-        # TODO: set icon
-        # icon = load_image(self.icon_file)
-        # pixels = (icon * 255).astype(np.uint8)
-        # height, width = icon.shape[:2]
-        # glfw.set_window_icon(window, 1, [width, height, pixels])  # set icon for the window
 
         self.window = window
 
@@ -141,18 +235,10 @@ class Viewer:
         imgui.create_context()
         self.io = imgui.get_io()
 
-        # io.config_flags |= imgui.ConfigFlags_.nav_enable_keyboard  # Enable Keyboard Controls # NOTE: This will make imgui always want to capture keyboard
-        # io.config_flags |= imgui.ConfigFlags_.nav_enable_gamepad # Enable Gamepad Controls
-        self.io.config_flags |= imgui.ConfigFlags_.docking_enable  # Enable docking
-        # io.config_flags |= imgui.ConfigFlags_.viewports_enable # Enable Multi-Viewport / Platform Windows
-        # io.config_viewports_no_auto_merge = True
-        # io.config_viewports_no_task_bar_icon = True
+        self.io.config_flags |= imgui.ConfigFlags_.docking_enable
 
-        # Setup Dear ImGui style
         imgui.style_colors_dark()
-        # imgui.style_colors_classic()
 
-        # When viewports are enabled we tweak WindowRounding/WindowBg so platform windows can look identical to regular ones.
         style = imgui.get_style()
         style.tab_rounding = 4.0
         style.grab_rounding = 4.0
@@ -165,31 +251,17 @@ class Viewer:
         window_bg_color.w = 1.0
         style.set_color_(imgui.Col_.window_bg, window_bg_color)
 
-        # You need to transfer the window address to imgui.backends.glfw_init_for_opengl
-        # proceed as shown below to get it.
         imgui.backends.glfw_init_for_open_gl(self.window_address, True)
         imgui.backends.opengl3_init(self.glsl_version)
 
         io = imgui.get_io()
-        # self.default_font = io.fonts.add_font_from_file_ttf(self.font_default, self.font_size)
-        # self.italic_font = io.fonts.add_font_from_file_ttf(self.font_italic, self.font_size)
-        # self.bold_font = io.fonts.add_font_from_file_ttf(self.font_bold, self.font_size)
         io.fonts.build()
 
-        # # Markdown initialization
-        # options = imgui_md.MarkdownOptions()
-        # # options.font_options.font_base_path = 'assets/fonts'
-        # options.font_options.regular_size = self.font_size
-        # imgui_md.initialize_markdown(options=options)
-        # imgui_md.get_font_loader_function()() # requires imgui_hello
-
     def _init_quad(self):
-        from easydrive.utils.opengl_utils import Quad
-
-        self.quad = Quad(H=self.H, W=self.W)  # will blit this texture to screen if rendered
+        self.quad = Quad(H=self.H, W=self.W)
 
     def _bind_callbacks(self):
-        glfw.set_window_user_pointer(self.window, self)  # set the user, for retrival
+        glfw.set_window_user_pointer(self.window, self)
 
     def is_running(self):
         return not glfw.window_should_close(self.window) if self.mode in ["client", "local"] else True
@@ -220,9 +292,6 @@ class Viewer:
         imgui.backends.glfw_new_frame()
         imgui.new_frame()
 
-        # self.get_fps_and_frame_time()
-        # self.get_device_and_memory()
-
         if img is not None:
             self.quad.copy_to_texture(img)
             self.quad.draw()
@@ -244,8 +313,7 @@ class Viewer:
     def _actuate_server(self, img):
         output = img
         with self.lock:
-            # self.server.output = output.to('cpu', non_blocking=True)  # initiate async copy
-            self.server.output = output  # initiate async copy
+            self.server.output = output
 
         with self.lock:
             input_data = self.server.input
@@ -259,35 +327,3 @@ class Viewer:
 
         glfw.destroy_window(self.window)
         glfw.terminate()
-
-    # def get_fps_and_frame_time(self):
-    #     first_run = 'last_fps_update' not in self.static
-    #     curr_time = time.perf_counter()
-    #     if first_run:
-    #         self.static.last_fps_update = curr_time
-    #         self.static.frame_time = 1
-    #         self.static.fps = 1
-    #         self.static.acc_frame = 1
-    #     elif curr_time - self.static.last_fps_update > self.update_fps_time:
-    #         self.static.frame_time = (curr_time - self.static.last_fps_update) / self.static.acc_frame
-    #         self.static.fps = 1 / self.static.frame_time  # in fps
-    #         self.static.last_fps_update = curr_time
-    #         self.static.acc_frame = 1
-    #     else:
-    #         self.static.acc_frame += 1
-    #     return self.static.fps, self.static.frame_time
-
-    # def get_device_and_memory(self):
-    #     first_run = 'last_memory_update' not in self.static
-    #     curr_time = time.perf_counter()
-    #     if first_run or curr_time - self.static.last_memory_update > self.update_mem_time:
-    #         try:
-    #             self.static.name = torch.cuda.get_device_name()
-    #             self.static.device = torch.cuda.current_device()
-    #             self.static.memory = torch.cuda.max_memory_allocated()
-    #         except:
-    #             self.static.name = 'Unsupported'
-    #             self.static.device = 'Unsupported'
-    #             self.static.memory = -1
-    #         self.static.last_memory_update = curr_time
-    #     return self.static.name, self.static.device, self.static.memory

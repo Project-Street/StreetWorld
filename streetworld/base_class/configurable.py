@@ -1,6 +1,6 @@
 from typing import Dict, Union
 
-from easydrive.engine.config import Config
+from streetworld.engine.config import Config
 
 
 class Configurable:

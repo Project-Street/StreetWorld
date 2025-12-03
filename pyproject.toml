@@ -32,7 +32,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["ruff", "pre-commit"]
+dev = ["ruff", "pre-commit", "pytest"]
 gym = ["gym>=0.19.0,<=0.26.0"]
 
 [tool.setuptools]

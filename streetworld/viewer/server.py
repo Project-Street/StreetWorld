@@ -17,13 +17,16 @@ data format: server received
 from __future__ import annotations
 
 import asyncio
+import logging
 import threading
 
 import numpy as np
 import torch
 import websockets
-from easydrive.utils.console_utils import log
 from torchvision.io import encode_jpeg
+
+# Get logger for this module
+log = logging.getLogger(__name__).info
 
 
 class WebSocketServer:
