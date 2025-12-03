@@ -4,15 +4,28 @@ StreetWorld is built on MetaDrive, integrating Gaussian splatting rendering and 
 
 ## Installation
 - Install dependencies:
-  ```bash
-  pip install -e .[gym]
-  ```
-- If you use the default Gaussian renderer, ensure `easydrive` is installed.
+
+```bash
+# python >= 3.8 is compatible
+conda create -n "streetworld" python=3.11 -y
+conda activate streetworld
+
+# Install compatible torch version here, cu121 for example
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
+
+pip install -e .
+```
+
+> [!NOTE]
+> If you use our default Gaussian renderer, ensure `easydrive` is installed.
+
+> [!NOTE]
+> For development, see [DEV.md](docs/DEV.md)
 
 ## Quickstart
 1) Start the server (handles simulation + rendering and waits for clients):
 ```bash
-python -m metadrive.examples.drive_in_real_env_server \
+python -m streetworld.examples.drive_in_real_env_server \
   --scene_config_directory /path/to/scene_configs \
   --host <server-ip> \
   --port <server-port>
@@ -20,7 +33,7 @@ python -m metadrive.examples.drive_in_real_env_server \
 
 2) Start the client (on the same or a remote machine, keyboard control):
 ```bash
-python -m metadrive.examples.remote_visualizer --host <server-ip> --port <server-port> --width <window_size_width> --height <window_size_height>
+python -m streetworld.examples.remote_visualizer --host <server-ip> --port <server-port> --width <window_size_width> --height <window_size_height>
 ```
 
 Controls: `W/A/S/D` drive.
