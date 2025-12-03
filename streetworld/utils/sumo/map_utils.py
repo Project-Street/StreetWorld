@@ -2,15 +2,13 @@ from __future__ import (
     annotations,
 )  # https://stackoverflow.com/questions/33533148/how-do-i-type-hint-a-method-with-the-type-of-the-enclosing-class
 
-import logging
-
 import numpy as np
 
 from streetworld.scenario import ScenarioDescription as SD
 from streetworld.type import MetaDriveType
+from streetworld.utils.logger import get_logger
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 from dataclasses import dataclass
 from typing import Dict, List, Optional

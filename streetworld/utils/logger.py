@@ -1,4 +1,5 @@
 import logging
+from rich.console import Console
 
 global_logger = None
 dup_filter = None
@@ -46,28 +47,56 @@ class DuplicateFilter(object):
         self.msgs.clear()
 
 
-class CustomFormatter(logging.Formatter):
-    grey = "\x1b[38;20m"
-    yellow = "\x1b[33;20m"
-    red = "\x1b[31;20m"
-    bold_red = "\x1b[31;1m"
-    reset = "\x1b[0m"
-    # format = "[%(levelname)s] %(message)s (%(name)s %(filename)s:%(lineno)d)"
-    format = "[%(levelname)s] %(message)s (%(filename)s:%(lineno)d)"
-    simple_format = "[%(levelname)s] %(message)s"
+class RichLogger:
+    """Wrapper for rich Console with logging-like interface"""
 
-    FORMATS = {
-        logging.DEBUG: grey + format + reset,
-        logging.INFO: grey + simple_format + reset,
-        logging.WARNING: yellow + format + reset,
-        logging.ERROR: red + format + reset,
-        logging.CRITICAL: bold_red + format + reset,
-    }
+    def __init__(self, console=None):
+        self.console = console or Console()
+        self._level = logging.INFO
+        self.dup_filter = DuplicateFilter()
 
-    def format(self, record):
-        log_fmt = self.FORMATS.get(record.levelno)
-        formatter = logging.Formatter(log_fmt)
-        return formatter.format(record)
+    def setLevel(self, level):
+        """Set the logging level"""
+        self._level = level
+
+    def addFilter(self, filter_obj):
+        """Add a filter (for compatibility)"""
+        if isinstance(filter_obj, DuplicateFilter):
+            self.dup_filter = filter_obj
+
+    @property
+    def level(self):
+        """Get current level"""
+        return self._level
+
+    def _should_log(self, record):
+        """Check if message should be logged"""
+        return self.dup_filter.filter(record) if hasattr(record, "log_once") else True
+
+    def debug(self, msg, *args, **kwargs):
+        """Log debug message"""
+        if self._level <= logging.DEBUG:
+            self.console.print(f"[DEBUG] {msg}", style="dim")
+
+    def info(self, msg, *args, **kwargs):
+        """Log info message"""
+        if self._level <= logging.INFO:
+            self.console.print(f"[INFO] {msg}")
+
+    def warning(self, msg, *args, **kwargs):
+        """Log warning message"""
+        if self._level <= logging.WARNING:
+            self.console.print(f"[WARNING] {msg}", style="yellow")
+
+    def error(self, msg, *args, **kwargs):
+        """Log error message"""
+        if self._level <= logging.ERROR:
+            self.console.print(f"[ERROR] {msg}", style="red")
+
+    def critical(self, msg, *args, **kwargs):
+        """Log critical message"""
+        if self._level <= logging.CRITICAL:
+            self.console.print(f"[CRITICAL] {msg}", style="bold red")
 
 
 def get_logger():
@@ -82,21 +111,16 @@ def get_logger():
     global dup_filter
     if global_logger is None:
         dup_filter = DuplicateFilter()
-        logger = logging.getLogger("Default")
-        logger.propagate = False
-        # create console handler with a higher log level
-        ch = logging.StreamHandler()
-        # create formatter and add it to the handlers
-        ch.setFormatter(CustomFormatter())
-        logger.addHandler(ch)
+        console = Console()
+        logger = RichLogger(console)
         logger.addFilter(dup_filter)
         global_logger = logger
     return global_logger
 
 
 def set_propagate(propagate=False):
-    global global_logger
-    global_logger.propagate = propagate
+    """Set propagation (for compatibility, no-op with rich)"""
+    pass
 
 
 def set_log_level(level=logging.INFO):
@@ -109,7 +133,7 @@ def set_log_level(level=logging.INFO):
 
     """
     global global_logger
-    if global_logger.level != level:
+    if global_logger and global_logger.level != level:
         global_logger.setLevel(level)
 
 
@@ -119,4 +143,5 @@ def reset_logger():
     Returns: None
     """
     global dup_filter
-    dup_filter.reset()
+    if dup_filter:
+        dup_filter.reset()

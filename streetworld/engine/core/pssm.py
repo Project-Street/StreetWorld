@@ -8,8 +8,11 @@ from panda3d.core import (
     Texture,
     WindowProperties,
 )
+from rich.console import Console
 
 from streetworld.constants import CamMask
+
+console = Console()
 
 
 class PSSM:
@@ -240,7 +243,7 @@ class PSSM:
         )
 
         if buffer is None:
-            print("Failed to create buffer")
+            console.print("[red]Failed to create buffer[/red]")
             return
 
         buffer.add_render_texture(self.depth_tex, GraphicsOutput.RTM_bind_or_copy, GraphicsOutput.RTP_depth)

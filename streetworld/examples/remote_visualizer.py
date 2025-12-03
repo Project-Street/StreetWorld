@@ -1,6 +1,10 @@
 import argparse
 
+from rich.console import Console
+
 from streetworld.viewer.viewer import Viewer
+
+console = Console()
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="MetaDrive Remote Visualizer")
@@ -11,7 +15,7 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    print(f"Connecting to {args.host}:{args.port}")
+    console.print(f"[cyan]Connecting to {args.host}:{args.port}[/cyan]")
     visualizer = Viewer(args.height, args.width, mode="client", host=args.host, port=args.port)
 
     while visualizer.is_running():

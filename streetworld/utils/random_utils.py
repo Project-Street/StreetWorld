@@ -3,12 +3,15 @@ Most of the code in this file is copied from gym==0.17.2
 """
 
 import hashlib
-import logging
 import os
 import struct
 import uuid
 
 import numpy as np
+
+from streetworld.utils.logger import get_logger
+
+logger = get_logger()
 
 
 def get_np_random(seed=None, return_seed=False):
@@ -22,7 +25,9 @@ def get_np_random(seed=None, return_seed=False):
 
     """
     if seed is not None and not (isinstance(seed, int) and 0 <= seed):
-        raise logging.error("Seed must be a non-negative integer or omitted, not {}".format(seed))
+        msg = "Seed must be a non-negative integer or omitted, not {}".format(seed)
+        logger.error(msg)
+        raise ValueError(msg)
 
     seed = create_seed(seed)
 
@@ -80,7 +85,9 @@ def create_seed(a=None, max_bytes=8):
     elif isinstance(a, int):
         a = a % 2 ** (8 * max_bytes)
     else:
-        raise logging.error("Invalid type for seed: {} ({})".format(type(a), a))
+        msg = "Invalid type for seed: {} ({})".format(type(a), a)
+        logger.error(msg)
+        raise ValueError(msg)
 
     return a
 
@@ -100,7 +107,9 @@ def _bigint_from_bytes(bytes):
 def _int_list_from_bigint(bigint):
     # Special case 0
     if bigint < 0:
-        raise logging.error("Seed must be non-negative, not {}".format(bigint))
+        msg = "Seed must be non-negative, not {}".format(bigint)
+        logger.error(msg)
+        raise ValueError(msg)
     elif bigint == 0:
         return [0]
 

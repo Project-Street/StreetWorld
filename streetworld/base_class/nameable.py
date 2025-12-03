@@ -1,6 +1,7 @@
-import logging
-
 from streetworld.utils import random_string
+from streetworld.utils.logger import get_logger
+
+logger = get_logger()
 
 
 class Nameable:
@@ -19,7 +20,7 @@ class Nameable:
 
     def __del__(self):
         try:
-            logging.debug("{} is destroyed".format(str(self)))
+            logger.debug("{} is destroyed".format(str(self)))
         except:
             pass
 

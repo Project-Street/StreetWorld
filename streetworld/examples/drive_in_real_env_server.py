@@ -5,10 +5,14 @@ This script demonstrates how to use the environment where traffic and road map a
 
 import argparse
 
+from rich.console import Console
+
 from streetworld.constants import HELP_MESSAGE
 from streetworld.engine.asset_loader import AssetLoader
 from streetworld.envs.scenario_env import ScenarioEnv
 from streetworld.viewer.viewer import Viewer
+
+console = Console()
 
 RENDER_MESSAGE = {
     "Quit": "ESC",
@@ -30,7 +34,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
     asset_path = AssetLoader.asset_path
     use_waymo = args.waymo
-    print(HELP_MESSAGE)
+    console.print(HELP_MESSAGE)
 
     cfg = {
         "scene_config_directory": args.scene_config_directory,
@@ -63,7 +67,7 @@ if __name__ == "__main__":
         if viser.is_running():
             o_for_vis = o["gaussian"]["FRONT"][-1]
             turn_signal = o["navigation"]["turn_signal"]
-            print("[Turn Signal] ", turn_signal)
+            console.print("[Turn Signal] ", turn_signal)
             action = viser.run(o_for_vis)
 
     env.close()

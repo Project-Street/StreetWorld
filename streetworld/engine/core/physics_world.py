@@ -1,7 +1,9 @@
-import logging
-
 from panda3d.bullet import BulletWorld
 from panda3d.core import Vec3
+
+from streetworld.utils.logger import get_logger
+
+logger = get_logger()
 
 
 class PhysicsWorld:
@@ -40,4 +42,4 @@ class PhysicsWorld:
         self.static_world = None
 
     def __del__(self):
-        logging.debug("Physics world is destroyed successfully!")
+        logger.debug("Physics world is destroyed successfully!")

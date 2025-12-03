@@ -1,6 +1,5 @@
 import copy
 import datetime
-import logging
 import os
 import socket
 import sys
@@ -10,6 +9,9 @@ import numpy as np
 from panda3d.bullet import BulletBodyNode
 
 from streetworld.constants import MetaDriveType
+from streetworld.utils.logger import get_logger
+
+logger = get_logger()
 
 
 def is_port_occupied(port, host="127.0.0.1"):
@@ -37,10 +39,11 @@ def get_time_str():
 
 
 def setup_logger(debug=False):
-    logging.basicConfig(
-        level=logging.DEBUG if debug else logging.WARNING,
-        format="%(asctime)s - %(filename)s[line:%(lineno)d] - %(levelname)s: %(message)s",
-    )
+    import logging
+
+    from streetworld.utils.logger import set_log_level
+
+    set_log_level(logging.DEBUG if debug else logging.WARNING)
 
 
 def recursive_equal(data1, data2, need_assert=False):
@@ -190,7 +193,6 @@ def deprecation_warning(old, new, error=False) -> None:
     elif error and issubclass(error, Exception):
         raise error(msg)
     else:
-        logger = logging.getLogger(__name__)
         logger.warning("DeprecationWarning: " + msg + " This will raise an error in the future!")
 
 
@@ -246,7 +248,7 @@ def time_me(fn):
     def _wrapper(*args, **kwargs):
         start = time.time()
         ret = fn(*args, **kwargs)
-        print("function: %s cost %s second" % (fn.__name__, time.time() - start))
+        logger.info("function: %s cost %s second" % (fn.__name__, time.time() - start))
         return ret
 
     return _wrapper
@@ -266,7 +268,7 @@ def time_me_with_prefix(prefix):
         def _wrapper(*args, **kwargs):
             start = time.time()
             ret = fn(*args, **kwargs)
-            print(prefix, "function: %s cost %s second" % (fn.__name__, time.time() - start))
+            logger.info("%s function: %s cost %s second" % (prefix, fn.__name__, time.time() - start))
             return ret
 
         return _wrapper

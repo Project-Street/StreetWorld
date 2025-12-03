@@ -1,6 +1,6 @@
-import logging
+from streetworld.utils.logger import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 
 class MetaDriveType:

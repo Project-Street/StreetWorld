@@ -17,7 +17,6 @@ data format: server received
 from __future__ import annotations
 
 import asyncio
-import logging
 import threading
 
 import numpy as np
@@ -25,8 +24,11 @@ import torch
 import websockets
 from torchvision.io import encode_jpeg
 
+from streetworld.utils.logger import get_logger
+
 # Get logger for this module
-log = logging.getLogger(__name__).info
+logger = get_logger()
+log = logger.info
 
 
 class WebSocketServer:

@@ -6,6 +6,7 @@ import pickle
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.pyplot import figure
+from rich.console import Console
 
 from streetworld.component.static_object.traffic_object import TrafficBarrier, TrafficCone
 from streetworld.component.traffic_participants.cyclist import Cyclist
@@ -23,6 +24,7 @@ VELOCITY_DECIMAL = 1  # velocity can not be set accurately
 MIN_LENGTH_RATIO = 0.8
 
 logger = get_logger()
+console = Console()
 
 
 def dict_recursive_remove_array_and_set(d):
@@ -472,7 +474,9 @@ def save_dataset(scenario_list, dataset_name, dataset_version, dataset_dir):
         pickle.dump(dict_recursive_remove_array_and_set(summary), file)
     with open(mapping_file, "wb") as file:
         pickle.dump(mapping, file)
-    print("\n ================ Dataset Summary and Mapping are saved at: {} ================ \n".format(summary_file))
+    console.print(
+        f"\n[green]================ Dataset Summary and Mapping are saved at: {summary_file} ================[/green]\n"
+    )
 
 
 def get_number_of_scenarios(dataset_path):

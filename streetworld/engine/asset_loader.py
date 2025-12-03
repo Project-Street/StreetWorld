@@ -3,7 +3,7 @@ import pathlib
 import sys
 
 from streetworld.constants import RENDER_MODE_NONE
-from streetworld.engine.logger import get_logger
+from streetworld.utils.logger import get_logger
 from streetworld.utils.utils import is_win
 from streetworld.version import VERSION
 

@@ -4,6 +4,9 @@ import glfw
 import numpy as np
 
 from streetworld.utils import is_win
+from rich.console import Console
+
+console = Console()
 
 
 def get_controller(controller_name, window=None):
@@ -135,8 +138,9 @@ class SteeringWheelController(Controller):
             import evdev
             from evdev import InputDevice, ecodes
         except ImportError:
-            print(
-                "Fail to load evdev, which is required for steering wheel control. Install evdev via pip install evdev"
+            console.print(
+                "Fail to load evdev, which is required for steering wheel control. Install evdev via pip install evdev",
+                style="yellow",
             )
         try:
             import pygame
@@ -144,11 +148,11 @@ class SteeringWheelController(Controller):
             pygame.display.init()
             pygame.joystick.init()
         except ImportError:
-            print("Pygame is required for steering wheel control")
+            console.print("Pygame is required for steering wheel control", style="yellow")
             return
         assert not is_win(), "Steering Wheel is supported in linux and mac only"
         assert pygame.joystick.get_count() > 0, "Please connect Steering Wheel or use keyboard input"
-        print("Successfully Connect your Steering Wheel!")
+        console.print("Successfully Connect your Steering Wheel!", style="green")
 
         ffb_device = evdev.list_devices()[0]
         self.ffb_dev = InputDevice(ffb_device)
@@ -226,8 +230,9 @@ class XboxController(Controller):
             import evdev
             from evdev import InputDevice, ecodes
         except ImportError:
-            print(
-                "Fail to load evdev, which is required for steering wheel control. Install evdev via pip install evdev"
+            console.print(
+                "Fail to load evdev, which is required for steering wheel control. Install evdev via pip install evdev",
+                style="yellow",
             )
         try:
             import pygame
@@ -235,11 +240,11 @@ class XboxController(Controller):
             pygame.display.init()
             pygame.joystick.init()
         except ImportError:
-            print("Pygame is required for Xbox controller")
+            console.print("Pygame is required for Xbox controller", style="yellow")
             return
         assert not is_win(), "Joystick is supported in linux and mac only"
         assert pygame.joystick.get_count() > 0, "Please connect joystick or use keyboard input"
-        print("Successfully Connect your Joystick!")
+        console.print("Successfully Connect your Joystick!", style="green")
 
         self.joystick = pygame.joystick.Joystick(0)
         self.joystick.init()

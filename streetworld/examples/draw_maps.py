@@ -5,12 +5,15 @@ import matplotlib.pyplot as plt
 from streetworld import MetaDriveEnv
 from streetworld.envs.scenario_env import ScenarioEnv
 from streetworld.utils.draw_top_down_map import draw_top_down_map
+from rich.console import Console
+
+console = Console()
 
 if __name__ == "__main__":
     env = MetaDriveEnv(config=dict(num_scenarios=100, map=7, start_seed=0))
     fig, axs = plt.subplots(2, 3, figsize=(10, 10), dpi=100)
     count = 0
-    print("We are going to draw 6 maps! 3 for PG maps, 3 for real world ones!")
+    console.print("We are going to draw 6 maps! 3 for PG maps, 3 for real world ones!", style="blue")
     for i in range(2):
         if i == 1:
             env.close()
@@ -24,7 +27,7 @@ if __name__ == "__main__":
             ax.imshow(m, cmap="bone")
             ax.set_xticks([])
             ax.set_yticks([])
-            print("Drawing {}-th map!".format(count))
+            console.print(f"Drawing {count}-th map!", style="green")
     fig.suptitle("Top-down view of generated maps")
     plt.show()
     env.close()

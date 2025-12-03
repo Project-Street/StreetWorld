@@ -1,9 +1,9 @@
-import logging
 from typing import List
 
+from streetworld.utils.logger import get_logger
 from streetworld.utils.math import norm
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 
 class SceneCull:

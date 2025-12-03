@@ -15,8 +15,10 @@ import numpy as np
 import torch
 import websockets
 from torchvision.io import decode_jpeg
+from rich.console import Console
 
 # fmt: on
+console = Console()
 
 
 class Client:
@@ -51,14 +53,14 @@ class Client:
         while True:
             try:
                 async with websockets.connect(self.url) as websocket:
-                    print(f"Connected to server at {self.url}")
+                    console.print(f"Connected to server at {self.url}", style="green")
                     send_task = asyncio.create_task(self._send_inputs(websocket))
                     recv_task = asyncio.create_task(self._recv_outputs(websocket))
                     _done, pending = await asyncio.wait({send_task, recv_task}, return_when=asyncio.FIRST_EXCEPTION)
                     for task in pending:
                         task.cancel()
             except (websockets.ConnectionClosed, ConnectionRefusedError, OSError, websockets.WebSocketException) as e:
-                print(f"Connection failed: {e}. Retrying in 1 seconds...")
+                console.print(f"Connection failed: {e}. Retrying in 1 seconds...", style="yellow")
                 await asyncio.sleep(1)
 
     async def _send_inputs(self, websocket):
@@ -88,7 +90,7 @@ class Client:
                         )  # 10ms for 1080p...
                         tensor = tensor.permute(1, 2, 0)
                     except RuntimeError:
-                        print("Image corruptted.")
+                        console.print("Image corrupted.", style="red")
                         continue
 
                     with self.lock:

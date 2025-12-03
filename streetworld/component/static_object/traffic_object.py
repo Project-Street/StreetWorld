@@ -1,4 +1,3 @@
-import logging
 from typing import Tuple
 
 from panda3d.bullet import BulletBoxShape, BulletCylinderShape
@@ -7,11 +6,11 @@ from streetworld.component.static_object.base_static_object import BaseStaticObj
 from streetworld.constants import CollisionGroup, MetaDriveType, Semantics
 from streetworld.engine.asset_loader import AssetLoader
 from streetworld.engine.physics_node import BaseRigidBodyNode
+from streetworld.utils.logger import get_logger
 
 LaneIndex = Tuple[str, str, int]
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 
 class TrafficObject(BaseStaticObject):

@@ -3,13 +3,17 @@ This filed is mostly copied from gym==0.17.2
 We use the gym.spaces as helpers, but it may cause problem if user using some old version of gym.
 """
 
-import logging
 import typing as tp
 from collections import OrderedDict, namedtuple
 
 import numpy as np
+from rich.console import Console
 
 from streetworld.utils import get_np_random
+from streetworld.utils.logger import get_logger
+
+logger = get_logger()
+console = Console()
 
 BoxSpace = namedtuple("BoxSpace", "max min")
 DiscreteSpace = namedtuple("DiscreteSpace", "max min")
@@ -427,7 +431,7 @@ class Box(Space):
         high_precision = _get_precision(self.high.dtype)
         dtype_precision = _get_precision(self.dtype)
         if min(low_precision, high_precision) > dtype_precision:
-            logging.warning("Box bound precision lowered by casting to {}".format(self.dtype))
+            logger.warning("Box bound precision lowered by casting to {}".format(self.dtype))
         self.low = self.low.astype(self.dtype)
         self.high = self.high.astype(self.dtype)
 
@@ -517,9 +521,9 @@ if __name__ == "__main__":
         "goal": DiscreteSpace(min=0, max=2),
     }
     config = ParameterSpace(config)
-    print(config.sample())
+    console.print(config.sample())
     config.seed(1)
-    print(config.sample())
-    print(config.sample())
+    console.print(config.sample())
+    console.print(config.sample())
     config.seed(1)
-    print(*config.sample()["length"])
+    console.print(*config.sample()["length"])
