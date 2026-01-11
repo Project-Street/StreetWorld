@@ -33,7 +33,7 @@ from typing import List, Union, Dict
 from glm import vec3, vec4, mat3, mat4, mat4x3
 from torchvision.io import encode_jpeg, decode_jpeg
 
-from easydrive.utils.console_utils import log
+from metadrive.utils.console_utils import log
 
 
 class WebSocketServer:

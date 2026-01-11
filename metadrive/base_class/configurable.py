@@ -1,6 +1,6 @@
 from typing import Dict, Union
 
-from easydrive.engine.config import Config
+from metadrive.config import Config
 
 
 class Configurable:

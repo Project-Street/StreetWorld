@@ -12,7 +12,7 @@ import platform
 import OpenGL.GL as gl
 from imgui_bundle import imgui, imgui_toggle
 from glm import mat4, mat3, mat4x3, vec3
-from easydrive.utils.console_utils import *
+from metadrive.utils.console_utils import *
 from metadrive.viewer.client import Client
 from metadrive.viewer.server import WebSocketServer
 from metadrive.viewer.manual_controller import KeyboardController, get_controller
@@ -185,7 +185,7 @@ class Viewer:
         # imgui_md.get_font_loader_function()() # requires imgui_hello
     
     def _init_quad(self):
-        from easydrive.utils.opengl_utils import Quad
+        from metadrive.utils.opengl_utils import Quad
         self.quad = Quad(H=self.H, W=self.W)  # will blit this texture to screen if rendered
 
     def _bind_callbacks(self):

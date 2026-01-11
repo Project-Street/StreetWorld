@@ -37,7 +37,7 @@ from metadrive.manager.scenario_map_manager import ScenarioMapManager
 from metadrive.obs.navigation_obs import NavigationObservation
 from metadrive.obs.assembly_obs import AssemblyObservation
 from metadrive.policy.replay_policy import ReplayPolicy
-from easydrive.engine.config import Config
+from metadrive.config import Config
 from metadrive.default_config import BASE_DEFAULT_CONFIG
 
 class BaseEnv(gym.Env):
