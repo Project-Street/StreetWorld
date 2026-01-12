@@ -288,12 +288,53 @@ class NavigationObservation(BaseObservation, Randomizable):
                     break
                 visited.add(v)
                 q_l.append((v, next_len))
-            
+
         if actual_goal is None:
             return [start_lane]
-        
+
         seq = [actual_goal]
         while parent[seq[-1]] is not None:
             seq.append(parent[seq[-1]])
         seq.reverse()
         return seq
+
+    def get_reference_state(self, idx):
+        """
+        Get reference state at a specific path index.
+
+        This method is used by the reward function in ScenarioEnv to compute
+        position and heading deviation penalties.
+
+        Args:
+            idx: Index into the path (_path_xy)
+
+        Returns:
+            dict with keys:
+                - position: np.ndarray of shape (2,) with [x, y] coordinates
+                - heading_theta: float representing heading angle in radians
+            Returns None if idx is out of bounds or path is not available
+        """
+        if self._path_xy is None or idx < 0 or idx >= len(self._path_xy):
+            return None
+
+        # Get position at index
+        position = self._path_xy[idx]
+
+        # Compute heading from path segment
+        if idx < len(self._path_xy) - 1:
+            # Use segment from idx to idx+1
+            delta = self._path_xy[idx + 1] - position
+        elif idx > 0:
+            # Use segment from idx-1 to idx (for last point)
+            delta = position - self._path_xy[idx - 1]
+        else:
+            # Only one point in path
+            return None
+
+        # Compute heading angle
+        heading_theta = math.atan2(delta[1], delta[0])
+
+        return {
+            "position": position,
+            "heading_theta": heading_theta
+        }

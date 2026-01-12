@@ -1,5 +1,6 @@
 import gymnasium as gym
 import numpy as np
+from scipy.spatial.transform import Rotation as SCR
 
 from metadrive.obs.observation_base import BaseObservation
 
@@ -14,6 +15,7 @@ class StateObservation(BaseObservation):
     def __init__(self, config=None):
         super().__init__(config or {})
         self.controller = None
+        self._last_timestamp = None
         # Generous bounds for meters and m/s
         self._pos_low = -1e6
         self._pos_high = 1e6
@@ -22,6 +24,7 @@ class StateObservation(BaseObservation):
 
     def reset(self, controller, seed=None, **kwargs):
         self.controller = controller
+        self._last_timestamp = None
 
     @property
     def observation_space(self):
@@ -31,11 +34,43 @@ class StateObservation(BaseObservation):
         })
 
     def observe(self):
-        p = self.controller.position
-        v = self.controller.velocity
+        ego_r = SCR.from_matrix(self.controller.transform[:3, :3]).as_euler('XYZ', degrees=False)
+        ego_t = self.controller.transform[:3, 3]
+        velo = float(self.controller.speed)
+        steer = float(self.controller.steering * np.deg2rad(self.controller.max_steering))
+        accel = float(self.controller.accelerate)
+        steer_rate = float(self.controller.steer_rate)
+        timestamp = float(self.controller.timestamp - 0.1)
+        dt = 0.1
+        if self._last_timestamp is not None:
+            dt_candidate = timestamp - self._last_timestamp
+            if dt_candidate > 1e-4:
+                dt = dt_candidate
+        self._last_timestamp = timestamp
+
+        vel_xy = np.asarray(getattr(self.controller, 'velocity', np.zeros(2, dtype=np.float32)), dtype=np.float32)
+        linear_vel = np.zeros(3, dtype=np.float32)
+        linear_vel[:2] = vel_xy
+
+        prev_vel_xy = np.asarray(getattr(self.controller, 'last_velocity', vel_xy), dtype=np.float32)
+        linear_acc_xy = (vel_xy - prev_vel_xy) / dt
+        linear_acc = np.zeros(3, dtype=np.float32)
+        linear_acc[:2] = linear_acc_xy
+
+        angular_vel = np.zeros(3, dtype=np.float32)
+        angular_vel[2] = float(getattr(self.controller, 'angular_velocity', 0.0))
+
         return {
-            'position': np.array([p[0], p[1]], dtype=np.float32),
-            'velocity': np.array([v[0], v[1]], dtype=np.float32),
+            'ego_pos': ego_t.tolist(),
+            'ego_rot': ego_r.tolist(),
+            'ego_velo': velo,
+            'ego_steer': steer,
+            'accelerate': accel,
+            'steer_rate': steer_rate,
+            'timestamp': timestamp,
+            'linear_velocity': linear_vel,
+            'linear_acceleration': linear_acc,
+            'angular_velocity': angular_vel,
         }
 
     def destroy(self):

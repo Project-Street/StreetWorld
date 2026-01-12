@@ -2,7 +2,10 @@
 This environment can load all scenarios exported from other environments via env.export_scenarios()
 """
 
+from typing import Union
+
 import numpy as np
+import math
 
 import torch
 from metadrive.manager.agent_manager import AgentState
@@ -12,8 +15,12 @@ from metadrive.manager.scenario_curriculum_manager import ScenarioCurriculumMana
 from metadrive.manager.scenario_data_manager import ScenarioDataManager, ScenarioOnlineDataManager
 from metadrive.manager.scenario_map_manager import ScenarioMapManager
 from metadrive.manager.agent_manager import AgentManager
+from metadrive.obs.assembly_obs import AssemblyObservation
+from metadrive.obs.navigation_obs import NavigationObservation
+from metadrive.obs.surrounding_obs import SurroundingObservation
 from metadrive.utils import get_np_random
 from metadrive.utils.math import wrap_to_pi
+from metadrive.utils.navigation_utils import nearest_front_index
 
 SCENARIO_ENV_CONFIG = dict(
     # ===== Scenario Config =====
@@ -52,19 +59,24 @@ SCENARIO_ENV_CONFIG = dict(
     even_sample_vehicle_class=None,  # Deprecated.
 
     # ===== Reward Scheme =====
-    # See: https://github.com/metadriverse/metadrive/issues/283
-    success_reward=5.0,
-    out_of_road_penalty=5.0,
-    on_lane_line_penalty=1.,
-    crash_vehicle_penalty=1.,
-    crash_object_penalty=1.0,
-    crash_human_penalty=1.0,
-    driving_reward=1.0,
-    steering_range_penalty=0.5,
-    heading_penalty=1.0,
-    lateral_penalty=.5,
-    max_lateral_dist=4,
-    no_negative_reward=True,
+    position_deviation_threshold=1.5,
+    position_penalty_gain=0.5,
+    position_penalty_max=1.0,
+    heading_deviation_threshold=0.05,
+    heading_penalty_weight=0.3,
+    progress_reward_weight=1.0,
+    reverse_penalty_weight=0.5,
+    progress_deviation_weight=1.0,
+    ttc_safe_horizon=4.0,
+    ttc_warn_horizon=2.0,
+    ttc_mid_penalty_weight=0.5,
+    ttc_high_penalty_weight=1.5,
+    ttc_safe_bonus_weight=0.2,
+    comfort_accel_weight=0.1,
+    comfort_heading_weight=0.05,
+    comfort_accel_threshold=1.5,
+    comfort_heading_threshold=0.1,
+    comfort_bonus_factor=0.5,
 
     # ===== Cost Scheme =====
     crash_vehicle_cost=1.0,
@@ -78,6 +90,9 @@ SCENARIO_ENV_CONFIG = dict(
     crash_object_done=False,
     crash_human_done=False,
     relax_out_of_road_done=True,
+
+    # ===== Collision Reward =====
+    collision_penalty_weight=3.0,
 )
 
 
@@ -91,6 +106,11 @@ class ScenarioEnv(BaseEnv):
 
     def __init__(self, model, config=None):
         super(ScenarioEnv, self).__init__(model, config)
+        self._last_speed = None
+        self._last_accel = None
+        self._last_steer = None
+        self._last_progress_value = None
+        self._last_progress_idx = None
         if self.config["curriculum_level"] > 1:
             assert self.config["num_scenarios"] % self.config["curriculum_level"] == 0, \
                 "Each level should have the same number of scenarios"
@@ -174,31 +194,305 @@ class ScenarioEnv(BaseEnv):
         step_info["cost"] = cost
         return cost, step_info
 
+    def reset(self, seed: Union[None, int] = None):
+        self._last_speed = None
+        self._last_accel = None
+        self._last_steer = None
+        self._last_progress_value = None
+        self._last_progress_idx = None
+        return super().reset(seed=seed)
+
     def reward_function(self):
-        """
-        Override this func to get a new reward function
-        :param vehicle_id: id of BaseVehicle
-        :return: reward
-        """
-        state = self.agent_managers['actor'].state
+        """Return reward composed of collision, positional, heading, and smoothness terms."""
+        actor_manager = self.agent_managers['actor']
+        state = actor_manager.state
+        vehicle = getattr(actor_manager, "controller", None)
+        nav = self._get_navigation_observer()
+
         step_info = dict()
+        components = dict()
+        collision_states = {
+            AgentState.CRASH_VEHICLE,
+            AgentState.CRASH_HUMAN,
+            AgentState.CRASH_OBJECT,
+            AgentState.CRASH_WORLD,
+            AgentState.OUT_OF_ROAD,
+        }
+        step_info["collision"] = int(state in collision_states)
+        collision_reward = 0.0
+        if state in collision_states:
+            collision_reward = -float(self.config.get("collision_penalty_weight", 3.0))
+        components["collision_reward"] = collision_reward
 
-        # crash penalty
-        reward = 0
-        if state == AgentState.CRASH_VEHICLE:
-            reward = -self.config["crash_vehicle_penalty"]
-        if state == AgentState.CRASH_HUMAN:
-            reward = -self.config["crash_human_penalty"]
+        # ===== Expert reference =====
+        expert_state = None
+        ego_xy = None
+        path_xy = None
+        idx = None
+        if nav is not None and vehicle is not None and hasattr(nav, "get_reference_state"):
+            path_xy = getattr(nav, "_path_xy", None)
+            if path_xy is not None and len(path_xy) > 0:
+                ego_xy = nav._vehicle_xy(vehicle)
+                heading_vec = nav._ego_heading_vec(vehicle)
+                idx = nearest_front_index(path_xy, ego_xy, heading_vec)
+                idx = int(np.clip(idx, 0, len(path_xy) - 1))
+                expert_state = nav.get_reference_state(idx)
 
-        step_info["step_reward"] = reward
+        step_info["expert_available"] = 1 if expert_state else 0
 
-        # termination reward
-        if state == AgentState.SUCCESS:
-            reward = self.config["success_reward"]
-        elif state == AgentState.OUT_OF_ROAD:
-            reward = -self.config["out_of_road_penalty"]
+        # ===== Positional deviation =====
+        position_reward = 0.0
+        if expert_state and expert_state.get("position") is not None and ego_xy is not None:
+            expert_pos = np.asarray(expert_state["position"], dtype=np.float32)
+            deviation = float(np.linalg.norm(ego_xy - expert_pos))
+            threshold = max(self.config.get("position_deviation_threshold", 1.5), 1e-3)
+            if deviation > threshold:
+                gain = float(self.config.get("position_penalty_gain", 0.5))
+                max_penalty = float(self.config.get("position_penalty_max", 1.0))
+                position_reward = -min(max_penalty, gain * (deviation - threshold))
+            step_info["position_deviation"] = deviation
+            step_info["position_threshold"] = threshold
+        else:
+            step_info["position_deviation"] = None
+            step_info["position_threshold"] = None
+        components["position_reward"] = position_reward
 
-        return reward, step_info
+        # ===== Heading deviation =====
+        heading_reward = 0.0
+        ego_heading = float(getattr(vehicle, "heading_theta", 0.0)) if vehicle is not None else 0.0
+        if expert_state and expert_state.get("heading_theta") is not None:
+            expert_heading = float(expert_state["heading_theta"])
+            heading_err = abs(ego_heading - expert_heading)
+            heading_threshold = max(float(self.config.get("heading_deviation_threshold", 0.05)), 1e-6)
+            if heading_err > heading_threshold:
+                heading_reward = -float(self.config.get("heading_penalty_weight", 0.3)) * (heading_err - heading_threshold)
+            step_info["heading_error"] = heading_err
+            step_info["heading_threshold"] = heading_threshold
+        else:
+            step_info["heading_error"] = None
+            step_info["heading_threshold"] = None
+        components["heading_reward"] = heading_reward
+
+        # ===== Safety: TTC shaping =====
+        ttc_reward = 0.0
+        ttc_safe = float(self.config.get("ttc_safe_horizon", 4.0))
+        ttc_warn = float(self.config.get("ttc_warn_horizon", 2.0))
+        w_mid = float(self.config.get("ttc_mid_penalty_weight", 0.5))
+        w_high = float(self.config.get("ttc_high_penalty_weight", 1.5))
+        w_safe_bonus = float(self.config.get("ttc_safe_bonus_weight", 0.2))
+        min_ttc = self._compute_min_ttc(vehicle)
+        if min_ttc is not None:
+            if min_ttc <= ttc_warn:
+                penalty = (ttc_warn - min_ttc) / max(ttc_warn, 1e-3)
+                ttc_reward = -w_high * np.clip(penalty, 0.0, 1.0)
+            elif min_ttc < ttc_safe:
+                penalty = (ttc_safe - min_ttc) / max(ttc_safe - ttc_warn, 1e-3)
+                ttc_reward = -w_mid * np.clip(penalty, 0.0, 1.0)
+            else:
+                bonus = (min_ttc - ttc_safe) / max(ttc_safe, 1e-3)
+                ttc_reward = w_safe_bonus * np.clip(bonus, 0.0, 1.0)
+        components["ttc_reward"] = ttc_reward
+        step_info["ttc"] = min_ttc
+
+        # ===== Comfort & Smoothness =====
+        ego_speed = float(vehicle.speed) if vehicle is not None and hasattr(vehicle, "speed") else 0.0
+        dt = float(0.1)
+        speed_delta = 0.0 if self._last_speed is None else ego_speed - self._last_speed
+        accel = speed_delta / max(dt, 1e-3)
+        current_heading = float(getattr(vehicle, "heading_theta", 0.0)) if vehicle is not None else 0.0
+        heading_rate = 0.0
+        if self._last_steer is not None:
+            heading_rate = (current_heading - self._last_steer) / max(dt, 1e-3)
+        w_accel = float(self.config.get("comfort_accel_weight", 0.1))
+        w_heading = float(self.config.get("comfort_heading_weight", 0.05))
+        accel_thresh = float(self.config.get("comfort_accel_threshold", 1.5))
+        heading_thresh = float(self.config.get("comfort_heading_threshold", 0.1))
+        comfort_bonus_factor = float(self.config.get("comfort_bonus_factor", 0.5))
+        comfort_reward = 0.0
+        accel_mag = abs(accel)
+        heading_rate_mag = abs(heading_rate)
+        if accel_mag > accel_thresh:
+            comfort_reward -= w_accel * (accel_mag - accel_thresh)
+        else:
+            comfort_reward += w_accel * comfort_bonus_factor * (1.0 - accel_mag / max(accel_thresh, 1e-3))
+        if heading_rate_mag > heading_thresh:
+            comfort_reward -= w_heading * (heading_rate_mag - heading_thresh)
+        else:
+            comfort_reward += w_heading * comfort_bonus_factor * (1.0 - heading_rate_mag / max(heading_thresh, 1e-3))
+        components["comfort_reward"] = comfort_reward
+        step_info["accel"] = accel
+        step_info["heading_rate"] = heading_rate
+        self._last_speed = ego_speed
+        self._last_steer = current_heading
+
+        # ===== Progress along route =====
+        progress_reward = 0.0
+        progress_weight = float(self.config.get("progress_reward_weight", 1.0))
+        reverse_weight = float(self.config.get("reverse_penalty_weight", 0.5))
+
+        valid_path = path_xy is not None and len(path_xy) >= 2
+        valid_ego = ego_xy is not None
+
+        if valid_path and valid_ego:
+            path_cumlen = getattr(nav, "_path_cumlen", None) if nav else None
+            progress_val, best_idx = self._project_progress_along_path(
+                ego_xy, path_xy, path_cumlen, self._last_progress_idx
+            )
+
+            if progress_val is not None:
+                if self._last_progress_value is None:
+                    self._last_progress_value = progress_val
+                    self._last_progress_idx = best_idx
+
+                delta = progress_val - self._last_progress_value
+
+                if delta > 1e-3:
+                    progress_reward = progress_weight * delta
+                    deviation = 0.0
+                    if expert_state and expert_state.get("position") is not None and ego_xy is not None:
+                        expert_pos = np.asarray(expert_state["position"], dtype=np.float32)
+                        deviation = float(np.linalg.norm(ego_xy - expert_pos))
+                    alpha = float(self.config.get("progress_deviation_weight", 1.0))
+                    if deviation > 1e-4 and alpha > 0:
+                        progress_reward *= math.exp(-alpha * deviation)
+                elif delta < -1e-3:
+                    progress_reward = -reverse_weight * abs(delta)
+
+                self._last_progress_value = progress_val
+                self._last_progress_idx = best_idx
+        
+        else:
+            self._last_progress_value = None
+            self._last_progress_idx = None
+
+        if state in collision_states and progress_reward > 0:
+            progress_reward = 0.0
+
+        components["progress_reward"] = progress_reward
+        step_info["progress"] = progress_reward / progress_weight if progress_weight > 1e-6 else 0.0
+
+        total_reward = sum(components.values())
+        for name, value in components.items():
+            step_info[name] = value
+
+        step_info["step_reward"] = total_reward
+        return total_reward, step_info
+
+    def _compute_min_ttc(self, vehicle):
+        surrounding_obs = self._get_surrounding_observer()
+        if vehicle is None or surrounding_obs is None:
+            return None
+        surroundings = surrounding_obs.observe()
+        if not surroundings:
+            return None
+        # ego velocity in ego frame
+        vel_world = np.array(getattr(vehicle, "velocity", [0.0, 0.0]), dtype=np.float32)
+        if vel_world.shape[0] < 2:
+            vel_world = np.array([float(vel_world[0]), 0.0], dtype=np.float32)
+        vel_world3 = np.array([float(vel_world[0]), float(vel_world[1]), 0.0], dtype=np.float32)
+        transform = getattr(vehicle, "transform", None)
+        if transform is None:
+            return None
+        R_world_vehicle = transform[:3, :3]
+        R_vehicle_world = np.linalg.inv(R_world_vehicle)
+        ego_vel_ego = (R_vehicle_world @ vel_world3)[:2]
+        min_ttc = None
+        for obj in surroundings:
+            rel_pos = np.asarray(obj.get("position", [0.0, 0.0]), dtype=np.float32)
+            rel_vel = np.asarray(obj.get("velocity", [0.0, 0.0]), dtype=np.float32) - ego_vel_ego
+            dist = float(np.linalg.norm(rel_pos))
+            if dist < 1e-3:
+                return 0.0
+            rel_dir = rel_pos / dist
+            closing_speed = -float(np.dot(rel_vel, rel_dir))
+            if closing_speed <= 1e-3:
+                continue
+            ttc = dist / closing_speed
+            if min_ttc is None or ttc < min_ttc:
+                min_ttc = ttc
+        return min_ttc
+
+    def _get_navigation_observer(self):
+        actor_observer = getattr(self.agent_managers['actor'], "observer", None)
+        if isinstance(actor_observer, NavigationObservation):
+            return actor_observer
+        if isinstance(actor_observer, AssemblyObservation):
+            nav = actor_observer._observers.get("navigation") if hasattr(actor_observer, "_observers") else None
+            if isinstance(nav, NavigationObservation):
+                return nav
+        return None
+    def _project_progress_along_path(self, position, path_xy, path_cumlen, last_idx):
+        if path_xy is None or len(path_xy) < 2:
+            return None, None
+        pts = np.asarray(path_xy, dtype=np.float32)
+        if path_cumlen is None or len(path_cumlen) != len(pts):
+            seg_lengths = np.linalg.norm(pts[1:] - pts[:-1], axis=1)
+            path_cumlen = np.concatenate(([0.0], np.cumsum(seg_lengths)))
+        N = len(pts) - 1
+        if N <= 0:
+            return None, None
+        if last_idx is None:
+            seg_range = range(0, N)
+        else:
+            k = 15
+            lo = max(0, last_idx - k)
+            hi = min(N, last_idx + k)
+            seg_range = range(lo, hi)
+
+        best_progress = None
+        best_dist = np.inf
+        best_idx = None
+        pos = np.asarray(position, dtype=np.float32)
+
+        for idx in seg_range:
+            p0 = pts[idx]
+            p1 = pts[idx + 1]
+            seg = p1 - p0
+            seg_len = np.linalg.norm(seg)
+            if seg_len < 1e-6:
+                continue
+            t = float(np.dot(pos - p0, seg) / (seg_len ** 2))
+            t = 0.0 if t < 0.0 else 1.0 if t > 1.0 else t
+            proj = p0 + t * seg
+            dist = np.linalg.norm(pos - proj)
+            if dist < best_dist:
+                base = float(path_cumlen[idx]) if idx < len(path_cumlen) else 0.0
+                best_progress = base + t * seg_len
+                best_dist = dist
+                best_idx = idx
+
+        if best_progress is None:
+            return None, None
+        return best_progress, best_idx
+
+    def _get_surrounding_observer(self):
+        actor_observer = getattr(self.agent_managers['actor'], "observer", None)
+        if isinstance(actor_observer, SurroundingObservation):
+            return actor_observer
+        if isinstance(actor_observer, AssemblyObservation):
+            surrounding = actor_observer._observers.get("surrounding") if hasattr(actor_observer, "_observers") else None
+            if isinstance(surrounding, SurroundingObservation):
+                return surrounding
+        return None
+
+    def _get_reference_direction(self, path_xy, idx):
+        if path_xy is None or idx is None or len(path_xy) < 2:
+            return None
+
+        if idx < len(path_xy) - 1:
+            ref_idx0 = idx
+            ref_idx1 = idx + 1
+        elif idx > 0:
+            ref_idx0 = idx - 1
+            ref_idx1 = idx
+        else:
+            return None
+
+        target_vec = path_xy[ref_idx1] - path_xy[ref_idx0]
+        norm = np.linalg.norm(target_vec)
+        if norm < 1e-6:
+            return None
+        return target_vec / norm
 
 class ScenarioOnlineEnv(ScenarioEnv):
     """
@@ -259,4 +553,3 @@ class ScenarioWaypointEnv(ScenarioEnv):
         ret = super(ScenarioWaypointEnv, self)._post_process_config(config)
         assert config["set_static"], "Waypoint policy requires set_static=True"
         return ret
-
