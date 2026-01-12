@@ -117,14 +117,19 @@ class Config:
         """Return a copy of the config."""
         return Config(deepcopy(dict(self._cfg_dict)))
 
-    def merge_from(self, options: Dict, allow_list_keys: bool = True):
+    def merge_from(
+        self, options: Dict, allow_list_keys: bool = True, replace_keys: list = None
+    ):
         """
         Merge dict into cfg_dict.
 
         Args:
             options: Dictionary of configs to merge from
             allow_list_keys: If True, int string keys (e.g. '0', '1') are allowed
+            replace_keys: Keys to replace instead of merge (no recursive merge)
         """
+        if replace_keys is None:
+            replace_keys = []
         option_cfg_dict = {}
         for full_key, v in options.items():
             d = option_cfg_dict
@@ -136,11 +141,15 @@ class Config:
             d[subkey] = v
 
         cfg_dict = super().__getattribute__("_cfg_dict")
-        merged = self._merge_a_into_b(option_cfg_dict, cfg_dict, allow_list_keys)
+        merged = self._merge_a_into_b(
+            option_cfg_dict, cfg_dict, allow_list_keys, replace_keys=replace_keys
+        )
         super().__setattr__("_cfg_dict", ConfigDict(merged))
 
     @staticmethod
-    def _merge_a_into_b(a: Dict, b: Dict, allow_list_keys: bool = True) -> Dict:
+    def _merge_a_into_b(
+        a: Dict, b: Dict, allow_list_keys: bool = True, replace_keys: list = None
+    ) -> Dict:
         """
         Merge dict a into dict b (non-inplace).
 
@@ -150,13 +159,20 @@ class Config:
             a: Source dict to be merged into b
             b: Origin dict
             allow_list_keys: If True, int string keys are allowed in source a
+            replace_keys: Keys to replace instead of merge (no recursive merge)
 
         Returns:
             Modified dict of b using a
         """
+        if replace_keys is None:
+            replace_keys = []
         b = b.copy()
 
         for k, v in a.items():
+            # If key is in replace_keys, directly replace instead of recursive merge
+            if k in replace_keys:
+                b[k] = v
+                continue
             if allow_list_keys and k.isdigit() and isinstance(b, list):
                 k = int(k)
                 if k == len(b):

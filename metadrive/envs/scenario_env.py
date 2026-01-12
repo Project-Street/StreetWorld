@@ -7,19 +7,14 @@ from typing import Union
 import numpy as np
 import math
 
-import torch
 from metadrive.manager.agent_manager import AgentState
 from metadrive.engine.asset_loader import AssetLoader
 from metadrive.envs.base_env import BaseEnv
-from metadrive.manager.scenario_curriculum_manager import ScenarioCurriculumManager
-from metadrive.manager.scenario_data_manager import ScenarioDataManager, ScenarioOnlineDataManager
-from metadrive.manager.scenario_map_manager import ScenarioMapManager
+from metadrive.manager.scenario_data_manager import ScenarioOnlineDataManager
 from metadrive.manager.agent_manager import AgentManager
 from metadrive.obs.assembly_obs import AssemblyObservation
 from metadrive.obs.navigation_obs import NavigationObservation
 from metadrive.obs.surrounding_obs import SurroundingObservation
-from metadrive.utils import get_np_random
-from metadrive.utils.math import wrap_to_pi
 from metadrive.utils.navigation_utils import nearest_front_index
 
 SCENARIO_ENV_CONFIG = dict(
@@ -141,29 +136,29 @@ class ScenarioEnv(BaseEnv):
         done = False
         if state_info == AgentState.SUCCESS:
             done = True
-            self.logger.debug(msg("arrive_dest"), extra={"log_once": True})
+            self.logger.info(msg("arrive_dest"), extra={"log_once": True})
         elif state_info == AgentState.OUT_OF_ROAD:
             done = True
-            self.logger.debug(msg("out_of_road"), extra={"log_once": True})
+            self.logger.info(msg("out_of_road"), extra={"log_once": True})
         elif state_info == AgentState.OUT_OF_STEP:
             done = True
-            self.logger.debug(msg("out_of_step of object"), extra={"log_once": True})
+            self.logger.info(msg("out_of_step of object"), extra={"log_once": True})
         elif state_info == AgentState.CRASH_HUMAN:
             done = True
-            self.logger.debug(msg("crash human"), extra={"log_once": True})
+            self.logger.info(msg("crash human"), extra={"log_once": True})
         elif state_info == AgentState.CRASH_VEHICLE:
             done = True
-            self.logger.debug(msg("crash vehicle"), extra={"log_once": True})
+            self.logger.info(msg("crash vehicle"), extra={"log_once": True})
         elif state_info == AgentState.CRASH_OBJECT:
             done = True
-            self.logger.debug(msg("crash object"), extra={"log_once": True})
+            self.logger.info(msg("crash object"), extra={"log_once": True})
         elif state_info == AgentState.CRASH_WORLD:
             done = True
-            self.logger.debug(msg("crash background"), extra={"log_once": True})
+            self.logger.info(msg("crash background"), extra={"log_once": True})
         elif is_max_step:
             state_info = AgentState.OUT_OF_STEP
             done = True
-            self.logger.debug(msg("max step"), extra={"log_once": True})
+            self.logger.info(msg("max step"), extra={"log_once": True})
 
         # # log data to curriculum manager
         # self.engine.curriculum_manager.log_episode(

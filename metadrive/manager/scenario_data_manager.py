@@ -18,12 +18,13 @@ class ScenarioDataManager(BaseManager):
 
 
     def __init__(self, config, loader):
-        
-        super(ScenarioDataManager, self).__init__()        
+
+        super(ScenarioDataManager, self).__init__()
         self.base_config = config
 
         # self.store_data = engine.global_config["store_data"]
-        self.directory = self.base_config["scene_config_directory"]
+        # Allow subclasses to set directory differently
+        self.directory = self.base_config.get("scene_config_directory")
 
         # for multi-worker
         # self._scenarios = {}

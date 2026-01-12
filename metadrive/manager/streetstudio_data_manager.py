@@ -7,9 +7,10 @@ files produced by StreetStudio's ConvertToStreetStudio class.
 
 import json
 from pathlib import Path
+import numpy as np
 
 from metadrive.manager.scenario_data_manager import ScenarioDataManager
-from metadrive.utils.streetstudio_utils import sec_to_us, parse_instances_data
+from metadrive.utils.streetstudio_utils import sec_to_us, parse_instances_data, SceneTransform
 
 
 class StreetStudioDataManager(ScenarioDataManager):
@@ -45,33 +46,51 @@ class StreetStudioDataManager(ScenarioDataManager):
         transforms_path = Path(self.transforms_json_path)
 
         # Read transforms.json
-        with open(transforms_path, 'r') as f:
+        with open(transforms_path, "r") as f:
             data = json.load(f)
 
         # Extract scene name (use filename if not provided)
         scene_name = data.get("scene_name", transforms_path.parent.name)
 
         # Convert ego_poses: {sec: pose_4x4} -> {us: pose_4x4}
-        ego_poses = {
-            sec_to_us(float(ts)): pose
-            for ts, pose in data["sim_data"]["egos_data"].items()
-        }
+        ego_poses = {sec_to_us(float(ts)): np.array(pose) for ts, pose in data["sim_data"]["egos_data"].items()}
 
         # Get timestamp range
         timestamps = sorted(ego_poses.keys())
         timestamp_range = [timestamps[0], timestamps[-1]]
 
-        # Camera parameters - direct mapping
-        camera_params = data["sim_data"]["cameras_data"]
+        # Camera parameters - normalize format for GaussianObservation
+        # Convert list format to torch.Tensor for ego2camera and K
+        camera_params = {}
+        for cam_name, cam_data in data["sim_data"]["cameras_data"].items():
+            normalized_cam = {
+                "H": cam_data["H"],
+                "W": cam_data["W"],
+            }
+
+            # Convert K from list to numpy array (will be converted to torch.Tensor by GaussianObservation)
+            if "K" in cam_data:
+                K = cam_data["K"]
+                if isinstance(K, list):
+                    normalized_cam["K"] = np.array(K, dtype=np.float32)
+                else:
+                    normalized_cam["K"] = K
+
+            # Convert ego2camera from list to numpy array (will be converted to torch.Tensor by GaussianObservation)
+            if "ego2camera" in cam_data:
+                ego2cam = cam_data["ego2camera"]
+                if isinstance(ego2cam, list):
+                    normalized_cam["ego2camera"] = np.array(ego2cam, dtype=np.float32)
+                else:
+                    normalized_cam["ego2camera"] = ego2cam
+
+            camera_params[cam_name] = normalized_cam
 
         # Convert instances_data -> tracking_data
         tracking_data = parse_instances_data(data["instances_data"])
 
         # Create config object
-        cfg = {
-            "scene_name": scene_name,
-            "transforms_json_path": str(transforms_path)
-        }
+        cfg = {"scene_name": scene_name, "transforms_json_path": str(transforms_path)}
 
         # Background mesh (optional)
         mesh_path = data.get("ply_file_path")
@@ -80,6 +99,9 @@ class StreetStudioDataManager(ScenarioDataManager):
         else:
             mesh_path = None
 
+        # Extract dataset_transforms for coordinate conversion
+        dataset_transforms = data.get("dataset_transforms")
+
         return (
             scene_name,
             cfg,
@@ -87,7 +109,8 @@ class StreetStudioDataManager(ScenarioDataManager):
             camera_params,
             ego_poses,
             tracking_data,
-            mesh_path
+            mesh_path,
+            dataset_transforms,
         )
 
     @property
@@ -98,11 +121,36 @@ class StreetStudioDataManager(ScenarioDataManager):
     def read_metadata(self, loader):
         """Override to use the internal loader"""
         self.metadata, self.idx2scene = {}, []
-        self.num_scenarios = 1
 
-        scene_name, cfg, timestamp_range, camera_params, ego_poses, tracking_data, mesh_path = loader(
-            None  # cfg_path not needed
+        scene_name, cfg, timestamp_range, camera_params, ego_poses, tracking_data, mesh_path, dataset_transforms = (
+            loader(
+                None  # cfg_path not needed
+            )
         )
+
+        # Store dataset_transforms for rendering coordinate conversion
+        self._dataset_transforms = dataset_transforms
+
+        # Apply inverse transform to poses: normalized -> real (for simulation)
+        if dataset_transforms:
+            transform = SceneTransform(**dataset_transforms)
+
+            # Transform ego poses
+            for ts in ego_poses.keys():
+                ego_poses[ts] = transform.apply_extrinsic(ego_poses[ts], reverse=True)
+
+            # Transform participant poses
+            for uid, participant in tracking_data.items():
+                for ts in participant["poses"].keys():
+                    participant["poses"][ts] = transform.apply_extrinsic(participant["poses"][ts], reverse=True)
+
+                participant["size"] = [x / transform.scaling for x in participant["size"]]
+
+            # Transform camera poses
+            for cam_name in camera_params:
+                cam2ego = np.linalg.inv(camera_params[cam_name]["ego2camera"])
+                cam2ego[:3, 3] /= transform.scaling
+                camera_params[cam_name]["ego2camera"] = np.linalg.inv(cam2ego)
 
         # Restructure metadata using parent class method
         self.metadata[scene_name] = self.restructure_metadata(
@@ -112,5 +160,10 @@ class StreetStudioDataManager(ScenarioDataManager):
             ego_poses=ego_poses,
             participants=tracking_data,
         )
-        self.metadata[scene_name]['scene_mesh_path'] = mesh_path
+        self.metadata[scene_name]["scene_mesh_path"] = mesh_path
         self.idx2scene.append(scene_name)
+
+    @property
+    def dataset_transforms(self):
+        """Get dataset transforms for rendering coordinate conversion."""
+        return getattr(self, "_dataset_transforms", None)

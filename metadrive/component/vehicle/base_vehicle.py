@@ -1,25 +1,20 @@
 import math
-import os
 from collections import deque
-from typing import Union, Optional, List
+from typing import Union, List
 
 import numpy as np
 from panda3d.bullet import BulletVehicle, BulletBoxShape, ZUp
-from panda3d.core import Material, Vec3, TransformState
+from panda3d.core import Vec3, TransformState
 
 from metadrive.base_class.base_object import BaseObject
 # from metadrive.component.navigation_module.node_network_navigation import NodeNetworkNavigation
 from metadrive.component.pg_space import VehicleParameterSpace, ParameterSpace
-from metadrive.constants import CamMask, get_color_palette
 from metadrive.constants import MetaDriveType, CollisionGroup
 from metadrive.constants import Semantics
-from metadrive.engine.asset_loader import AssetLoader
 from metadrive.utils.logger import get_logger
 from metadrive.engine.physics_node import BaseRigidBodyNode
 from metadrive.utils import Config, safe_clip_for_small_array
-from metadrive.utils.math import get_vertical_vector, norm, clip
-from metadrive.utils.math import wrap_to_pi
-from metadrive.utils.utils import get_object_from_node
+from metadrive.utils.math import norm
 import torch
 logger = get_logger()
 
@@ -319,6 +314,7 @@ class BaseVehicle(BaseObject, BaseVehicleState):
         self.contact_results.update(contact_infos)
 
     def _is_crash_world(self, contact_points):
+        return False # Disable this
         wheel_centers = []
         for i in range(self.vehicle.getNumWheels()):
             wheel = self.vehicle.getWheel(i)
