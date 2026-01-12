@@ -5,6 +5,8 @@ StreetWorld is built on MetaDrive, integrating Gaussian splatting rendering and 
 ## Installation
 - Install dependencies:
   ```bash
+  pip3 install torch torchvision --index-url https://download.pytorch.org/whl/cu121
+
   pip install -e .[gym]
   ```
 - If you use the default Gaussian renderer, ensure `easydrive` is installed.

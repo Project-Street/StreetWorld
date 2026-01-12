@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=45"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "metadrive-simulator"
+description = "StreetWorld is built on MetaDrive, integrating Gaussian splatting rendering and simulation. It discovers scenes automatically from a scene-config directory and supports remote visualization in a client/server mode for interactive driving or RL training."
+readme = { file = "README.md", content-type = "text/markdown" }
+authors = [
+    { name = "lllcccfff", email = "7802220128@csu.edu.cn" },
+    { name = "Jesse Senior", email = "jessesenior@outlook.com" },
+]
+requires-python = ">=3.8"
+version = "0.0.1"
+dependencies = [
+    "cuda-python<=12.8",
+    "glfw",
+    "gymnasium",
+    "imgui-bundle",
+    "lxml",
+    "mediapy",
+    "opencv-python-headless",
+    "panda3d",
+    "pydantic",
+    "pygame",
+    "PyOpenGL",
+    "PyOpenGL_accelerate",
+    "rich",
+    "shapely",
+    "torch",
+    "trajdata",
+    "websockets<14",
+]
+
+[tool.setuptools]
+packages = ["metadrive"]
+
+[tool.setuptools.package-dir]
+"metadrive" = "metadrive"
+
+[tool.setuptools.package-data]
+"metadrive" = ["*", "**/*"]
