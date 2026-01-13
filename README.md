@@ -1,71 +1,80 @@
 # StreetWorld
 
-StreetWorld is built on MetaDrive, integrating Gaussian splatting rendering and simulation. It discovers scenes automatically from a scene-config directory and supports remote visualization in a client/server mode for interactive driving or RL training.
+StreetWorld is an open-source driving simulator built on MetaDrive, integrating Gaussian Splatting rendering for photorealistic visualization. It supports loading real-world driving scenarios, remote visualization in client/server mode, and reinforcement learning training.
+
+## Features
+
+- **Photorealistic Rendering**: Integration with Gaussian Splatting for real-world scene visualization
+- **Real-World Scenarios**: Load and replay driving scenarios from various datasets (nuScenes, Waymo, StreetStudio, custom datasets)
+- **Remote Visualization**: Client/server architecture for remote interactive driving
+- **RL Training Ready**: Gymnasium-compatible interface for reinforcement learning
+- **Multiple Observations**: Modular observation system (Gaussian, Navigation, State, Surrounding)
+- **Flexible Policies**: Support for human control (keyboard/steering wheel/Xbox), replay policies, and custom policies
+- **OnSite Integration**: Compatible with OnSite platform for distributed simulation
 
 ## Installation
-- Install dependencies:
-  ```bash
-  pip3 install torch torchvision --index-url https://download.pytorch.org/whl/cu121
 
-  pip install -e .[gym]
-  ```
-- If you use the default Gaussian renderer, ensure `easydrive` is installed.
+### Prerequisites
 
-## gRPC Quickstart
+- Python >= 3.8 (Python 3.10 recommended)
+- CUDA 12.1 (for GPU acceleration)
 
-### As Client
+### Environment Setup
+
+Create a conda environment:
 
 ```bash
-# NOTE: Install streetstudio's grpc package
-python metadrive/examples/drive_with_streetstudio.py --transforms ref/StreetData/data/Dynamic-City-Full/processed/dynamic-city-full-0002/transforms.json
+mamba create -n st-world python=3.10 -y
+mamba activate st-world
 ```
+
+### Install StreetWorld
+
+```bash
+# Install PyTorch with CUDA support
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
+
+# Install StreetWorld
+pip install -e .[gym]
+```
+
+
+## Quick Start
+
+### StreetStudio Integration
+
+Load and replay scenarios from StreetStudio transforms.json:
+
+```bash
+mamba run -n st-world python -m metadrive.examples.drive_with_streetstudio \
+  --transforms /path/to/transforms.json
+```
+
+## gRPC Mode
 
 ### As Server
 
+Run gRPC server for remote RL training:
+
 ```bash
-# On server env
+# On server environment
 pip install ./grpc/[server]
 
-# Server
-mamba run -n st-world python -m metadrive.examples.server --transforms ref/StreetData/data/Dynamic-City-Full/processed/dynamic-city-full-0002/transforms.json --render-url 127.0.0.1:50051 --port 50062
+mamba run -n st-world python -m metadrive.examples.server \
+  --transforms /path/to/transforms.json \
+  --render-url 127.0.0.1:50051 \
+  --port 50062
+```
 
-# ===
+### As Client (example script)
 
-# On client env
+Connect to gRPC server:
+
+```bash
+# On client environment
 pip install ./grpc
 
-# Example client
-mamba run -n st-world python -m metadrive.examples.client --port 50062 --steps 5
+mamba run -n st-world python -m metadrive.examples.client \
+  --port 50062 \
+  --steps 100
 ```
-
----
-
-Depreciate stuff:
-
-## Quickstart Example
-1) Start the server (handles simulation + rendering and waits for clients):
-```bash
-python -m metadrive.examples.drive_in_real_env_server \
-  --scene_config_directory /path/to/scene_configs \
-  --host <server-ip> \
-  --port <server-port>
-```
-
-2) Start the client (on the same or a remote machine, keyboard control):
-```bash
-python -m metadrive.examples.remote_visualizer --host <server-ip> --port <server-port> --width <window_size_width> --height <window_size_height>
-```
-
-Controls: `W/A/S/D` drive.
-
-## Integrate Your Gaussian Renderer
-Read `GS_INTERGRATION.md` and implement the `SimulatorInterface` methods `load_metadata / load_model / render` to plug in custom rendering.
-
-## Environment Config
-We provide defualt environment config in `metadrive\default_config.py`
-User are able to edit the component of actor and participant through `actor_config` and `participant_config`.
-For each component (observer, policy, controller), user are required to provide component type and configuration.
-And currently user can not config participant's controller, as it is automatically decided by the object's type.
-
-## Scene Config
-Place each scene config file under `SCENE_CONFIG_DIRECTORY` so `ScenarioEnv` can scan and recognize the reconstructed scene assets.
