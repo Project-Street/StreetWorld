@@ -11,6 +11,25 @@ StreetWorld is built on MetaDrive, integrating Gaussian splatting rendering and 
   ```
 - If you use the default Gaussian renderer, ensure `easydrive` is installed.
 
+## gRPC Quickstart
+
+```bash
+# On server env
+pip install grpc/[server]
+# On other env
+pip install grpc
+
+# Server
+mamba run -n st-world python -m metadrive.examples.server --transforms ref/StreetData/data/Dynamic-City-Full/processed/dynamic-city-full-0002/transforms.json --render-url 127.0.0.1:50051 --port 50062
+
+# Example client
+mamba run -n st-world python -m metadrive.examples.client --port 50063 --steps 5
+```
+
+---
+
+Depreciate stuff:
+
 ## Quickstart Example
 1) Start the server (handles simulation + rendering and waits for clients):
 ```bash
