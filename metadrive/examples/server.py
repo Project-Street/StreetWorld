@@ -10,7 +10,9 @@ Usage:
         --transforms /path/to/transforms.json \\
         --render-url http://localhost:8000 \\
         --host 0.0.0.0 \\
-        --port 50052
+        --port 50052 \\
+        --time-start 0.0 \\
+        --time-end 10.0
 """
 
 import argparse
@@ -287,7 +289,9 @@ def serve(
     render_server_url: str,
     host: str = "0.0.0.0",
     port: int = 50052,
-    max_workers: int = 10
+    max_workers: int = 10,
+    time_start: float = None,
+    time_end: float = None
 ) -> None:
     """
     Start gRPC server.
@@ -298,6 +302,8 @@ def serve(
         host: Server bind address
         port: Server port
         max_workers: Max concurrent RPC handlers
+        time_start: Start timestamp for scenario replay (optional)
+        time_end: End timestamp for scenario replay (optional)
     """
     # Create environment configuration
     config = {
@@ -309,6 +315,12 @@ def serve(
         # Disable onscreen rendering for server mode
         "offscreen_render": True,
     }
+
+    # Add time range constraints if provided
+    if time_start is not None:
+        config["time_start_sec"] = time_start
+    if time_end is not None:
+        config["time_end_sec"] = time_end
 
     # Create servicer
     servicer = StreetStudioServicer(config)
@@ -375,6 +387,18 @@ def main():
         default=10,
         help="Max concurrent RPC handlers (default: 10)"
     )
+    parser.add_argument(
+        "--time-start",
+        type=float,
+        default=None,
+        help="Start timestamp for scenario replay (default: scenario start time)"
+    )
+    parser.add_argument(
+        "--time-end",
+        type=float,
+        default=None,
+        help="End timestamp for scenario replay (default: scenario end time)"
+    )
     args = parser.parse_args()
 
     # Validate transforms path exists
@@ -388,7 +412,9 @@ def main():
         render_server_url=args.render_url,
         host=args.host,
         port=args.port,
-        max_workers=args.max_workers
+        max_workers=args.max_workers,
+        time_start=args.time_start,
+        time_end=args.time_end
     )
 
     return 0

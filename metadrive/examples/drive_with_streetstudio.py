@@ -396,6 +396,18 @@ def main():
         help="Path to save Gaussian render video (default: gaussian_render.mp4)",
     )
     parser.add_argument("--no-gaussian-video", action="store_true", help="Disable Gaussian render video generation")
+    parser.add_argument(
+        "--time-start",
+        type=float,
+        default=None,
+        help="Start time in seconds (default: use first available timestamp)",
+    )
+    parser.add_argument(
+        "--time-end",
+        type=float,
+        default=None,
+        help="End time in seconds (default: use last available timestamp)",
+    )
     args = parser.parse_args()
 
     print(f"Loading StreetStudio scenario from: {args.transforms}")
@@ -424,6 +436,16 @@ def main():
             "policy": ReplayPolicy,
         },
     }
+
+    # Add time range if specified
+    if args.time_start is not None:
+        config["time_start_sec"] = args.time_start
+    if args.time_end is not None:
+        config["time_end_sec"] = args.time_end
+
+    # Print time range info
+    if args.time_start is not None or args.time_end is not None:
+        print(f"Time range: {args.time_start}s - {args.time_end}s")
 
     # Create environment
     env = StreetStudioScenarioEnv(config)

@@ -10,7 +10,7 @@ from pathlib import Path
 import numpy as np
 
 from metadrive.manager.scenario_data_manager import ScenarioDataManager
-from metadrive.utils.streetstudio_utils import sec_to_us, parse_instances_data, SceneTransform
+from metadrive.utils.streetstudio_utils import sec_to_us, us_to_sec, parse_instances_data, SceneTransform
 
 
 class StreetStudioDataManager(ScenarioDataManager):
@@ -55,9 +55,47 @@ class StreetStudioDataManager(ScenarioDataManager):
         # Convert ego_poses: {sec: pose_4x4} -> {us: pose_4x4}
         ego_poses = {sec_to_us(float(ts)): np.array(pose) for ts, pose in data["sim_data"]["egos_data"].items()}
 
-        # Get timestamp range
+        # Get timestamp range from ego_poses
         timestamps = sorted(ego_poses.keys())
-        timestamp_range = [timestamps[0], timestamps[-1]]
+        original_start, original_end = timestamps[0], timestamps[-1]
+
+        # Apply time range filtering if specified in config
+        time_start_sec = self.base_config.get("time_start_sec")
+        time_end_sec = self.base_config.get("time_end_sec")
+
+        if time_start_sec is not None or time_end_sec is not None:
+            # Convert to microseconds
+            requested_start = sec_to_us(time_start_sec) if time_start_sec is not None else original_start
+            requested_end = sec_to_us(time_end_sec) if time_end_sec is not None else original_end
+
+            # Clip to available range and warn if needed
+            clipped = False
+            if requested_start < original_start:
+                requested_start = original_start
+                clipped = True
+            if requested_end > original_end:
+                requested_end = original_end
+                clipped = True
+
+            if clipped:
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.warning(
+                    f"Time range clipped to available data: "
+                    f"[{us_to_sec(original_start):.2f}s, {us_to_sec(original_end):.2f}s]"
+                )
+
+            timestamp_range = [requested_start, requested_end]
+        else:
+            # Use full range
+            timestamp_range = [original_start, original_end]
+
+        # Filter ego_poses to only include timestamps in range
+        start_ts, end_ts = timestamp_range
+        ego_poses = {
+            ts: pose for ts, pose in ego_poses.items()
+            if start_ts <= ts < end_ts
+        }
 
         # Camera parameters - normalize format for GaussianObservation
         # Convert list format to torch.Tensor for ego2camera and K
@@ -130,6 +168,25 @@ class StreetStudioDataManager(ScenarioDataManager):
 
         # Store dataset_transforms for rendering coordinate conversion
         self._dataset_transforms = dataset_transforms
+
+        # Filter tracking data (participants) by time range
+        # This is done after coordinate transform but before metadata restructuring
+        time_start_sec = self.base_config.get("time_start_sec")
+        time_end_sec = self.base_config.get("time_end_sec")
+
+        if time_start_sec is not None or time_end_sec is not None:
+            # Get filtered timestamp range from ego_poses
+            timestamps = sorted(ego_poses.keys())
+            if len(timestamps) > 0:
+                start_ts = timestamps[0]
+                end_ts = timestamps[-1]
+
+                # Filter each participant's poses
+                for uid, participant in tracking_data.items():
+                    participant["poses"] = {
+                        ts: pose for ts, pose in participant["poses"].items()
+                        if start_ts <= ts < end_ts
+                    }
 
         # Apply inverse transform to poses: normalized -> real (for simulation)
         if dataset_transforms:

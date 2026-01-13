@@ -97,6 +97,8 @@ class ScenarioDataManager(BaseManager):
                 traj = Trajectory(ego_poses)
             else:
                 org_ts_list = sorted(int(ts) for ts in tracking['poses'].keys())
+                if not org_ts_list:
+                    continue
                 def round_to_scene_ts(value):
                     return min(scene_timestamp_list, key=lambda ts: abs(ts - value))
                 rounded_start = round_to_scene_ts(org_ts_list[0])

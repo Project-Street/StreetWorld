@@ -101,6 +101,13 @@ BASE_DEFAULT_CONFIG = dict(
     curriculum_level=1,
     num_workers=1,
 
+    # ===== Time Segment Selection =====
+    # Time segment selection in seconds (optional)
+    # If set, only load data within this time range [start, end)
+    # Automatically clipped to available timestamp range
+    time_start_sec=None,  # Start time in seconds (None = use first available timestamp)
+    time_end_sec=None,  # End time in seconds (None = use last available timestamp)
+
     # ===== Terrain =====
     # The size of the square map region, which is centered at [0, 0]. The map objects outside it are culled.
     map_region_size=2048,
