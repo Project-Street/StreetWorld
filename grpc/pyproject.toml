@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "streetworld-grpc"
+version = "0.1.0"
+description = "gRPC API package for StreetWorld OnSite protocol"
+readme = "README.md"
+requires-python = ">=3.9"
+
+dependencies = ["grpcio", "grpcio-tools", "protobuf"]
+
+[project.optional-dependencies]
+server = ["grpcio-tools<1.49", "protobuf==3.19.4"] # Compatible for trajdata
+
+[tool.setuptools.packages.find]
+include = ["streetworld_grpc*"]
+
+[tool.setuptools.package-data]
+"*" = ["*.proto", "*.py"]

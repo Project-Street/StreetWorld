@@ -1,0 +1,27 @@
+syntax = "proto3";
+
+package streetworld.streetstudio;
+
+import "control.proto";
+import "common.proto";
+
+// Reset request
+message ResetRequest {
+    string transforms_json_path = 1;
+    string render_server_url = 2;  // HTTP address of Gaussian renderer
+}
+
+// Reset response
+message ResetResponse {
+    bool success = 1;
+    string message = 2;
+    string scene_name = 3;
+    repeated CameraImage images = 4;  // Initial observation images
+    ObservationInfo info = 5;  // Initial observation info
+}
+
+// Service definition
+service StreetStudioService {
+    rpc Reset(ResetRequest) returns (ResetResponse);
+    rpc Step(StepRequest) returns (StepResponse);
+}

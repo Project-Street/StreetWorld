@@ -1,0 +1,74 @@
+syntax = "proto3";
+
+package streetworld.streetstudio;
+
+// Image data for a single camera frame
+message CameraImage {
+    string camera_name = 1;
+    bytes image_data = 2;  // Raw RGB bytes (H * W * 3)
+    int32 height = 3;
+    int32 width = 4;
+}
+
+// Camera intrinsic parameters
+message CameraIntrinsic {
+    double fovx = 1;
+    double fovy = 2;
+    int32 height = 3;
+    int32 width = 4;
+    double cx = 5;
+    double cy = 6;
+}
+
+// Matrix (row-major flattened)
+message Matrix {
+    repeated double data = 1;  // Flattened matrix elements
+    int32 rows = 2;
+    int32 cols = 3;
+}
+
+// Complete camera parameters for UniAD
+message CameraParams {
+    string camera_name = 1;
+    CameraIntrinsic intrinsic = 2;
+    Matrix l2c = 3;          // LiDAR to camera (4x4)
+    Matrix ego2camera = 4;   // Ego to camera (4x4)
+    Matrix K = 5;            // Intrinsic matrix (3x3)
+    Matrix w2c = 6;          // World to camera (4x4)
+}
+
+// Observation info (metadata without images)
+message ObservationInfo {
+    // Ego position
+    double ego_pos_x = 1;
+    double ego_pos_y = 2;
+    double ego_pos_z = 3;
+
+    // Ego rotation (Euler angles)
+    double ego_rot_x = 4;
+    double ego_rot_y = 5;
+    double ego_rot_z = 6;
+
+    // Ego velocity
+    double ego_velo = 7;
+    double ego_steer = 8;
+
+    // Timestamp (seconds)
+    double timestamp = 9;
+
+    // Command: 0=left, 1=right, 2=straight
+    int32 command = 10;
+
+    // Expert path waypoints (Nx2 array flattened)
+    repeated double expert_path = 11;
+
+    // Additional fields for UniAD
+    repeated double linear_velocity = 12;      // [vx, vy, vz]
+    repeated double linear_acceleration = 13;  // [ax, ay, az]
+    repeated double angular_velocity = 14;     // [wx, wy, wz]
+    double accelerate = 15;
+    double steer_rate = 16;
+
+    // Camera parameters for all cameras
+    repeated CameraParams camera_params = 17;
+}
