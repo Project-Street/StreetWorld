@@ -488,7 +488,11 @@ class ScenarioEnv(BaseEnv):
         if norm < 1e-6:
             return None
         return target_vec / norm
-
+    def close(self):
+        """Close the environment and clean up resources."""
+        if hasattr(self, "engine") and self.engine is not None:
+            self.engine.close()
+            
 class ScenarioOnlineEnv(ScenarioEnv):
     """
     This environment allow the user to pass in scenario data directly.
