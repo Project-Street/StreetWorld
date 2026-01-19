@@ -75,9 +75,9 @@ class SharpVideoSimulatorInterface:
         self.fg_gaussians_path = cfg['fg_gaussians_path']
         self.bg_gaussians_path = cfg['bg_gaussians_path']
 
-        # Round to nearest timestamp at interval of 100 microseconds
-        rounded_timestamp = self.current_timestamp - (self.current_timestamp % 100) if self.current_timestamp % 100 < 50 else min(self.current_timestamp + (100 - self.current_timestamp % 100), self.end_timestamp)
-        rounded_timestamp = int(rounded_timestamp // 100)
+        # Round to nearest timestamp at interval of 100_000 microseconds
+        rounded_timestamp = min(self.current_timestamp - (self.current_timestamp % 100000), self.end_timestamp) if self.current_timestamp % 100000 < 50000 else min(self.current_timestamp + (100000 - self.current_timestamp % 100000), self.end_timestamp)
+        rounded_timestamp = int(rounded_timestamp // 100000)
         
         LOGGER.info("   -> Loading foreground Gaussians from %s at timestamp %d", self.fg_gaussians_path, rounded_timestamp)
         fg_gaussians_file = f"{self.fg_gaussians_path}/frame_{rounded_timestamp:06d}.ply"
@@ -98,17 +98,18 @@ class SharpVideoSimulatorInterface:
         :param object_poses: (dict): Current poses of dynamic objects
         """
         # MARK: Time stamp here seems 1 indexed.
-        new_timestamp = timestamp - 100 if timestamp - 100 >= 0 else 0
+        new_timestamp = timestamp - 100000 if timestamp - 100000 >= 0 else 0
         if new_timestamp == self.current_timestamp:
             return
         self.current_timestamp = new_timestamp
 
-        # Round to nearest timestamp at interval of 100 microseconds
-        rounded_timestamp = self.current_timestamp - (self.current_timestamp % 100) if self.current_timestamp % 100 < 50 else min(self.current_timestamp + (100 - self.current_timestamp % 100), cfg['end_time'])
-        rounded_timestamp = int(rounded_timestamp // 100)
+        # Round to nearest timestamp at interval of 100_000 microseconds
+        print("Current timestamp: ", self.current_timestamp)
+        rounded_timestamp = min(self.current_timestamp - (self.current_timestamp % 100000), self.end_timestamp) if self.current_timestamp % 100000 < 50000 else min(self.current_timestamp + (100000 - self.current_timestamp % 100000), self.end_timestamp)
+        rounded_timestamp = int(rounded_timestamp // 100000)
         
         fg_gaussians_file = f"{self.fg_gaussians_path}/frame_{rounded_timestamp:06d}.ply"
-        LOGGER.info("   -> Updating foreground Gaussians to timestamp %d, from %s", rounded_timestamp, fg_gaussians_file)
+        # LOGGER.info("   -> Updating foreground Gaussians to timestamp %d, from %s", rounded_timestamp, fg_gaussians_file)
         self.fg_gaussians = load_from_ply(fg_gaussians_file).to(device='cuda')
     
     def render(self, K, H, W, extrinsics, timestamp_us=None) -> np.ndarray:
@@ -141,6 +142,15 @@ class SharpVideoSimulatorInterface:
         else:
             extrinsics_4x4 = extrinsics.float()
         
+        axes_transformation = np.array([
+            [0, 0, 1, 0],
+            [-1, 0, 0, 0],
+            [0, -1, 0, 0],
+            [0, 0, 0, 1]
+        ])
+
+        extrinsics_4x4 = torch.tensor(np.linalg.inv(axes_transformation)).float() @ extrinsics_4x4
+
         rendering_result = render_frame(
             fg_gaussians=self.fg_gaussians,
             bg_gaussians=self.bg_gaussians,
@@ -207,14 +217,23 @@ class SharpVideoSimulatorInterface:
         c2w_data = np.load(c2w_path, allow_pickle=True).item()
         
         num_frames = len(c2w_data)
-        timestamp_interval = 100 # 100 microseconds interval
+        timestamp_interval = 100_000 # 100_000 microseconds interval
 
         LOGGER.info("   -> Found %d frames in c2w data", num_frames)
         LOGGER.info("   -> Assume %d microseconds interval between frames", timestamp_interval)
 
+        axes_transformation = np.array([
+            [0, 0, 1, 0],
+            [-1, 0, 0, 0],
+            [0, -1, 0, 0],
+            [0, 0, 0, 1]
+        ])
+
         ego_poses = {} # timestamp -> 4x4 pose matrix
         for frame_idx in range(num_frames):
             timestamp = frame_idx * timestamp_interval
+            # print(c2w_data[f'{frame_idx:06d}'].shape)
             c2w = c2w_data[f'{frame_idx:06d}']
-            ego_poses[timestamp] = c2w['e2w'].astype(np.float32)
+            c2w = axes_transformation @ c2w['e2w']
+            ego_poses[timestamp] = c2w.astype(np.float32)
         return ego_poses

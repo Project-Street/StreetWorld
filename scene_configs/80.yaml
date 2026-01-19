@@ -1,7 +1,7 @@
 scene_name: 80
 
 start_time: 0
-end_time: 9900
+end_time: 9900000
 
 camera_rig_path: /nas2/home/jrguo/CarCrash/data/WOD-E2E-debug/80/camera.npz
 c2w_path: /nas2/home/jrguo/CarCrash/submodules/ml-sharp/cam_dict.npy
