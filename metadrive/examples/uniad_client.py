@@ -16,6 +16,11 @@ import argparse
 from pathlib import Path
 from typing import Dict, List, Tuple
 import sys
+RL_FRAMEWORK_ROOT="../../"
+sys.path.insert(0, str(RL_FRAMEWORK_ROOT))
+import os
+os.environ['no_proxy'] = '127.0.0.1,localhost'
+from rl_framework.rl_modules.closeLoop import create_uniad
 
 import grpc
 import numpy as np
@@ -56,7 +61,12 @@ class UniADClient:
         self.port = port
 
         # Create gRPC channel and stub
-        self.channel = grpc.insecure_channel(f"{host}:{port}")
+        self.channel = grpc.insecure_channel(
+            f"{host}:{port}",
+            options = [
+                ('grpc.max_send_message_length', 200 * 1024 * 1024),
+                ('grpc.max_receive_message_length', 200 * 1024 * 1024),
+            ])
         self.stub = service_pb2_grpc.StreetStudioServiceStub(self.channel)
 
         # Initialize UniAD model
@@ -74,7 +84,11 @@ class UniADClient:
         }
 
         # Camera set to use for UniAD
-        self.cameras = {'FRONT', 'FRONT_LEFT', 'FRONT_RIGHT', 'BACK', 'BACK_LEFT', 'BACK_RIGHT'}
+        self.cameras = {'camera_1', 'camera_0', 'camera_2', 'camera_5', 'camera_6', 'camera_7'}
+        # self.cameras = {'FRONT', 'FRONT_LEFT', 'FRONT_RIGHT', 'BACK', 'BACK_LEFT', 'BACK_RIGHT'}
+
+        # Record current scene name
+        self.scene_name = None
 
     def _create_uniad(self, config: dict):
         """Create UniAD model from config."""
@@ -170,7 +184,7 @@ class UniADClient:
             results = self.uniad(
                 return_loss=False,
                 rescale=True,
-                feature_extractor=False,
+                # feature_extractor=False,
                 **raw_data
             )
             plan_traj = results[0]['planning']['result_planning']['sdc_traj'][0]
@@ -195,12 +209,15 @@ class UniADClient:
         """Parse ResetResponse to obs_img and obs_info."""
         obs_img = self._parse_images(response.images)
         obs_info = self._parse_obs_info(response.info)
+        obs_info['scene_token'] = response.scene_name
+        self.scene_name = response.scene_name
         return obs_img, obs_info
 
     def _parse_step_response(self, response: control_pb2.StepResponse) -> Tuple[Dict, Dict]:
         """Parse StepResponse to obs_img and obs_info."""
         obs_img = self._parse_images(response.images)
         obs_info = self._parse_obs_info(response.info)
+        obs_info['scene_token'] = self.scene_name
         return obs_img, obs_info
 
     def _parse_images(self, images: List[common_pb2.CameraImage]) -> Dict[str, np.ndarray]:
@@ -298,12 +315,12 @@ def main():
     parser = argparse.ArgumentParser(
         description="UniAD client for remote StreetStudio environment"
     )
-    parser.add_argument(
-        "--uniad-config",
-        type=str,
-        required=True,
-        help="Path to UniAD configuration JSON"
-    )
+    # parser.add_argument(
+    #     "--uniad-config",
+    #     type=str,
+    #     required=True,
+    #     help="Path to UniAD configuration JSON"
+    # )
     parser.add_argument(
         "--host",
         type=str,
@@ -332,9 +349,14 @@ def main():
     args = parser.parse_args()
 
     # Load UniAD config
-    import json
-    with open(args.uniad_config, 'r') as f:
-        uniad_config = json.load(f)
+    # import json
+    # with open(args.uniad_config, 'r') as f:
+    #     uniad_config = json.load(f)
+    uniad_config = {
+        'config_path': "/nas2/home/jrguo/CarCrash/submodules/StreetWorld/UniAD_SIM/projects/configs/stage2_e2e/base_e2e.py",
+        'checkpoint_path': "/nas2/home/jrguo/CarCrash/submodules/FT_ADPolicy/UniAD_SIM/ckpts/uniad_base_e2e.pth",
+        'device': 'cuda:0'
+    }
 
     # Create client
     client = UniADClient(
@@ -343,6 +365,10 @@ def main():
         port=args.port
     )
 
+    # Initialize FrameRecorder for visualization
+    from drive_with_streetstudio import GaussianFrameRecorder
+    gaussian_recorder = GaussianFrameRecorder(output_path='./driving_uniad.mp4', fps=10)
+    
     try:
         # Reset environment
         print("Resetting environment...")
@@ -360,6 +386,8 @@ def main():
         reward_sum = 0.0
         for step in range(1, args.steps + 1):
             obs_img, reward, terminated, truncated, obs_info = client.step(action)
+            gaussian_recorder.update_frame((obs_img, obs_info))
+            
             reward_sum += reward
 
             # Run UniAD inference
@@ -367,7 +395,7 @@ def main():
             steer, acc = traj2control(plan_traj, obs_info)
             action = [steer, acc]
 
-            if step % 10 == 0:
+            if step % 1 == 0:
                 print(f"Step {step}: reward={reward:.2f}, steer={steer:.4f}, acc={acc:.4f}")
 
             if terminated or truncated:
@@ -375,7 +403,8 @@ def main():
                 break
 
         print(f"Total reward: {reward_sum:.2f}")
-
+        gaussian_recorder.save_video()
+        
     finally:
         client.close()
 
