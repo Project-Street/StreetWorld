@@ -84,7 +84,7 @@ class UniADClient:
         }
 
         # Camera set to use for UniAD
-        self.cameras = {'camera_1', 'camera_0', 'camera_2', 'camera_5', 'camera_6', 'camera_7'}
+        self.cameras = {'camera_1', 'camera_0', 'camera_2', 'camera_7', 'camera_6', 'camera_5'}
         # self.cameras = {'FRONT', 'FRONT_LEFT', 'FRONT_RIGHT', 'BACK', 'BACK_LEFT', 'BACK_RIGHT'}
 
         # Record current scene name
@@ -354,7 +354,7 @@ def main():
     #     uniad_config = json.load(f)
     uniad_config = {
         'config_path': "/nas2/home/jrguo/CarCrash/submodules/StreetWorld/UniAD_SIM/projects/configs/stage2_e2e/base_e2e.py",
-        'checkpoint_path': "/nas2/home/jrguo/CarCrash/submodules/FT_ADPolicy/UniAD_SIM/ckpts/uniad_base_e2e.pth",
+        'checkpoint_path': "/nas2/home/jrguo/CarCrash/submodules/StreetWorld/UniAD_SIM/ckpts/uniad_base_e2e.pth",
         'device': 'cuda:0'
     }
 
@@ -378,7 +378,7 @@ def main():
         # Run UniAD inference for first step
         print("Running initial UniAD inference...")
         plan_traj = client.run_uniad_inference(obs_img, obs_info)
-        steer, acc = traj2control(plan_traj, obs_info)
+        acc, steer = traj2control(plan_traj, obs_info)
         action = [steer, acc]
         print(f"Initial action: steer={steer:.4f}, acc={acc:.4f}")
 
@@ -392,7 +392,7 @@ def main():
 
             # Run UniAD inference
             plan_traj = client.run_uniad_inference(obs_img, obs_info)
-            steer, acc = traj2control(plan_traj, obs_info)
+            acc, steer = traj2control(plan_traj, obs_info)
             action = [steer, acc]
 
             if step % 1 == 0:
