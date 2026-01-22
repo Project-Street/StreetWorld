@@ -318,14 +318,14 @@ def serve(
     # Create environment configuration
     config = {
         "scene_config_directory": scene_config_directory,
-        "physics_world_step_size": 100_000,
+        "physics_world_step_size": 10_000,
         "render_server_url": render_server_url,
         "use_render": False,  # No local rendering needed
         "manual_control": False,  # Server receives actions via gRPC
         "num_scenarios": -1, # Load all scenarios in the directory
         # Disable onscreen rendering for server mode
         "offscreen_render": True,
-        "decision_repeat": 1,
+        "decision_repeat": 10,
         # "actor_config": {
         #     "policy": ReplayPolicy,
         # },
