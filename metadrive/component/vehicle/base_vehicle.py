@@ -314,7 +314,6 @@ class BaseVehicle(BaseObject, BaseVehicleState):
         self.contact_results.update(contact_infos)
 
     def _is_crash_world(self, contact_points):
-        return False # Disable this
         wheel_centers = []
         for i in range(self.vehicle.getNumWheels()):
             wheel = self.vehicle.getWheel(i)

@@ -3,6 +3,9 @@ import yaml
 import numpy as np
 import logging
 import torch
+import os
+import json
+
 from render_essentials import render_frame, load_from_ply
 
 LOGGER = logging.getLogger(__name__)
@@ -25,6 +28,7 @@ class SharpVideoSimulatorInterface:
         self.bg_gaussians_path = None # ply path to background model
         self.fg_gaussians = None
         self.bg_gaussians = None
+        self.bg_gaussians_back = None
 
     def load_metadata(self, cfg_path) -> tuple:
         """
@@ -84,7 +88,11 @@ class SharpVideoSimulatorInterface:
         self.fg_gaussians = load_from_ply(fg_gaussians_file).to(device='cuda')
         
         LOGGER.info("   -> Loading background Gaussians from %s", self.bg_gaussians_path)
-        self.bg_gaussians = load_from_ply(self.bg_gaussians_path).to(device='cuda')
+        if os.path.isdir(self.bg_gaussians_path):
+            self.bg_gaussians = load_from_ply(os.path.join(self.bg_gaussians_path, 'background_front.ply')).to(device='cuda')
+            self.bg_gaussians_back = load_from_ply(os.path.join(self.bg_gaussians_path, 'background_back.ply')).to(device='cuda')
+        else:
+            self.bg_gaussians = load_from_ply(self.bg_gaussians_path).to(device='cuda')
 
         return None
     
@@ -128,7 +136,7 @@ class SharpVideoSimulatorInterface:
 
         if timestamp_us is not None and timestamp_us != self.current_timestamp:
             self.update_scene(timestamp_us, object_poses={})
-            LOGGER.info("Rendering at specified timestamp %d", timestamp_us)
+            # LOGGER.info("Rendering at specified timestamp %d", timestamp_us)
         # Prepare intrinsics, extrinsics, width, height
         if isinstance(K, list):
             intrinsics_4x4 = torch.eye(4).float()
@@ -151,14 +159,25 @@ class SharpVideoSimulatorInterface:
 
         extrinsics_4x4 = torch.tensor(np.linalg.inv(axes_transformation)).float() @ extrinsics_4x4
 
-        rendering_result = render_frame(
-            fg_gaussians=self.fg_gaussians,
-            bg_gaussians=self.bg_gaussians,
-            intrinsics=intrinsics_4x4.to(device='cuda'),
-            extrinsics=torch.inverse(extrinsics_4x4).to(device='cuda'),
-            width=W,
-            height=H,
-        )
+        if self.bg_gaussians_back is not None and H < 800:
+            # Back cameras
+            rendering_result = render_frame(
+                fg_gaussians=self.fg_gaussians,
+                bg_gaussians=self.bg_gaussians_back,
+                intrinsics=intrinsics_4x4.to(device='cuda'),
+                extrinsics=torch.inverse(extrinsics_4x4).to(device='cuda'),
+                width=W,
+                height=H,
+            )
+        else:
+            rendering_result = render_frame(
+                fg_gaussians=self.fg_gaussians,
+                bg_gaussians=self.bg_gaussians,
+                intrinsics=intrinsics_4x4.to(device='cuda'),
+                extrinsics=torch.inverse(extrinsics_4x4).to(device='cuda'),
+                width=W,
+                height=H,
+            )
 
         return rendering_result['rgb']
 

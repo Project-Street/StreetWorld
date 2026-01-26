@@ -1,0 +1,144 @@
+diff --git a/projects/mmdet3d_plugin/uniad/dense_heads/planning_head.py b/projects/mmdet3d_plugin/uniad/dense_heads/planning_head.py
+index 6ac3b2c..a691658 100644
+--- a/projects/mmdet3d_plugin/uniad/dense_heads/planning_head.py
++++ b/projects/mmdet3d_plugin/uniad/dense_heads/planning_head.py
+@@ -99,6 +99,7 @@ class PlanningHeadSingleMode(nn.Module):
+                       sdc_planning_mask=None,
+                       command=None,
+                       gt_future_boxes=None,
++                      feature_extractor=False,
+                       ):
+         """
+         Perform forward planning training with the given inputs.
+@@ -121,19 +122,20 @@ class PlanningHeadSingleMode(nn.Module):
+ 
+         occ_mask = None
+         
+-        outs_planning = self(bev_embed, occ_mask, bev_pos, sdc_traj_query, sdc_track_query, command)
++        outs_planning = self(bev_embed, occ_mask, bev_pos, sdc_traj_query, sdc_track_query, command, feature_extractor=feature_extractor)
+         loss_inputs = [sdc_planning, sdc_planning_mask, outs_planning, gt_future_boxes]
+         losses = self.loss(*loss_inputs)
+         ret_dict = dict(losses=losses, outs_motion=outs_planning)
+         return ret_dict
+ 
+-    def forward_test(self, bev_embed, outs_motion={}, outs_occflow={}, command=None):
++    def forward_test(self, bev_embed, outs_motion={}, outs_occflow={}, command=None, feature_extractor=False):
+         sdc_traj_query = outs_motion['sdc_traj_query']
+         sdc_track_query = outs_motion['sdc_track_query']
+         bev_pos = outs_motion['bev_pos']
+         occ_mask = outs_occflow['seg_out']
+         
+-        outs_planning = self(bev_embed, occ_mask, bev_pos, sdc_traj_query, sdc_track_query, command)
++        outs_planning = self(bev_embed, occ_mask, bev_pos, sdc_traj_query, sdc_track_query, command, feature_extractor=feature_extractor)
++        
+         return outs_planning
+ 
+     def forward(self, 
+@@ -142,7 +144,8 @@ class PlanningHeadSingleMode(nn.Module):
+                 bev_pos, 
+                 sdc_traj_query, 
+                 sdc_track_query, 
+-                command):
++                command,
++                feature_extractor=False):
+         """
+         Forward pass for PlanningHeadSingleMode.
+ 
+@@ -162,7 +165,6 @@ class PlanningHeadSingleMode(nn.Module):
+         P = sdc_traj_query.shape[1]
+         sdc_track_query = sdc_track_query[:, None].expand(-1,P,-1)
+         
+-        
+         navi_embed = self.navi_embed.weight[command]
+         navi_embed = navi_embed[None].expand(-1,P,-1)
+         plan_query = torch.cat([sdc_traj_query, sdc_track_query, navi_embed], dim=-1)
+@@ -172,6 +174,13 @@ class PlanningHeadSingleMode(nn.Module):
+         
+         bev_pos = rearrange(bev_pos, 'b c h w -> (h w) b c')
+         bev_feat = bev_embed +  bev_pos
++
++        pos_embed = self.pos_embed.weight
++        plan_query = plan_query + pos_embed[None]  # [1, 1, 256]
++
++        if feature_extractor:
++            outs_planning = dict(plan_query=plan_query, bev_feat=bev_feat)
++            return outs_planning
+         
+         ##### Plugin adapter #####
+         if self.with_adapter:
+@@ -179,9 +188,6 @@ class PlanningHeadSingleMode(nn.Module):
+             bev_feat = bev_feat + self.bev_adapter(bev_feat)  # residual connection
+             bev_feat = rearrange(bev_feat, 'b c h w -> (h w) b c')
+         ##########################
+-      
+-        pos_embed = self.pos_embed.weight
+-        plan_query = plan_query + pos_embed[None]  # [1, 1, 256]
+         
+         # plan_query: [1, 1, 256]
+         # bev_feat: [40000, 1, 256]
+diff --git a/projects/mmdet3d_plugin/uniad/detectors/uniad_e2e.py b/projects/mmdet3d_plugin/uniad/detectors/uniad_e2e.py
+index 556c2c0..5961b0a 100644
+--- a/projects/mmdet3d_plugin/uniad/detectors/uniad_e2e.py
++++ b/projects/mmdet3d_plugin/uniad/detectors/uniad_e2e.py
+@@ -67,7 +67,7 @@ class UniAD(UniADTrack):
+         dummy_metas = None
+         return self.forward_test(img=img, img_metas=[[dummy_metas]])
+ 
+-    def forward(self, return_loss=True, **kwargs):
++    def forward(self, return_loss=True, feature_extractor=False, **kwargs):
+         """Calls either forward_train or forward_test depending on whether
+         return_loss=True.
+         Note this setting will change the expected inputs. When
+@@ -78,14 +78,15 @@ class UniAD(UniADTrack):
+         augmentations.
+         """
+         if return_loss:
+-            return self.forward_train(**kwargs)
++            return self.forward_train(feature_extractor=feature_extractor, **kwargs)
+         else:
+-            return self.forward_test(**kwargs)
++            return self.forward_test(feature_extractor=feature_extractor, **kwargs)
+         
+ 
+     # Add the subtask loss to the whole model loss
+     @auto_fp16(apply_to=('img', 'points'))
+     def forward_train(self,
++                      feature_extractor=False,
+                       img=None,
+                       img_metas=None,
+                       gt_bboxes_3d=None,
+@@ -233,6 +234,7 @@ class UniAD(UniADTrack):
+         return loss_dict
+ 
+     def forward_test(self,
++                     feature_extractor=False,
+                      img=None,
+                      img_metas=None,
+                      l2g_t=None,
+@@ -243,7 +245,6 @@ class UniAD(UniADTrack):
+                     ):
+         """Test function
+         """
+-        # import ipdb; ipdb.set_trace()
+         for var, name in [(img_metas, 'img_metas')]:
+             if not isinstance(var, list):
+                 raise TypeError('{} must be a list, but got {}'.format(
+@@ -305,7 +306,10 @@ class UniAD(UniADTrack):
+             result[0]['occ'] = outs_occ
+         
+         if self.with_planning_head:
+-            result_planning = self.planning_head.forward_test(bev_embed, outs_motion, outs_occ, command)
++            result_planning = self.planning_head.forward_test(bev_embed, outs_motion, outs_occ, command, feature_extractor=feature_extractor)
++            if feature_extractor:
++                return result_planning
++                
+             result[0]['planning'] = dict(
+                 result_planning=result_planning,
+             )
+@@ -341,4 +345,4 @@ def pop_elem_in_result(task_result:dict, pop_list:list=None):
+     if pop_list is not None:
+         for pop_k in pop_list:
+             task_result.pop(pop_k, None)
+-    return task_result
++    return task_result
+\ No newline at end of file

@@ -1,5 +1,7 @@
 # StreetWorld
 
+> This code integrates rl training framework and sharp-video scenes.
+
 StreetWorld is an open-source driving simulator built on MetaDrive, integrating Gaussian Splatting rendering for photorealistic visualization. It supports loading real-world driving scenarios, remote visualization in client/server mode, and reinforcement learning training.
 
 ## Features
@@ -48,6 +50,14 @@ Load and replay scenarios from StreetStudio transforms.json:
 ```bash
 mamba run -n st-world python -m metadrive.examples.drive_with_streetstudio \
   --transforms /path/to/transforms.json
+```
+
+## RL Training
+
+To train UniAD with RL, please apply the patch to UniAD_SIM submodule.
+
+```bash
+cd UniAD_SIM && git apply ../uniad.patch
 ```
 
 ## gRPC Mode
