@@ -21,7 +21,6 @@ from metadrive.obs.observation_base import BaseObservation
 from metadrive.obs.gaussian_obs import GaussianObservation
 from metadrive.obs.observation_base import DummyObservation
 # from metadrive.obs.state_obs import LidarStateObservation
-from metadrive.scenario.utils import convert_recorded_scenario_exported
 from metadrive.utils import merge_dicts, get_np_random, concat_step_infos
 from metadrive.utils.logger import get_logger, reset_logger
 from metadrive.engine.core.physics_world import PhysicsWorld
@@ -32,7 +31,7 @@ from metadrive.version import VERSION
 from metadrive.component.traffic_participants.cyclist import Cyclist
 from metadrive.component.traffic_participants.pedestrian import Pedestrian
 from metadrive.component.vehicle.vehicle_type import get_vehicle_type
-from metadrive.manager.scenario_data_manager import ScenarioDataManager, ScenarioOnlineDataManager
+from metadrive.manager.scenario_data_manager import ScenarioDataManager
 from metadrive.manager.scenario_map_manager import ScenarioMapManager
 from metadrive.obs.navigation_obs import NavigationObservation
 from metadrive.obs.assembly_obs import AssemblyObservation
@@ -476,7 +475,7 @@ class BaseEnv(gym.Env):
             episode = self.engine.dump_episode()
             if verbose:
                 self.logger.info("Finish scenario {} with {} steps.".format(index, count))
-            scenarios_to_export[index] = convert_recorded_scenario_exported(episode, to_dict=to_dict)
+            scenarios_to_export[index] = episode
             done_info[index] = info
         self.config["record_episode"] = False
         if return_done_info:

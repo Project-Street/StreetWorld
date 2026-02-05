@@ -3,6 +3,7 @@ import json
 import torch
 import threading
 from typing import Union
+import time
 
 from cuda import cudart
 import glfw
@@ -12,7 +13,7 @@ import platform
 import OpenGL.GL as gl
 from imgui_bundle import imgui, imgui_toggle
 from glm import mat4, mat3, mat4x3, vec3
-from metadrive.utils.console_utils import *
+from easydrive.utils.console_utils import *
 from metadrive.viewer.client import Client
 from metadrive.viewer.server import WebSocketServer
 from metadrive.viewer.manual_controller import KeyboardController, get_controller
@@ -24,11 +25,13 @@ class Viewer:
         mode = 'local', # client, server, local
         host = None,
         port = None,
-        controller = 'keyboard'
+        controller = 'keyboard',
+        physics_dt=None
     ):
         self.H = H
         self.W = W
         self.mode = mode
+        self.physics_dt = physics_dt
             
         if self.mode == 'client':
             self.lock = threading.Lock()
@@ -40,6 +43,7 @@ class Viewer:
             self.server.run()
             
         self.window_title = 'Simple Visualizer'
+        self._last_run_time = None
 
         if self.mode in ['local', 'client']:
             self._init_glfw()
@@ -185,7 +189,7 @@ class Viewer:
         # imgui_md.get_font_loader_function()() # requires imgui_hello
     
     def _init_quad(self):
-        from metadrive.utils.opengl_utils import Quad
+        from easydrive.utils.opengl_utils import Quad
         self.quad = Quad(H=self.H, W=self.W)  # will blit this texture to screen if rendered
 
     def _bind_callbacks(self):
@@ -194,8 +198,9 @@ class Viewer:
     def is_running(self):
         return not glfw.window_should_close(self.window) if self.mode in ['client', 'local'] else True
     
-    def run(self, img : Union[np.ndarray, torch.Tensor] = None):
+    def run(self, img: Union[np.ndarray, torch.Tensor] = None):
         if self.mode == 'server':
+            self._sleep_to_physics_dt()
             action = self._actuate_server(img)
             action = action if action else [0.0, 0.0] 
             return action
@@ -208,9 +213,20 @@ class Viewer:
                 self.last_image = img
             self._render(img)
         elif self.mode == 'local':
+            self._sleep_to_physics_dt()
             self._render(img)
             action = self.manual_controller.process_input()
             return action
+
+    def _sleep_to_physics_dt(self):
+        now = time.time()
+        if self._last_run_time is None:
+            self._last_run_time = now
+            return
+        delta_time = now - self._last_run_time
+        if delta_time < self.physics_dt:
+            time.sleep(self.physics_dt - delta_time)
+        self._last_run_time = time.time()
     
     def _render(self, img):
         gl.glClear(gl.GL_COLOR_BUFFER_BIT)
