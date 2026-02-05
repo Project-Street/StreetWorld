@@ -35,7 +35,15 @@ BASE_DEFAULT_CONFIG = dict(
                 observer_class=GaussianObservation,
                 clip_rgb=False,
                 stack_size=6,
-                cameras={}
+                # cameras={ # an example of selfdefined camera config
+                #     'front': {
+                #         'offset': [-2.65, 0, 1.8], # in ego frame (+x front)
+                #         'hpr': [180, 0, 0], # orientation
+                #         'H': 900,
+                #         'W': 1600,
+                #         'focal': 2500, # in pixel
+                #     }
+                # }
             ),
             navigation = dict(
                 observer_class=NavigationObservation,
