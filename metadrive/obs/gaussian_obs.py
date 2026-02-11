@@ -173,6 +173,7 @@ class GaussianObservation(BaseObservation):
                 W=params['W'],
                 extrinsics=extrinsics_c2w,
                 timestamp_us=timestamp_us,
+                meta=params.get('meta', {})
             )
             self.state[cam_name] = np.roll(self.state[cam_name], -1, axis=0)
             self.state[cam_name][-1] = ret

@@ -84,7 +84,10 @@ class UniADClient:
         }
 
         # Camera set to use for UniAD
-        self.cameras = {'camera_1', 'camera_0', 'camera_2', 'camera_7', 'camera_6', 'camera_5'}
+        # self.cameras = {'camera_0', 'camera_1', 'camera_2', 'camera_6', 'camera_5', 'camera_7'}
+
+        self.cameras = {'camera_0', 'camera_1', 'camera_2', 'camera_3', 'camera_4', 'camera_5'}
+        # self.cameras = {'camera_2', 'camera_0', 'camera_1', 'camera_5', 'camera_4', 'camera_3'}
         # self.cameras = {'FRONT', 'FRONT_LEFT', 'FRONT_RIGHT', 'BACK', 'BACK_LEFT', 'BACK_RIGHT'}
 
         # Record current scene name

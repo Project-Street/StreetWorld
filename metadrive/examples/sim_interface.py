@@ -10,6 +10,13 @@ from render_essentials import render_frame, load_from_ply
 
 LOGGER = logging.getLogger(__name__)
 
+Xfront2Y = np.array([
+    [ 0., -1.,  0., 0.],
+    [ 1.,  0.,  0., 0.],
+    [ 0. , 0.,  1., 0.],
+    [ 0., 0.,  0., 1.]
+])
+
 class SharpVideoSimulatorInterface:
     def __init__(self, zNear=0.0001, zFar=1000):
         """
@@ -47,19 +54,36 @@ class SharpVideoSimulatorInterface:
         timestamp_range = [cfg_text['start_time'], cfg_text['end_time']]
         self.end_timestamp = cfg_text['end_time']
 
-        camera_rig_path = cfg_text['camera_rig_path'] # Camera intrinsics and ego to camera extrinsics
-        camera_params = self._load_camera_rig(camera_rig_path)
+        camera_rig_config = cfg_text['camera_rig_config']
+        camera_params = self._load_camera_rig(camera_rig_config)
         cfg_text['camera_params'] = camera_params
 
         c2w_path = cfg_text['c2w_path']
         ego_poses = self._load_ego_pose(c2w_path)
         cfg_text['ego_poses'] = ego_poses
         
-        # TODO: We use dummy tracking data for now.
-        tracking_data = {}
-        # for i in range(len(ego_poses)):
-        #     timestamp = i * 100
-        #     tracking_data["1"]["poses"][timestamp] = np.eye(4)
+        with open(cfg_text['tracking_data_path'], 'r') as f:
+            tracking_data = json.load(f)
+        
+        # Scale timestamps to microseconds
+        for obj_id in tracking_data:
+            new_poses = {}
+            for ts_str, pose in tracking_data[obj_id]['poses'].items():
+                ts_us = int(int(ts_str) * 100000) # 1/10 seconds to microseconds
+
+                # The loaded size: (x, y, z) <-> (w, l, h).
+                # Convert from x front to y front
+                #   The loaded pose assumes x front, which is consistent with Bullet.
+                #   StreetGaussian expects y front, since StreetGaussian handles y front to x front internally for Bullet simulation.
+                #   The pose passed to Bullent is finally: pose = pose @ Xfornt2Y @ Yfront2X = pose
+                new_poses[ts_us] = np.array(pose) @ Xfront2Y
+            
+            tracking_data[obj_id]['poses'] = new_poses
+
+            # StreetGaussian expects (l,w,h) as size order.
+            tracking_data[obj_id]['size'] = [tracking_data[obj_id]['size'][i] * 0.7 for i in [1, 0, 2]] # (w,l,h) -> (l,w,h)
+            # print([s * 0.1 for s in tracking_data[obj_id]['size']])
+        # tracking_data = {}
 
         bk_ground_model_path = None
 
@@ -120,7 +144,7 @@ class SharpVideoSimulatorInterface:
         # LOGGER.info("   -> Updating foreground Gaussians to timestamp %d, from %s", rounded_timestamp, fg_gaussians_file)
         self.fg_gaussians = load_from_ply(fg_gaussians_file).to(device='cuda')
     
-    def render(self, K, H, W, extrinsics, timestamp_us=None) -> np.ndarray:
+    def render(self, K, H, W, extrinsics, timestamp_us=None, meta=None) -> np.ndarray:
         """
         render
             - Render the scene from the given camera parameters
@@ -150,6 +174,7 @@ class SharpVideoSimulatorInterface:
         else:
             extrinsics_4x4 = extrinsics.float()
         
+        # StreetGaussian uses z up, while gaussians are in -y up.
         axes_transformation = np.array([
             [0, 0, 1, 0],
             [-1, 0, 0, 0],
@@ -159,7 +184,7 @@ class SharpVideoSimulatorInterface:
 
         extrinsics_4x4 = torch.tensor(np.linalg.inv(axes_transformation)).float() @ extrinsics_4x4
 
-        if self.bg_gaussians_back is not None and H < 800:
+        if self.bg_gaussians_back is not None and meta is not None and meta.get("render_gaussian", "front") == "back":
             # Back cameras
             rendering_result = render_frame(
                 fg_gaussians=self.fg_gaussians,
@@ -181,8 +206,14 @@ class SharpVideoSimulatorInterface:
 
         return rendering_result['rgb']
 
-    def _load_camera_rig(self, camera_rig_path):
+    def _load_camera_rig(self, camera_rig_config):
         """Load camera intrinsics and extrinsics from the rig file."""
+        camera_rig_path = camera_rig_config['camera_rig_path']
+        camera_rig_type = camera_rig_config.get('camera_rig_type', None)
+        front = camera_rig_config.get('front_camera', None)
+        Hs = camera_rig_config.get('Hs', None)
+        Ws = camera_rig_config.get('Ws', None)
+
         LOGGER.info("Loading camera parameters from %s", camera_rig_path)
         cameras_data = np.load(camera_rig_path)
         
@@ -193,17 +224,18 @@ class SharpVideoSimulatorInterface:
         c2e_array = cameras_data["extrinsics"]
         
         # Apply coordinate transformations (same as predict_multicam_combined.py)
-        axes_transformation = np.array([
-            [0, -1, 0, 0],
-            [0, 0, -1, 0],
-            [1, 0, 0, 0],
-            [0, 0, 0, 1]
-        ])
-        
-        c2e_array = np.linalg.inv(
-            np.array([[0, 1, 0, 0], [-1, 0, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]]) @ 
-            np.array([[0, 0, 1, 0], [0, 1, 0, 0], [-1, 0, 0, 0], [0, 0, 0, 1]])
-        ) @ c2e_array @ np.linalg.inv(axes_transformation)
+        if camera_rig_type == "waymo-e2e":
+            axes_transformation = np.array([
+                [0, -1, 0, 0],
+                [0, 0, -1, 0],
+                [1, 0, 0, 0],
+                [0, 0, 0, 1]
+            ])
+            
+            c2e_array = np.linalg.inv(
+                np.array([[0, 1, 0, 0], [-1, 0, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]]) @ 
+                np.array([[0, 0, 1, 0], [0, 1, 0, 0], [-1, 0, 0, 0], [0, 0, 0, 1]])
+            ) @ c2e_array @ np.linalg.inv(axes_transformation)
         
         self.num_cameras = len(intrinsics_array)
 
@@ -211,7 +243,6 @@ class SharpVideoSimulatorInterface:
     
         camera_param_dict = {} # camera_name -> ("K_3x3", "H", "W", "ego2camera")
 
-        Hs = [1087, 1087, 1087, 1087, 1087, 589, 589, 589] # Hardcoded for Waymo cameras
         for cam_idx in range(self.num_cameras):
             intrinsics = intrinsics_array[cam_idx]
             c2e = c2e_array[cam_idx]
@@ -219,14 +250,20 @@ class SharpVideoSimulatorInterface:
                               [0, intrinsics[1, 1], intrinsics[1, 2]],
                               [0, 0, 1]])
             H = Hs[cam_idx]
-            W = 986
+            W = Ws[cam_idx]
+
             ego2camera = np.linalg.inv(c2e)
             assert K_3x3.shape == (3, 3) and ego2camera.shape == (4, 4)
             camera_param_dict[f"camera_{cam_idx}"] = {
                 "K": K_3x3,
                 "H": H,
                 "W": W,
-                "ego2camera": ego2camera.astype(np.float32)
+                "ego2camera": ego2camera.astype(np.float32),
+                "meta":
+                    {
+                        "render_gaussian": "front" if cam_idx in front else "back",
+                        "camera_rig_type": camera_rig_type
+                    }
             }
         return camera_param_dict
     
@@ -241,6 +278,7 @@ class SharpVideoSimulatorInterface:
         LOGGER.info("   -> Found %d frames in c2w data", num_frames)
         LOGGER.info("   -> Assume %d microseconds interval between frames", timestamp_interval)
 
+        # StreetGaussian uses z up, while gaussians are in -y up.
         axes_transformation = np.array([
             [0, 0, 1, 0],
             [-1, 0, 0, 0],

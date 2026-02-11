@@ -3,9 +3,34 @@ scene_name: 80
 start_time: 0
 end_time: 9900000
 
-camera_rig_path: /nas2/home/jrguo/CarCrash/data/WOD-E2E-debug/80/camera.npz
+camera_rig_config:
+  # camera_rig_path: /nas2/home/jrguo/CarCrash/data/WOD-E2E-debug/80/camera.npz
+  # camera_rig_type: "waymo-e2e"
+  # front_camera: [0, 1, 2, 3, 4]
+  # Hs: [1087, 1087, 1087, 1087, 1087, 589, 589, 589]
+  # Ws: [986, 986, 986, 986, 986, 986, 986, 986]
+
+  camera_rig_path: /home/guojiarui/river/CarCrash/submodules/ml-sharp/nuscenes_camera_info.npz
+  camera_rig_type: "nuscenes"
+  front_camera: [0, 1, 2]
+  Hs: [900, 900, 900, 900, 900, 900]
+  Ws: [1600, 1600, 1600, 1600, 1600, 1600]
+
 c2w_path: /nas2/home/jrguo/CarCrash/submodules/ml-sharp/cam_dict.npy
 
-fg_gaussians_path: /nas2/home/jrguo/CarCrash/submodules/ml-sharp/output/incre-100-validprojbg+fg-da3mix-keepmaskfg-rgbbar0.01-alphabar0.9-dptbar50-opa0.01-wodptadd-bgmaskprune-wofloater/foreground
-bg_gaussians_path: /nas2/home/jrguo/CarCrash/submodules/ml-sharp/output/incre-100-validprojbg+fg-da3mix-keepmaskfg-rgbbar0.01-alphabar0.9-dptbar50-opa0.01-wodptadd-bgmaskprune-wofloater/background/background_post.ply
+fg_gaussians_path: /nas2/home/jrguo/CarCrash/submodules/ml-sharp/output/incre-100-validprojbg+fg-da3mix-sky-keepmaskfg-rgbbar0.01-alphabar0.9-dptbar50-opa0.01-wodptadd-bgmaskprune-wofloater/foreground
+bg_gaussians_path: /nas2/home/jrguo/CarCrash/submodules/ml-sharp/output/incre-100-validprojbg+fg-da3mix-sky-keepmaskfg-rgbbar0.01-alphabar0.9-dptbar50-opa0.01-wodptadd-bgmaskprune-wofloater/background
+
+tracking_data_path: /home/guojiarui/river/CarCrash/submodules/ml-sharp/bbox/centerpoint.json
+
+# scene_name: 1e6
+
+# start_time: 0
+# end_time: 9900000
+
+# camera_rig_path: /nas2/home/jrguo/CarCrash/data/WOD-E2E-seq/1e6ec4bc4ada213c5993bd94b37a75c3/camera.npz
+# c2w_path: /nas2/home/jrguo/CarCrash/submodules/ml-sharp/1e6ec4bc4ada213c5993bd94b37a75c3.npy
+
+# fg_gaussians_path: /nas2/home/jrguo/CarCrash/submodules/ml-sharp/output/1e6ec4bc4ada213c5993bd94b37a75c3/foreground
+# bg_gaussians_path: /nas2/home/jrguo/CarCrash/submodules/ml-sharp/output/1e6ec4bc4ada213c5993bd94b37a75c3/background/background.ply
 
