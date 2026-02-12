@@ -116,6 +116,8 @@ class StreetStudioServicer(service_pb2_grpc.StreetStudioServiceServicer):
                 )
 
             except Exception as e:
+                print(e)
+                raise e
                 return service_pb2.ResetResponse(
                     success=False,
                     message=f"Reset failed: {str(e)}",
@@ -144,7 +146,7 @@ class StreetStudioServicer(service_pb2_grpc.StreetStudioServiceServicer):
             try:
                 # Extract action from request
                 action = list(request.action)  # [steering, throttle]
-
+                print(f"Steering: {action[0]:.4f}, Throttle: {action[1]:.4f}")
                 # Step environment
                 obs, reward, terminated, truncated, info = self.env.step(action)
 

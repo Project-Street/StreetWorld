@@ -1,0 +1,65 @@
+diff --git a/.gitignore b/.gitignore
+index b6e4761..d2ce27a 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -1,3 +1,5 @@
++ckpts
++
+ # Byte-compiled / optimized / DLL files
+ __pycache__/
+ *.py[cod]
+diff --git a/projects/mmdet3d_plugin/VAD/VAD.py b/projects/mmdet3d_plugin/VAD/VAD.py
+index 61818a5..1f9697c 100644
+--- a/projects/mmdet3d_plugin/VAD/VAD.py
++++ b/projects/mmdet3d_plugin/VAD/VAD.py
+@@ -256,13 +256,13 @@ class VAD(MVXTwoStageDetector):
+     def forward_test(
+         self,
+         img_metas,
+-        gt_bboxes_3d,
+-        gt_labels_3d,
++        gt_bboxes_3d=None,
++        gt_labels_3d=None,
+         img=None,
+-        ego_his_trajs=None,
+-        ego_fut_trajs=None,
+-        ego_fut_cmd=None,
+-        ego_lcf_feat=None,
++        ego_his_trajs=[None],
++        ego_fut_trajs=[None],
++        ego_fut_cmd=[None],
++        ego_lcf_feat=[None],
+         gt_attr_labels=None,
+         **kwargs
+     ):
+@@ -315,8 +315,8 @@ class VAD(MVXTwoStageDetector):
+     def simple_test(
+         self,
+         img_metas,
+-        gt_bboxes_3d,
+-        gt_labels_3d,
++        gt_bboxes_3d=None,
++        gt_labels_3d=None,
+         img=None,
+         prev_bev=None,
+         points=None,
+@@ -357,8 +357,8 @@ class VAD(MVXTwoStageDetector):
+         self,
+         x,
+         img_metas,
+-        gt_bboxes_3d,
+-        gt_labels_3d,
++        gt_bboxes_3d=None,
++        gt_labels_3d=None,
+         prev_bev=None,
+         fut_valid_flag=None,
+         rescale=False,
+@@ -378,6 +378,8 @@ class VAD(MVXTwoStageDetector):
+ 
+         outs = self.pts_bbox_head(x, img_metas, prev_bev=prev_bev,
+                                   ego_his_trajs=ego_his_trajs, ego_lcf_feat=ego_lcf_feat)
++        # Skip bbox and metric computation.
++        return outs['bev_embed'], [{'ego_fut_preds': outs['ego_fut_preds'].cpu()}], None
+         bbox_list = self.pts_bbox_head.get_bboxes(outs, img_metas, rescale=rescale)
+ 
+         bbox_results = []
