@@ -15,6 +15,7 @@ import time
 from typing import Optional
 
 import numpy as np
+from google.protobuf.json_format import MessageToDict
 
 try:
     import grpc
@@ -23,9 +24,9 @@ except ImportError as exc:  # pragma: no cover - runtime dependency
 
 import libMulticastNetwork
 
-from metadrive.utils.onsite_proto.chassis.proto.chassis_enums_pb2 import VEHICLE_CONTROL
-from metadrive.utils.onsite_proto.chassis.proto.chassis_messages_pb2 import VehicleControl
-from metadrive.utils.onsite_proto.main.proto.enums_pb2 import (
+from metadrive.misc.onsite_middleware.onsite_proto.chassis.proto.chassis_enums_pb2 import VEHICLE_CONTROL
+from metadrive.misc.onsite_middleware.onsite_proto.chassis.proto.chassis_messages_pb2 import VehicleControl
+from metadrive.misc.onsite_middleware.onsite_proto.main.proto.enums_pb2 import (
     MT_NOTIFY,
     MT_ACTOR_PREPARE,
     MT_ACTOR_PREPARE_RESULT,
@@ -33,7 +34,7 @@ from metadrive.utils.onsite_proto.main.proto.enums_pb2 import (
     NT_ABORT_TEST,
     NT_FINISH_TEST,
 )
-from metadrive.utils.onsite_proto.main.proto.messages_pb2 import Notify, ActorPrepare, ActorPrepareResult
+from metadrive.misc.onsite_middleware.onsite_proto.main.proto.messages_pb2 import Notify, ActorPrepare, ActorPrepareResult
 
 from metadrive.utils.remote_viewer_proto import remote_viewer_pb2, remote_viewer_pb2_grpc
 
@@ -91,6 +92,18 @@ class OnSiteBridge:
         param.log_level = 1
         param.client_name = "apollo_testee"
         param.recv_self_msg = False
+        logger.debug(
+            "OnSite create_channels param=%s",
+            {
+                "config_center_addr": param.config_center_addr,
+                "local_ip": param.local_ip,
+                "net_interface_name": param.net_interface_name,
+                "field_id": param.field_id,
+                "log_level": param.log_level,
+                "client_name": param.client_name,
+                "recv_self_msg": param.recv_self_msg,
+            },
+        )
 
         channels = libMulticastNetwork.ChannelPtrVector()
         ret = libMulticastNetwork.create_channels(param, channels)
@@ -120,6 +133,16 @@ class OnSiteBridge:
             notify = Notify()
             data = libMulticastNetwork.getMessageData(msg)
             notify.ParseFromString(data)
+            logger.debug(
+                "OnSite RX channel=notify type=%s payload_bytes=%d payload=%s",
+                MT_NOTIFY,
+                len(data),
+                MessageToDict(
+                    notify,
+                    preserving_proto_field_name=True,
+                    use_integers_for_enums=True,
+                ),
+            )
 
             if notify.type in [NT_ABORT_TEST, NT_FINISH_TEST]:
                 logger.info("Finish session")
@@ -132,6 +155,13 @@ class OnSiteBridge:
                 self._start_test = True
             else:
                 logger.info("Notify: session=%s type=%s", notify.session_id, notify.type)
+        else:
+            logger.debug(
+                "OnSite RX channel=notify unexpected_type=%s ret=%s expected_type=%s",
+                None if msg is None else msg.type(),
+                ret,
+                MT_NOTIFY,
+            )
 
     def _get_prepare(self) -> None:
         ret, msg = self._prepare_channel.get()
@@ -142,11 +172,28 @@ class OnSiteBridge:
             data = libMulticastNetwork.getMessageData(msg)
             prepare_msg = ActorPrepare()
             prepare_msg.ParseFromString(data)
+            logger.debug(
+                "OnSite RX channel=prepare type=%s payload_bytes=%d payload=%s",
+                MT_ACTOR_PREPARE,
+                len(data),
+                MessageToDict(
+                    prepare_msg,
+                    preserving_proto_field_name=True,
+                    use_integers_for_enums=True,
+                ),
+            )
             self._recv_prepare = True
             self._prepare_sent = False
             self._session_id = prepare_msg.session_id
             self._actor_id = prepare_msg.actor_id
             logger.info("Received prepare: session_id=%s actor_id=%s", self._session_id, self._actor_id)
+        else:
+            logger.debug(
+                "OnSite RX channel=prepare unexpected_type=%s ret=%s expected_type=%s",
+                None if msg is None else msg.type(),
+                ret,
+                MT_ACTOR_PREPARE,
+            )
 
     def _send_prepare_result(self) -> None:
         result = ActorPrepareResult()
@@ -156,6 +203,17 @@ class OnSiteBridge:
 
         data = result.SerializeToString()
         ret = self._prepare_channel.put(MT_ACTOR_PREPARE_RESULT, len(data), data)
+        logger.debug(
+            "OnSite TX channel=prepare type=%s payload_bytes=%d payload=%s ret=%s",
+            MT_ACTOR_PREPARE_RESULT,
+            len(data),
+            MessageToDict(
+                result,
+                preserving_proto_field_name=True,
+                use_integers_for_enums=True,
+            ),
+            ret,
+        )
         if ret != 0:
             logger.warning("send prepare result error")
         else:
@@ -168,8 +226,25 @@ class OnSiteBridge:
             return None
 
         img = None
+        images_meta = []
         for image in msg:
             img = image.data.astype(np.uint8).reshape(image.height, image.width, 3)
+            images_meta.append(
+                {
+                    "timestamp_sec": float(image.timestamp_sec),
+                    "camera_timestamp": int(image.camera_timestamp),
+                    "sequence_num": int(image.sequence_num),
+                    "measurement_time": float(image.measurement_time),
+                    "height": int(image.height),
+                    "width": int(image.width),
+                    "encoding": image.encoding,
+                }
+            )
+        logger.debug(
+            "OnSite RX channel=camera type=image_batch image_count=%d images=%s",
+            len(images_meta),
+            images_meta,
+        )
         return img
 
     def _send_vehicle_control(self, steering: float, throttle_brake: float) -> None:
@@ -185,6 +260,17 @@ class OnSiteBridge:
 
         data = cmd.SerializeToString()
         ret = self._cmd_channel.put(VEHICLE_CONTROL, len(data), data)
+        logger.debug(
+            "OnSite TX channel=vehiclecontrol type=%s payload_bytes=%d payload=%s ret=%s",
+            VEHICLE_CONTROL,
+            len(data),
+            MessageToDict(
+                cmd,
+                preserving_proto_field_name=True,
+                use_integers_for_enums=True,
+            ),
+            ret,
+        )
         if ret != 0:
             logger.warning("send vehicle control error")
 
@@ -287,7 +373,7 @@ def main() -> None:
     parser.add_argument("--log_level", type=str, default="INFO")
     args = parser.parse_args()
 
-    logging.basicConfig(level=getattr(logging, args.log_level.upper(), logging.INFO))
+    logging.basicConfig(level=getattr(logging, args.log_level.upper(), logging.INFO), force=True)
 
     action_state = {"steering": 0.0, "throttle_brake": 0.0}
     max_bytes = 2048 * 2048 * 3

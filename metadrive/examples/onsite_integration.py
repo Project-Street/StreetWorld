@@ -16,6 +16,7 @@ import os
 
 from metadrive.misc.onsite_middleware import OnSiteMiddleware, OnSiteScenarioEnv
 from metadrive.manager.agent_manager import AgentState
+from metadrive.misc.nurec_interface.simulator_interface import SimulatorInterface
 
 # Import proto enums for Notify types
 from metadrive.misc.onsite_middleware.onsite_proto.main.proto.enums_pb2 import (
@@ -82,7 +83,6 @@ def process_notify(middleware, env):
     notifies = middleware.recv_all_notifies()
 
     for notify in notifies:
-        breakpoint()
         role_id = notify.role_id
         notify_type = notify.type
 
@@ -105,13 +105,16 @@ def process_notify(middleware, env):
             logger.info(f"Session started: {notify_type}")
             start_test = True
 
-        # Update agent state if agent exists
-        if role_id in env.agent_managers:
-            env.agent_managers[role_id].set_state(new_state)
-            logger.info(f"Agent {role_id} state updated to {new_state}")
+        # Actor state is controlled by notify; ignore notifies for other roles.
+        if role_id != "actor":
+            logger.debug(f"Ignore notify for non-actor role: role_id={role_id}, type={notify_type}")
+            continue
+        if "actor" in env.agent_managers:
+            env.agent_managers["actor"].set_state(new_state)
+            logger.info(f"Agent actor state updated to {new_state}")
 
 
-def get_prepare(middleware):
+def get_prepare(middleware, env):
     """
     Receive ActorPrepare message from OnSite server.
 
@@ -128,6 +131,7 @@ def get_prepare(middleware):
         return None
 
     session_id, actor_id, brief_data = result
+    env.reset(scene_name='1_1')
     recv_prepare = True
     logger.info(f"Received ActorPrepare: session={session_id}, actor={actor_id}")
     return result
@@ -168,7 +172,7 @@ def main_loop(env, middleware):
 
         # Phase 2: Wait for ActorPrepare
         if not recv_prepare:
-            get_prepare(middleware)
+            get_prepare(middleware, env)
             time.sleep(0.1)
             continue
 
@@ -183,17 +187,12 @@ def main_loop(env, middleware):
 
         # Phase 4: Main simulation loop
         # Receive messages from OnSite
-        pub_role = middleware.recv_pub_role()
         vehicle_control = middleware.recv_vehicle_control()
-        vehicle_feedback = middleware.recv_vehicle_feedback()  # Only receive, not use
+        vehicle_feedback = None
         session_info = middleware.recv_session_info()  # Only receive, log
 
         if session_info:
             logger.debug("Received SessionInfo from OnSite")
-
-        # Update participants from PubRole
-        if pub_role:
-            env.update_agents_from_pub_role(pub_role)
 
         # Execute simulation step
         action = vehicle_control if vehicle_control else [0.0, 0.0]
@@ -255,7 +254,14 @@ def main():
                         help="Unique field ID (must match daemon and simulator)")
     parser.add_argument("--net_interface", type=str, default="eno2",
                         help="Network interface name")
+    parser.add_argument('--grpc-host', type=str, default='localhost',
+                        help='gRPC server host for NuRec renderer')
+    parser.add_argument('--grpc-port', type=int, default=50051,
+                        help='gRPC server port for NuRec renderer')
+    parser.add_argument('--log-level', type=str, default='INFO',
+                        help='Logging level, e.g. DEBUG/INFO/WARNING/ERROR')
     args = parser.parse_args()
+    logging.getLogger().setLevel(getattr(logging, args.log_level.upper(), logging.INFO))
 
     # Auto-detect local IP if not specified
     args.local_ip = get_ip_address(args.net_interface)
@@ -278,11 +284,11 @@ def main():
     # Initialize environment
     logger.info("Initializing MetaDrive environment...")
     try:
-        # Import simulator interface
-        from easydrive.models.scenes.simulator_interface import SimulatorInterface
-
         # Create model and environment
-        model = SimulatorInterface()
+        model = SimulatorInterface(
+            grpc_host=args.grpc_host,
+            grpc_port=args.grpc_port,
+        )
         env_config = {
             "scene_config_directory": args.scene_config_directory,
             # Add other config as needed

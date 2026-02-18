@@ -188,13 +188,13 @@ class ScenarioEnv(BaseEnv):
         step_info["cost"] = cost
         return cost, step_info
 
-    def reset(self, seed: Union[None, int] = None):
+    def reset(self, seed: Union[None, int] = None, scene_name: Union[None, str] = None):
         self._last_speed = None
         self._last_accel = None
         self._last_steer = None
         self._last_progress_value = None
         self._last_progress_idx = None
-        return super().reset(seed=seed)
+        return super().reset(seed=seed, scene_name=scene_name)
 
     def reward_function(self):
         """Return reward composed of collision, positional, heading, and smoothness terms."""

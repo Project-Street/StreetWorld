@@ -128,7 +128,7 @@ class BaseEnv(gym.Env):
         # self.managers[manager_name] = manager
         setattr(self, manager_name, manager)
 
-    def reset(self, seed: Union[None, int] = None):
+    def reset(self, seed: Union[None, int] = None, scene_name: Union[None, str] = None):
         # Update record replay
         self.replay_episode = True if self.config["replay_episode"] is not None else False
         self.record_episode = self.config["record_episode"]
@@ -162,7 +162,11 @@ class BaseEnv(gym.Env):
                 self.agent_managers[n].destroy()
                 self.agent_managers.pop(n)
 
-        self.data_manager.reset()
+        if scene_name:
+            scene_id = self.data_manager.idx2scene.index(scene_name)
+            self.data_manager.reset(scene_id=scene_id)
+        else:
+            self.data_manager.reset()
 
         scenario_data = self.data_manager.get_current_scenario_data()
         self.step_manager.reset(**scenario_data)
@@ -219,6 +223,8 @@ class BaseEnv(gym.Env):
                     cfg['controller'] = Pedestrian
                 elif tracking['type'] == 'cyclist':
                     cfg['controller'] = Cyclist
+                else:
+                    raise
                 
                 self.agent_managers[name] = AgentManager(cfg, self.step_manager)
             else:

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import json
+import logging
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
@@ -9,6 +10,8 @@ import numpy as np
 import torch
 
 from metadrive.utils.trajectory import build_rotation
+
+logger = logging.getLogger(__name__)
 
 
 def _load_json(path: Path | str) -> Dict[str, Any]:
@@ -173,11 +176,25 @@ def parse_tracking_data(
     for idx, track_id in enumerate(track_ids):
         obj_id = str(track_id)
         size = sizes[idx]
-        obj_type = labels[idx]
-        if obj_type == "automobile":
-            obj_type = "vehicle"
-        elif obj_type == "person":
-            obj_type = "pedestrian"
+        raw_obj_type = str(labels[idx])
+        obj_type_key = raw_obj_type.lower()
+        obj_type = {
+            "automobile": "vehicle",
+            "trailer": "vehicle",
+            "heavy_truck": "vehicle",
+            "other_vehicle": "vehicle",
+            "bus": "vehicle",
+            "person": "pedestrian",
+            "bicycle": "cyclist",
+            "stroller": "pedestrian",
+        }.get(obj_type_key, obj_type_key)
+        if obj_type not in ("vehicle", "pedestrian", "cyclist"):
+            logger.warning(
+                "Drop unsupported NuRec object type: track_id=%s, type=%s",
+                obj_id,
+                raw_obj_type,
+            )
+            continue
         timestamps = timestamps_list[idx]
         poses = poses_list[idx]
         pose_map: Dict[int, List[float]] = {}

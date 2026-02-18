@@ -7,6 +7,7 @@ providing helper methods for state synchronization with OnSite server.
 
 import logging
 import numpy as np
+import torch
 from metadrive.envs.scenario_env import ScenarioEnv
 from metadrive.manager.agent_manager import AgentState
 
@@ -27,6 +28,21 @@ class OnSiteScenarioEnv(ScenarioEnv):
         super().__init__(model, config)
         # Cache for last received PubRole (for preserving fields)
         self.last_received_pub_role = None
+
+    def _update_scene(self):
+        """
+        In OnSite mode, actor state is controlled by Notify, so skip actor.update_state().
+        """
+        new_object_poses = {}
+        for name, mgr in self.agent_managers.items():
+            if name != "actor":
+                mgr.update_state()
+                if mgr.state == AgentState.ALIVE:
+                    new_object_poses[name] = torch.from_numpy(mgr.get_pose())
+                continue
+            if mgr.state == AgentState.ALIVE:
+                new_object_poses[name] = torch.from_numpy(mgr.get_pose())
+        self.model.update_scene(self.step_manager.current_timestamp, new_object_poses)
 
     def get_agent_state_dict(self, agent_name):
         """

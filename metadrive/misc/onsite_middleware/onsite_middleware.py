@@ -10,6 +10,7 @@ import logging
 import sys
 import time
 import numpy as np
+from google.protobuf.json_format import MessageToDict
 
 import libMulticastNetwork
 
@@ -87,7 +88,19 @@ class OnSiteMiddleware:
         param.field_id = self.field_id
         param.log_level = 1  # 1-info, 2-warning, 3-error
         param.client_name = "simulator"
-        param.recv_self_msg = True
+        param.recv_self_msg = False
+        logger.debug(
+            "OnSite create_channels param=%s",
+            {
+                "config_center_addr": param.config_center_addr,
+                "local_ip": param.local_ip,
+                "net_interface_name": param.net_interface_name,
+                "field_id": param.field_id,
+                "log_level": param.log_level,
+                "client_name": param.client_name,
+                "recv_self_msg": param.recv_self_msg,
+            },
+        )
 
         self.channels = libMulticastNetwork.ChannelPtrVector()
         ret = libMulticastNetwork.create_channels(param, self.channels)
@@ -139,6 +152,16 @@ class OnSiteMiddleware:
             data = libMulticastNetwork.getMessageData(msg)
             prepare_msg = ActorPrepare()
             prepare_msg.ParseFromString(data)
+            logger.debug(
+                "OnSite RX channel=prepare type=%s payload_bytes=%d payload=%s",
+                MT_ACTOR_PREPARE,
+                len(data),
+                MessageToDict(
+                    prepare_msg,
+                    preserving_proto_field_name=True,
+                    use_integers_for_enums=True,
+                ),
+            )
 
             session_id = prepare_msg.session_id
             actor_id = prepare_msg.actor_id
@@ -154,6 +177,11 @@ class OnSiteMiddleware:
             logger.info(f"Received ActorPrepare: session={session_id}, actor={actor_id}")
             return (session_id, actor_id, brief_data)
 
+        logger.debug(
+            "OnSite RX channel=prepare unexpected_type=%s expected_type=%s",
+            msg.type(),
+            MT_ACTOR_PREPARE,
+        )
         return None
 
     def recv_notify(self):
@@ -174,9 +202,24 @@ class OnSiteMiddleware:
             data = libMulticastNetwork.getMessageData(msg)
             notify = Notify()
             notify.ParseFromString(data)
+            logger.debug(
+                "OnSite RX channel=notify type=%s payload_bytes=%d payload=%s",
+                MT_NOTIFY,
+                len(data),
+                MessageToDict(
+                    notify,
+                    preserving_proto_field_name=True,
+                    use_integers_for_enums=True,
+                ),
+            )
             logger.debug(f"Received Notify: type={notify.type}, role_id={notify.role_id}")
             return notify
 
+        logger.debug(
+            "OnSite RX channel=notify unexpected_type=%s expected_type=%s",
+            msg.type(),
+            MT_NOTIFY,
+        )
         return None
 
     def recv_all_notifies(self):
@@ -192,6 +235,8 @@ class OnSiteMiddleware:
             if notify is None:
                 break
             notifies.append(notify)
+        if notifies:
+            logger.debug("OnSite RX notify batch size=%d", len(notifies))
         return notifies
 
     def recv_pub_role(self):
@@ -212,9 +257,24 @@ class OnSiteMiddleware:
             data = libMulticastNetwork.getMessageData(msg)
             pub_role = PubRole()
             pub_role.ParseFromString(data)
+            logger.debug(
+                "OnSite RX channel=pubrole type=%s payload_bytes=%d payload=%s",
+                MT_PUBROLE,
+                len(data),
+                MessageToDict(
+                    pub_role,
+                    preserving_proto_field_name=True,
+                    use_integers_for_enums=True,
+                ),
+            )
             logger.debug(f"Received PubRole with {len(pub_role.s_roles)} roles")
             return pub_role
 
+        logger.debug(
+            "OnSite RX channel=pubrole unexpected_type=%s expected_type=%s",
+            msg.type(),
+            MT_PUBROLE,
+        )
         return None
 
     def recv_vehicle_control(self):
@@ -235,12 +295,27 @@ class OnSiteMiddleware:
             data = libMulticastNetwork.getMessageData(msg)
             control = VehicleControl()
             control.ParseFromString(data)
+            logger.debug(
+                "OnSite RX channel=vehiclecontrol type=%s payload_bytes=%d payload=%s",
+                VEHICLE_CONTROL,
+                len(data),
+                MessageToDict(
+                    control,
+                    preserving_proto_field_name=True,
+                    use_integers_for_enums=True,
+                ),
+            )
 
             # Convert to MetaDrive action
             action = self._vehicle_control_to_action(control)
             logger.debug(f"Received VehicleControl: steering={action[0]:.3f}, throttle_brake={action[1]:.3f}")
             return action
 
+        logger.debug(
+            "OnSite RX channel=vehiclecontrol unexpected_type=%s expected_type=%s",
+            msg.type(),
+            VEHICLE_CONTROL,
+        )
         return None
 
     def recv_vehicle_feedback(self):
@@ -262,9 +337,24 @@ class OnSiteMiddleware:
             data = libMulticastNetwork.getMessageData(msg)
             feedback = VehicleFeedback()
             feedback.ParseFromString(data)
+            logger.debug(
+                "OnSite RX channel=vehiclecontrol type=%s payload_bytes=%d payload=%s",
+                VEHICLE_FEEDBACK,
+                len(data),
+                MessageToDict(
+                    feedback,
+                    preserving_proto_field_name=True,
+                    use_integers_for_enums=True,
+                ),
+            )
             logger.debug("Received VehicleFeedback from OnSite")
             return feedback
 
+        logger.debug(
+            "OnSite RX channel=vehiclecontrol unexpected_type=%s expected_type=%s",
+            msg.type(),
+            VEHICLE_FEEDBACK,
+        )
         return None
 
     def recv_session_info(self):
@@ -285,9 +375,24 @@ class OnSiteMiddleware:
             data = libMulticastNetwork.getMessageData(msg)
             session_info = SessionInfo()
             session_info.ParseFromString(data)
+            logger.debug(
+                "OnSite RX channel=sessioninfo type=%s payload_bytes=%d payload=%s",
+                MT_SESSIONINFO,
+                len(data),
+                MessageToDict(
+                    session_info,
+                    preserving_proto_field_name=True,
+                    use_integers_for_enums=True,
+                ),
+            )
             logger.debug("Received SessionInfo from OnSite")
             return session_info
 
+        logger.debug(
+            "OnSite RX channel=sessioninfo unexpected_type=%s expected_type=%s",
+            msg.type(),
+            MT_SESSIONINFO,
+        )
         return None
 
     # ==================== Send Methods ====================
@@ -313,6 +418,17 @@ class OnSiteMiddleware:
         data = msg.SerializeToString()
         length = len(data)
         ret = self.prepare_channel.put(MT_ACTOR_PREPARE_RESULT, length, data)
+        logger.debug(
+            "OnSite TX channel=prepare type=%s payload_bytes=%d payload=%s ret=%s",
+            MT_ACTOR_PREPARE_RESULT,
+            length,
+            MessageToDict(
+                msg,
+                preserving_proto_field_name=True,
+                use_integers_for_enums=True,
+            ),
+            ret,
+        )
 
         if ret != 0:
             logger.error(f"Failed to send ActorPrepareResult, ret: {ret}")
@@ -338,6 +454,17 @@ class OnSiteMiddleware:
         data = msg.SerializeToString()
         length = len(data)
         ret = self.role_channel.put(MT_SUBROLE, length, data)
+        logger.debug(
+            "OnSite TX channel=pubrole type=%s payload_bytes=%d payload=%s ret=%s",
+            MT_SUBROLE,
+            length,
+            MessageToDict(
+                msg,
+                preserving_proto_field_name=True,
+                use_integers_for_enums=True,
+            ),
+            ret,
+        )
 
         if ret != 0:
             logger.error(f"Failed to send SubRole, ret: {ret}")
@@ -378,6 +505,17 @@ class OnSiteMiddleware:
         data = msg.SerializeToString()
         length = len(data)
         ret = self.role_channel.put(MT_PUBROLE, length, data)
+        logger.debug(
+            "OnSite TX channel=pubrole type=%s payload_bytes=%d payload=%s ret=%s",
+            MT_PUBROLE,
+            length,
+            MessageToDict(
+                msg,
+                preserving_proto_field_name=True,
+                use_integers_for_enums=True,
+            ),
+            ret,
+        )
 
         if ret != 0:
             logger.error(f"Failed to send PubRole, ret: {ret}")
@@ -402,6 +540,17 @@ class OnSiteMiddleware:
         data = msg.SerializeToString()
         length = len(data)
         ret = self.cmd_channel.put(VEHICLE_FEEDBACK, length, data)
+        logger.debug(
+            "OnSite TX channel=vehiclecontrol type=%s payload_bytes=%d payload=%s ret=%s",
+            VEHICLE_FEEDBACK,
+            length,
+            MessageToDict(
+                msg,
+                preserving_proto_field_name=True,
+                use_integers_for_enums=True,
+            ),
+            ret,
+        )
 
         if ret != 0:
             logger.error(f"Failed to send VehicleFeedback, ret: {ret}")
@@ -438,6 +587,24 @@ class OnSiteMiddleware:
             self.image_seq += 1
 
         ret = self.image_channel.put_image_simple(py_images)
+        images_meta = [
+            {
+                "timestamp_sec": float(py_img.timestamp_sec),
+                "camera_timestamp": int(py_img.camera_timestamp),
+                "sequence_num": int(py_img.sequence_num),
+                "measurement_time": float(py_img.measurement_time),
+                "height": int(py_img.height),
+                "width": int(py_img.width),
+                "encoding": py_img.encoding,
+            }
+            for py_img in py_images
+        ]
+        logger.debug(
+            "OnSite TX channel=camera type=image_batch image_count=%d images=%s ret=%s",
+            len(py_images),
+            images_meta,
+            ret,
+        )
         if ret != 0:
             logger.error(f"Failed to send images, ret: {ret}")
         else:
