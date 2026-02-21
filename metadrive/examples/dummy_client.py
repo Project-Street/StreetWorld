@@ -61,7 +61,7 @@ class DummyClient:
                 ('grpc.max_send_message_length', 200 * 1024 * 1024),
                 ('grpc.max_receive_message_length', 200 * 1024 * 1024),
             ])
-        self.stub = service_pb2_grpc.StreetStudioServiceStub(self.channel)
+        self.stub = service_pb2_grpc.EnvServiceStub(self.channel)
         print(f"Connected to LongTail gRPC server at {host}:{port}")
 
         # Image stack configuration

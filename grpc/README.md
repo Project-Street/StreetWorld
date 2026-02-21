@@ -43,7 +43,7 @@ from streetworld_grpc import control_pb2
 
 ### Service
 
-**StreetStudioService** provides RPC methods for:
+**EnvService** provides RPC methods for:
 - `Reset(ResetRequest) returns (ResetResponse)`: Initialize/reset the environment with a scene
 - `Step(StepRequest) returns (StepResponse)`: Execute one simulation step
 

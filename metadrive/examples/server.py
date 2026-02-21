@@ -33,7 +33,7 @@ import streetworld_grpc.common_pb2 as common_pb2
 import streetworld_grpc.control_pb2 as control_pb2
 
 
-class StreetStudioServicer(service_pb2_grpc.StreetStudioServiceServicer):
+class EnvServicer(service_pb2_grpc.EnvServiceServicer):
     """
     gRPC service for StreetStudio environment.
 
@@ -323,7 +323,7 @@ def serve(
         config["time_end_sec"] = time_end
 
     # Create servicer
-    servicer = StreetStudioServicer(config)
+    servicer = EnvServicer(config)
 
     # Create gRPC server
     server = grpc.server(
@@ -335,7 +335,7 @@ def serve(
     )
 
     # Add servicer to server
-    service_pb2_grpc.add_StreetStudioServiceServicer_to_server(servicer, server)
+    service_pb2_grpc.add_EnvServiceServicer_to_server(servicer, server)
 
     # Bind server to address
     server_address = f"{host}:{port}"

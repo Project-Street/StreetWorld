@@ -67,7 +67,7 @@ class UniADClient:
                 ('grpc.max_send_message_length', 200 * 1024 * 1024),
                 ('grpc.max_receive_message_length', 200 * 1024 * 1024),
             ])
-        self.stub = service_pb2_grpc.StreetStudioServiceStub(self.channel)
+        self.stub = service_pb2_grpc.EnvServiceStub(self.channel)
 
         # Initialize UniAD model
         self.uniad = self._create_uniad(uniad_config)

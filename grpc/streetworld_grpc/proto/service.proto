@@ -21,7 +21,7 @@ message ResetResponse {
 }
 
 // Service definition
-service StreetStudioService {
+service EnvService {
     rpc Reset(ResetRequest) returns (ResetResponse);
     rpc Step(StepRequest) returns (StepResponse);
 }

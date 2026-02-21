@@ -242,7 +242,7 @@ def test_grpc_connection(host: str, port: int):
 
     try:
         with grpc.insecure_channel(f"{host}:{port}") as channel:
-            stub = service_pb2_grpc.StreetStudioServiceStub(channel)
+            stub = service_pb2_grpc.EnvServiceStub(channel)
 
             # Test Reset (will fail if server not running, but that's expected)
             try:

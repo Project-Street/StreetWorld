@@ -60,7 +60,7 @@ class StreetStudioClient:
                 ('grpc.max_receive_message_length', 200 * 1024 * 1024),
             ]
         )
-        self.stub = service_pb2_grpc.StreetStudioServiceStub(self.channel)
+        self.stub = service_pb2_grpc.EnvServiceStub(self.channel)
 
     def reset(
         self,
