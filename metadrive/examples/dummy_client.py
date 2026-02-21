@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+﻿#!/usr/bin/env python
 """
 Testing client for remote LongTail environment.
 
@@ -260,9 +260,9 @@ class DummyClient:
 
     def _prepare_uniad_input(self, obs_img: Dict, obs_info: Dict) -> Dict:
         """Convert observation to UniAD input format."""
-        from rl_framework.rl_modules.dataparser import parse_raw
+        from rl_framework.uniad.dataparser import parse_uniad_obs
 
-        raw_data = parse_raw(obs_img, obs_info, self.cameras, self.img_norm_cfg)
+        raw_data = parse_uniad_obs(obs_img, obs_info, self.cameras, self.img_norm_cfg)
         # Store raw images for reference
         self._raw_images = raw_data.get('raw_imgs', {})
         # Remove raw_imgs from data to pass to model
@@ -285,7 +285,7 @@ def traj2control(plan_traj: np.ndarray, obs_info: Dict) -> Tuple[float, float]:
     Returns:
         (steer, accel) tuple
     """
-    from rl_framework.rl_modules.env_wrapper import traj2control as _traj2control
+    from rl_framework.common.trajectory import traj2control as _traj2control
     return _traj2control(plan_traj, obs_info)
 
 
@@ -376,3 +376,4 @@ def main():
 
 if __name__ == "__main__":
     exit(main())
+

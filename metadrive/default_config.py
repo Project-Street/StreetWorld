@@ -1,6 +1,7 @@
 import logging
 
-from metadrive.constants import DEFAULT_AGENT
+from metadrive.constants import DEFAULT_SENSOR_HPR, DEFAULT_SENSOR_OFFSET
+from metadrive.constants import RENDER_MODE_NONE, DEFAULT_AGENT
 from metadrive.policy.env_input_policy import EnvInputPolicy
 from metadrive.policy.replay_policy import ReplayPolicy
 from metadrive.component.vehicle.vehicle_type import DefaultVehicle
@@ -34,8 +35,19 @@ BASE_DEFAULT_CONFIG = dict(
             gaussian = dict(
                 observer_class=GaussianObservation,
                 clip_rgb=False,
-                stack_size=6,
-                cameras={}
+                stack_size=3,
+                cameras={
+                'BACK': {
+                    'offset': [-2.65, 0, 1.8],
+                    'hpr': [180, 0, 0],
+                    'H': 450,
+                    'W': 800,
+                    'fovx': 90.22309438895985,
+                    'fovy': 58.9063564284116,
+                    'cx': 428.8887163431848,
+                    'cy': 238.44244942037076
+                }
+                }
             ),
             navigation = dict(
                 observer_class=NavigationObservation,
@@ -101,13 +113,6 @@ BASE_DEFAULT_CONFIG = dict(
     curriculum_level=1,
     num_workers=1,
 
-    # ===== Time Segment Selection =====
-    # Time segment selection in seconds (optional)
-    # If set, only load data within this time range [start, end)
-    # Automatically clipped to available timestamp range
-    time_start_sec=None,  # Start time in seconds (None = use first available timestamp)
-    time_end_sec=None,  # End time in seconds (None = use last available timestamp)
-
     # ===== Terrain =====
     # The size of the square map region, which is centered at [0, 0]. The map objects outside it are culled.
     map_region_size=2048,
@@ -164,9 +169,5 @@ BASE_DEFAULT_CONFIG = dict(
     force_reuse_object_name=False,
 
     # ===== randomization =====
-    num_scenarios=1,  # the number of scenarios in this environment
-
-    # ===== gRPC Rendering =====
-    # gRPC rendering server URL for StreetStudio remote rendering
-    render_server_url="localhost:50051",
+    num_scenarios=1  # the number of scenarios in this environment
 )

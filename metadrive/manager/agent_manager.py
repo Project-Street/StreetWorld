@@ -76,7 +76,7 @@ class AgentManager(BaseManager):
         self.controller = self._create_agent(**kwargs)
         self.state = AgentState.NOT_SPAWN
 
-        self.observer.reset(controller=self.controller, seed=self.generate_seed(), step_mgr=self.step_manager, **kwargs)
+        self.observer.reset(controller=self.controller, seed=self.generate_seed(), **kwargs)
         self.policy.reset(controller=self.controller, seed=self.generate_seed(), **kwargs)
 
         if isinstance(self.observer, NavigationObservation):

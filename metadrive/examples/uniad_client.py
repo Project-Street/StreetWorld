@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+﻿#!/usr/bin/env python
 """
 UniAD gRPC client for remote StreetStudio environment.
 
@@ -20,7 +20,7 @@ RL_FRAMEWORK_ROOT="../../"
 sys.path.insert(0, str(RL_FRAMEWORK_ROOT))
 import os
 os.environ['no_proxy'] = '127.0.0.1,localhost'
-from rl_framework.rl_modules.closeLoop import create_uniad
+from rl_framework.uniad.loader import create_uniad
 
 import grpc
 import numpy as np
@@ -93,7 +93,7 @@ class UniADClient:
     def _create_uniad(self, config: dict):
         """Create UniAD model from config."""
         # Import here to avoid dependency if not using UniAD
-        from rl_framework.rl_modules.closeLoop import create_uniad
+        from rl_framework.uniad.loader import create_uniad
         return create_uniad(config)
 
     def reset(
@@ -281,9 +281,9 @@ class UniADClient:
 
     def _prepare_uniad_input(self, obs_img: Dict, obs_info: Dict) -> Dict:
         """Convert observation to UniAD input format."""
-        from rl_framework.rl_modules.dataparser import parse_raw
+        from rl_framework.uniad.dataparser import parse_uniad_obs
 
-        raw_data = parse_raw(obs_img, obs_info, self.cameras, self.img_norm_cfg)
+        raw_data = parse_uniad_obs(obs_img, obs_info, self.cameras, self.img_norm_cfg)
         # Store raw images for reference
         self._raw_images = raw_data.get('raw_imgs', {})
         # Remove raw_imgs from data to pass to model
@@ -306,7 +306,7 @@ def traj2control(plan_traj: np.ndarray, obs_info: Dict) -> Tuple[float, float]:
     Returns:
         (steer, accel) tuple
     """
-    from rl_framework.rl_modules.env_wrapper import traj2control as _traj2control
+    from rl_framework.common.trajectory import traj2control as _traj2control
     return _traj2control(plan_traj, obs_info)
 
 
@@ -413,3 +413,4 @@ def main():
 
 if __name__ == "__main__":
     exit(main())
+

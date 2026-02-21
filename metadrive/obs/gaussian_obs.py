@@ -1,10 +1,12 @@
 import gymnasium as gym
 import numpy as np
 
+from metadrive.component.vehicle.base_vehicle import BaseVehicle
 from metadrive.obs.observation_base import BaseObservation
 import torch
 import math
 from scipy.spatial.transform import Rotation as R
+from typing import Dict, Any
 
 lidar2ego = np.array([
     [0, 1, 0,  0.5], 
@@ -77,18 +79,16 @@ class GaussianObservation(BaseObservation):
         self.clip_rgb = config['clip_rgb']
         self.camera_configs = config['cameras']
 
-    def reset(self, controller, render_fn, camera_params, step_mgr=None, **kwargs):
+    def reset(self, controller, render_fn, camera_params, **kwargs):
         """
         Clear stack
         :param env: MetaDrive
         :param vehicle: BaseVehicle
-        :param step_mgr: StepManager for timestamp tracking
         :return: None
         """
-
+        
         self.controller = controller
         self.render_fn = render_fn
-        self.step_mgr = step_mgr
 
         dataset_params = camera_params or {}
         merged_params = dict(dataset_params)
@@ -125,7 +125,7 @@ class GaussianObservation(BaseObservation):
 
     def an_observation_shape(self, h, w):
         return (self.STACK_SIZE, h, w, 3)
-
+ 
     def observe(self):
         """
         Get the image Observation. By setting new_parent_node and the reset parameters, it can capture a new image from
@@ -159,21 +159,15 @@ class GaussianObservation(BaseObservation):
                 )
                 params['ego2camera'] = ego2cam
 
-            # Compute camera-to-world (c2w) matrix for rendering
-            extrinsics_c2w = (ego2cam @ ego_pose).inverse()
-
-            # Get timestamp in microseconds
-            timestamp_us = 0
-            if self.step_mgr is not None and hasattr(self.step_mgr, 'current_timestamp'):
-                timestamp_us = int(self.step_mgr.current_timestamp)
-
+            extrinsics = ego2cam @ ego_pose
             ret = self.render_fn(
                 K=params['K'],
                 H=params['H'],
                 W=params['W'],
-                extrinsics=extrinsics_c2w,
-                timestamp_us=timestamp_us,
+                extrinsics=extrinsics,
             )
+            if cam_name == 'BACK':
+                ret = np.zeros_like(ret)  # UniAD expects a back view; fill with black when data is missing
             self.state[cam_name] = np.roll(self.state[cam_name], -1, axis=0)
             self.state[cam_name][-1] = ret
 

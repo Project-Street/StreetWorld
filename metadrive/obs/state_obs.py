@@ -38,15 +38,9 @@ class StateObservation(BaseObservation):
         ego_t = self.controller.transform[:3, 3]
         velo = float(self.controller.speed)
         steer = float(self.controller.steering * np.deg2rad(self.controller.max_steering))
-        # Use throttle_brake as accelerate for DefaultVehicle compatibility
-        accel = float(getattr(self.controller, 'accelerate', getattr(self.controller, 'throttle_brake', 0.0)))
-        steer_rate = float(getattr(self.controller, 'steer_rate', 0.0))
-        # Use step manager timestamp if available, otherwise use controller timestamp or default
-        step_mgr = getattr(self.controller, 'step_manager', None)
-        if step_mgr is not None and hasattr(step_mgr, 'current_timestamp'):
-            timestamp = float(step_mgr.current_timestamp / 1_000_000)  # Convert us to sec
-        else:
-            timestamp = float(getattr(self.controller, 'timestamp', 0.1))
+        accel = float(self.controller.accelerate)
+        steer_rate = float(self.controller.steer_rate)
+        timestamp = float(self.controller.timestamp - 0.1)
         dt = 0.1
         if self._last_timestamp is not None:
             dt_candidate = timestamp - self._last_timestamp

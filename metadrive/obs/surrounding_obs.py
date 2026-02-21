@@ -60,15 +60,12 @@ class SurroundingObservation(BaseObservation):
             width = ctrl.WIDTH
             size = [float(length), float(width)]
 
-            # Get object type from controller class if available
-            obj_type = getattr(ctrl, 'metadrive_type', getattr(type(ctrl), '__name__', 'unknown'))
-
             surrounding.append({
                 "position": [float(pos_ego[0]), float(pos_ego[1])],
                 "velocity": [float(v_ego[0]), float(v_ego[1])],
                 "heading": float(rel_heading),
-                "size": size,
-                "type": obj_type
+                "size": size
+                # "type": self.collector.metadrive_type
             })
 
         return surrounding

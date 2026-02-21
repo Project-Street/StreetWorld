@@ -2,13 +2,11 @@ import math
 import numpy as np
 import gymnasium as gym
 from trajdata import VectorMap
-from trajdata.maps.vec_map_elements import RoadLane
 from metadrive.obs.observation_base import BaseObservation
 from metadrive.base_class.randomizable import Randomizable
 from metadrive.utils.navigation_utils import nearest_front_index
-from collections import deque
 
-lane_follow_length = 200.0  # meters
+lane_follow_length = 200.0
 
 class NavigationObservation(BaseObservation, Randomizable):
     trajdata_map: VectorMap
@@ -20,7 +18,7 @@ class NavigationObservation(BaseObservation, Randomizable):
         self.early_signal_distance = float(config.get("early_signal_distance", 10.0))  # meters
         # New radius-based threshold using triangle inradius (meters). Smaller -> sharper turn.
         # You may tune this based on map scale; ~20m is a moderate default.
-        self.turn_inradius_threshold = float(config.get("turn_radius_threshold", 10.0))
+        self.turn_inradius_threshold = float(config.get("turn_radius_threshold", 40.0))
 
         self.controller = None
         self.trajdata_map = None
@@ -29,6 +27,9 @@ class NavigationObservation(BaseObservation, Randomizable):
 
         self._path_xy = None
         self._path_cumlen = None
+        self._expert_speed = None
+        self._expert_angular_velocity = None
+        self._expert_heading = None
 
     def reset(self, trajdata_map: VectorMap, init_state, state, controller, seed=None, **kwargs):
         if self.navigating_type in ["lane_following", "destination_following"]:
@@ -41,6 +42,7 @@ class NavigationObservation(BaseObservation, Randomizable):
         self.trajdata_map = trajdata_map
         self.init_state = init_state
         self.state = state
+        self._clear_expert_reference()
 
         if self.navigating_type == "expert_following":
             self._build_expert_path()
@@ -60,6 +62,11 @@ class NavigationObservation(BaseObservation, Randomizable):
             'waypoint': self._path_xy,
             'cummulative_length': self._path_cumlen
         }
+
+    def _clear_expert_reference(self):
+        self._expert_speed = None
+        self._expert_angular_velocity = None
+        self._expert_heading = None
     
     def _get_turn_signal(self):
         if self._path_xy is None or len(self._path_xy) < 5:
@@ -129,15 +136,33 @@ class NavigationObservation(BaseObservation, Randomizable):
         self.trajdata_map = None
         self.init_state = None
         self.state = None
+        self._clear_expert_reference()
 
     # ---------- path builders ----------
     def _build_expert_path(self):
         points = []
+        ang_vels = []
+        speeds = []
+        headings = []
         for ts in sorted(self.state.keys()):
-            pos = self.state[ts]["position"]
+            frame = self.state[ts]
+            pos = frame["position"]
             x, y = float(pos[0]), float(pos[1])
             points.append([x, y])
+            vel = np.array(frame.get("velocity", [0.0, 0.0]), dtype=np.float64)
+            ang_vel = float(frame.get("angular_velocity", 0.0))
+            ang_vels.append(ang_vel)
+            speeds.append(float(np.linalg.norm(vel[:2])))
+            headings.append(float(frame.get("heading_theta", 0.0)))
+
         self._set_path(points)
+
+        if self._path_xy is not None:
+            self._expert_speed = np.asarray(speeds, dtype=np.float32)
+            self._expert_angular_velocity = np.asarray(ang_vels, dtype=np.float32)
+            self._expert_heading = np.asarray(headings, dtype=np.float32)
+        else:
+            self._clear_expert_reference()
 
     def _build_lane_follow_path(self):
         spawn_xyz = np.array(self.init_state["spawn_position"])
@@ -162,6 +187,7 @@ class NavigationObservation(BaseObservation, Randomizable):
         
         path_pts = self._concat_centerlines(lanes, spawn_xyz, spawn_yaw)
         self._set_path(path_pts)
+        self._clear_expert_reference()
 
     def _build_destination_path(self):
         spawn_xyz = np.array(self.init_state["spawn_position"])
@@ -185,16 +211,14 @@ class NavigationObservation(BaseObservation, Randomizable):
                 lane_seq = [start_lane]
         path_pts = self._concat_centerlines(lane_seq, spawn_xyz, spawn_yaw)
         self._set_path(path_pts)
+        self._clear_expert_reference()
 
     # ---------- small utils ----------
     @staticmethod
     def _vehicle_xy(vehicle):
         pos = vehicle.position
-        return np.array([pos[0], pos[1]], dtype=np.float32)
+        return np.array([float(pos[0]), float(pos[1])], dtype=np.float32)
 
-    @staticmethod
-    def _vec4(p, a):
-        return np.array([p[0], p[1], p[2], a], dtype=np.float32)
     @staticmethod
     def _xy2(p):
         return float(p[0]), float(p[1])
@@ -221,6 +245,15 @@ class NavigationObservation(BaseObservation, Randomizable):
         seg = self._seg_len(path)
         self._path_xy = path
         self._path_cumlen = np.concatenate([[0.0], np.cumsum(seg)])
+        if (
+            self._expert_speed is not None and
+            len(self._expert_speed) != len(self._path_xy)
+        ):
+            self._clear_expert_reference()
+    
+    def _seg_len(self, points):
+        seg = np.linalg.norm(points[1:] - points[:-1], axis=1)
+        return seg
 
 
     @staticmethod
@@ -239,6 +272,29 @@ class NavigationObservation(BaseObservation, Randomizable):
         h = vehicle.heading  # (cos, sin)
         return np.array([float(h[0]), float(h[1])], dtype=np.float32)
 
+    def get_reference_state(self, idx):
+        if (
+            self._path_xy is None or
+            idx is None or
+            self._expert_speed is None or
+            self._expert_angular_velocity is None or
+            len(self._expert_speed) == 0
+        ):
+            return None
+        clamped_idx = int(np.clip(idx, 0, len(self._expert_speed) - 1))
+        heading = None
+        if self._expert_heading is not None and len(self._expert_heading) > clamped_idx:
+            heading = float(self._expert_heading[clamped_idx])
+        position = None
+        if len(self._path_xy) > clamped_idx:
+            position = self._path_xy[clamped_idx].tolist()
+        return dict(
+            speed=float(self._expert_speed[clamped_idx]),
+            angular_velocity=float(self._expert_angular_velocity[clamped_idx]),
+            heading_theta=heading,
+            position=position
+        )
+
     @staticmethod
     def _signed_angle(v1, v2):
         v1n = v1 / np.linalg.norm(v1)
@@ -248,13 +304,13 @@ class NavigationObservation(BaseObservation, Randomizable):
         cross_z = v1n[0] * v2n[1] - v1n[1] * v2n[0]
         return ang if cross_z > 0 else -ang
 
-    def _concat_centerlines(self, lane_seq : list[RoadLane], start_xyz, start_yaw):
+    def _concat_centerlines(self, lane_seq, start_xy, start_heading):
         pts = []
-        for idx, lane in enumerate(lane_seq):
-            cl = lane.center.xy
+        for idx, lane_id in enumerate(lane_seq):
+            cl = np.asarray(self.trajdata_map.lane_centerline(lane_id), dtype=np.float32)
             if idx == 0:
-                heading_vec = np.array([math.cos(start_yaw), math.sin(start_yaw)], dtype=np.float32)
-                start_idx = nearest_front_index(cl, start_xyz[:2], heading_vec)
+                heading_vec = np.array([math.cos(start_heading), math.sin(start_heading)], dtype=np.float32)
+                start_idx = nearest_front_index(cl, np.asarray(start_xy), heading_vec)
                 cl = cl[start_idx:]
             if len(pts) > 0 and len(cl) > 0:
                 if np.allclose(pts[-1], cl[0]):
@@ -265,76 +321,25 @@ class NavigationObservation(BaseObservation, Randomizable):
                 pts.extend(cl)
         return pts
 
-    def _bfs_lane_seq(self, start_lane: RoadLane, goal_lane: RoadLane):
+    def _bfs_lane_seq(self, start_lane, goal_lane):
         if start_lane == goal_lane:
             return [start_lane]
-
-        q_l = deque([[start_lane, self._seg_len(start_lane.center.xy).sum()]])
+        from collections import deque
+        q = deque([start_lane])
         parent = {start_lane: None}
         visited = {start_lane}
-        actual_goal = None
-
-        while len(q_l) > 0:
-            u, cur_len = q_l.popleft()
-            for v_id in u.next_lanes:
-                v = self.trajdata_map.get_road_lane(v_id)
+        while len(q) > 0:
+            u = q.popleft()
+            for v in self.trajdata_map.successors(u):
                 if v in visited:
                     continue
                 parent[v] = u
-                next_len = cur_len + self._seg_len(v.center.xy).sum()
-                if v == goal_lane or next_len >= lane_follow_length:
-                    actual_goal = v
-                    q_l.clear()
-                    break
+                if v == goal_lane:
+                    seq = [v]
+                    while parent[seq[-1]] is not None:
+                        seq.append(parent[seq[-1]])
+                    seq.reverse()
+                    return seq
                 visited.add(v)
-                q_l.append((v, next_len))
-
-        if actual_goal is None:
-            return [start_lane]
-
-        seq = [actual_goal]
-        while parent[seq[-1]] is not None:
-            seq.append(parent[seq[-1]])
-        seq.reverse()
-        return seq
-
-    def get_reference_state(self, idx):
-        """
-        Get reference state at a specific path index.
-
-        This method is used by the reward function in ScenarioEnv to compute
-        position and heading deviation penalties.
-
-        Args:
-            idx: Index into the path (_path_xy)
-
-        Returns:
-            dict with keys:
-                - position: np.ndarray of shape (2,) with [x, y] coordinates
-                - heading_theta: float representing heading angle in radians
-            Returns None if idx is out of bounds or path is not available
-        """
-        if self._path_xy is None or idx < 0 or idx >= len(self._path_xy):
-            return None
-
-        # Get position at index
-        position = self._path_xy[idx]
-
-        # Compute heading from path segment
-        if idx < len(self._path_xy) - 1:
-            # Use segment from idx to idx+1
-            delta = self._path_xy[idx + 1] - position
-        elif idx > 0:
-            # Use segment from idx-1 to idx (for last point)
-            delta = position - self._path_xy[idx - 1]
-        else:
-            # Only one point in path
-            return None
-
-        # Compute heading angle
-        heading_theta = math.atan2(delta[1], delta[0])
-
-        return {
-            "position": position,
-            "heading_theta": heading_theta
-        }
+                q.append(v)
+        return []
