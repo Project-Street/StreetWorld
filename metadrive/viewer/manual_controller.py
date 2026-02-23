@@ -3,7 +3,7 @@ import math
 import numpy as np
 import glfw
 
-from metadrive.utils import is_win, is_mac
+from metadrive.utils.utils import is_mac, is_win
 
 
 def get_controller(controller_name, window=None):

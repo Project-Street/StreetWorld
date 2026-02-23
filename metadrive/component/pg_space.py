@@ -8,8 +8,7 @@ import typing as tp
 from collections import namedtuple, OrderedDict
 
 import numpy as np
-
-from metadrive.utils import get_np_random
+from metadrive.utils.random_utils import get_np_random
 
 BoxSpace = namedtuple("BoxSpace", "max min")
 DiscreteSpace = namedtuple("DiscreteSpace", "max min")

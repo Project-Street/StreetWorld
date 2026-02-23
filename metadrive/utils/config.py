@@ -12,7 +12,7 @@ def merge_config_with_unknown_keys(old_dict, new_dict):
 
 
 def merge_config(old_dict, new_dict, new_keys_allowed=False):
-    from metadrive.utils import Config
+    from metadrive.utils.config import Config
     if isinstance(old_dict, Config):
         old_dict = old_dict.get_dict()
     if isinstance(new_dict, Config):

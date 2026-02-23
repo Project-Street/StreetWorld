@@ -12,12 +12,9 @@ from metadrive.constants import Semantics
 from metadrive.utils.logger import get_logger
 from metadrive.engine.physics_node import BaseRigidBodyNode, BaseGhostBodyNode
 from metadrive.type import MetaDriveType
-from metadrive.utils import Vector
-from metadrive.utils import random_string
+from metadrive.utils.random_utils import random_string
 from metadrive.utils.coordinates_shift import panda_vector, metadrive_vector
-from metadrive.utils.math import clip
-from metadrive.utils.math import norm
-from metadrive.utils.math import wrap_to_pi
+from metadrive.utils.math import clip, norm, wrap_to_pi, Vector
 
 logger = get_logger()
 

@@ -16,7 +16,8 @@ from metadrive.constants import Semantics
 from metadrive.engine.asset_loader import AssetLoader
 from metadrive.utils.logger import get_logger
 from metadrive.engine.physics_node import BaseRigidBodyNode
-from metadrive.utils import Config, safe_clip_for_small_array
+from metadrive.utils.config import Config
+from metadrive.utils.math import safe_clip_for_small_array, Vector
 from metadrive.utils.math import get_vertical_vector, norm, clip
 from metadrive.utils.math import wrap_to_pi
 from metadrive.utils.utils import get_object_from_node

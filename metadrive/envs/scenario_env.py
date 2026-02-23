@@ -18,7 +18,7 @@ from metadrive.manager.agent_manager import AgentManager
 from metadrive.obs.assembly_obs import AssemblyObservation
 from metadrive.obs.navigation_obs import NavigationObservation
 from metadrive.obs.surrounding_obs import SurroundingObservation
-from metadrive.utils import get_np_random
+from metadrive.utils.random_utils import get_np_random
 from metadrive.utils.math import wrap_to_pi
 from metadrive.utils.navigation_utils import nearest_front_index
 

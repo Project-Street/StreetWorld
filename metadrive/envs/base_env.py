@@ -22,7 +22,8 @@ from metadrive.obs.gaussian_obs import GaussianObservation
 from metadrive.obs.observation_base import DummyObservation
 # from metadrive.obs.state_obs import LidarStateObservation
 from metadrive.scenario.utils import convert_recorded_scenario_exported
-from metadrive.utils import merge_dicts, get_np_random, concat_step_infos
+from metadrive.utils.random_utils import get_np_random
+from metadrive.utils.utils import merge_dicts, concat_step_infos
 from metadrive.utils.logger import get_logger, reset_logger
 from metadrive.engine.core.physics_world import PhysicsWorld
 from metadrive.engine.step_counter import StepCounter
@@ -183,7 +184,7 @@ class BaseEnv(gym.Env):
         if force_seed is not None:
             current_seed = force_seed
         else:
-            current_seed = get_np_random(None).randint(0, 0xffffffff)
+            current_seed = get_np_random(None).randint(0, 0x7fffffff)
         self.current_seed = current_seed
         for mgr in [self.data_manager, self.map_manager] + list(self.agent_managers.values()):
             mgr.seed(current_seed)
@@ -243,18 +244,19 @@ class BaseEnv(gym.Env):
 
             self.agent_managers[name].reset(**input_data)
 
-    def _get_reset_return(self, reset_info):
+    def _get_reset_return(self, collected_obs):
         # TODO: figure out how to get the information of the before step
         obses = {}
         done_infos = {}
         cost_infos = {}
         reward_infos = {}
-        obses = reset_info['actor']['observation']
+        obses = collected_obs['actor']['observation']
         _, reward_infos = self.reward_function()
         _, done_infos = self.done_function()
         _, cost_infos = self.cost_function()
 
-        step_infos = concat_step_infos([reset_info, done_infos, reward_infos, cost_infos])
+        step_infos = concat_step_infos([done_infos, reward_infos, cost_infos])
+        step_infos["scene_name"] = self.scene_name
 
         return obses, step_infos
 
@@ -284,7 +286,7 @@ class BaseEnv(gym.Env):
         #     after_step_infos, allow_new_keys=True, without_copy=True
         # )
         engine_info = after_step_infos
-        return self._get_step_return(actions, engine_info=engine_info)  # collect observation, reward, termination
+        return self._get_step_return(actions, collected_obs=engine_info)  # collect observation, reward, termination
 
     def _update_scene(self):
         new_object_poses = {}
@@ -307,7 +309,7 @@ class BaseEnv(gym.Env):
         dt = self.config["physics_world_step_size"] * 1e-6
         self.physics_world.dynamic_world.doPhysics(dt, 1, dt)
 
-    def _get_step_return(self, actions, engine_info):
+    def _get_step_return(self, actions, collected_obs):
         # update obs, dones, rewards, costs, calculate done at first !
         obses = {}
         done_infos = {}
@@ -321,9 +323,9 @@ class BaseEnv(gym.Env):
         done_function_result, done_infos = self.done_function()
         _, cost_infos = self.cost_function()
         self.dones = done_function_result
-        obses = engine_info['actor']['observation']
+        obses = collected_obs['actor']['observation']
 
-        step_infos = concat_step_infos([engine_info, done_infos, reward_infos, cost_infos])
+        step_infos = concat_step_infos([done_infos, reward_infos, cost_infos])
         truncateds = done_infos['reason'] == AgentState.OUT_OF_STEP
         terminateds = self.dones
 
@@ -336,6 +338,7 @@ class BaseEnv(gym.Env):
 
         step_infos["episode_reward"] = self.episode_rewards
         step_infos["episode_length"] = self.episode_lengths
+        step_infos["scene_name"] = self.scene_name
 
         return obses, rewards, terminateds, truncateds, step_infos
 
@@ -349,7 +352,68 @@ class BaseEnv(gym.Env):
         raise NotImplementedError
     
     def close(self):
-        raise NotImplementedError
+        """
+        Best-effort resource cleanup.
+
+        This method is intentionally idempotent and tolerant to partially
+        initialized state, so callers can safely invoke it in finally blocks.
+        """
+        # 1) Clean all agent managers and spawned agent objects.
+        agent_managers = getattr(self, "agent_managers", None)
+        if isinstance(agent_managers, dict):
+            for _, manager in list(agent_managers.items()):
+                if manager is None:
+                    continue
+                try:
+                    # AgentManager.destroy() may fail before lazy_init() happens.
+                    if hasattr(manager, "destroy"):
+                        manager.destroy()
+                    elif hasattr(manager, "clear_all_objects"):
+                        manager.clear_all_objects()
+                except Exception:
+                    try:
+                        if hasattr(manager, "clear_all_objects"):
+                            manager.clear_all_objects()
+                    except Exception:
+                        pass
+            agent_managers.clear()
+        self.agent_managers = {}
+
+        # 2) Clean map objects (ground/mesh) to detach physics bodies.
+        map_manager = getattr(self, "map_manager", None)
+        if map_manager is not None:
+            try:
+                if hasattr(map_manager, "clear_all_objects"):
+                    map_manager.clear_all_objects()
+            except Exception:
+                pass
+
+        # 3) Tear down physics world callbacks and Bullet worlds.
+        physics_world = getattr(self, "physics_world", None)
+        if physics_world is not None:
+            try:
+                if hasattr(physics_world, "destroy"):
+                    physics_world.destroy()
+            except Exception:
+                pass
+        self.physics_world = None
+
+        # 4) Close/destroy external simulator model if provided.
+        model = getattr(self, "model", None)
+        if model is not None:
+            try:
+                if hasattr(model, "close"):
+                    model.close()
+                elif hasattr(model, "destroy"):
+                    model.destroy()
+            except Exception:
+                pass
+        self.model = None
+
+        # 5) Drop manager references to allow GC.
+        self.step_manager = None
+        self.map_manager = None
+        self.data_manager = None
 
     def capture(self, file_name=None):
         if not hasattr(self, "_capture_img"):
@@ -363,6 +427,10 @@ class BaseEnv(gym.Env):
     @property
     def scene_name(self) -> str:
         return self.data_manager.idx2scene[self.data_manager.current_scenario_id]
+
+    @property
+    def actor_manager(self):
+        return self.agent_managers['actor']
 
     @property
     def actor_controller(self):

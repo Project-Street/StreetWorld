@@ -9,8 +9,8 @@ from scipy.spatial.transform import Rotation as R
 from typing import Dict, Any
 
 lidar2ego = np.array([
-    [0, 1, 0,  0.5], 
-    [-1, 0, 0,  0.00],
+    [1, 0, 0,  0.5], 
+    [0, 1, 0,  0.00],
     [0, 0, 1,  1.50], 
     [0, 0, 0,  1.00],
 ], dtype=np.float32)

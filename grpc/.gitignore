@@ -1,5 +1,0 @@
-# Ignore generated Python files from proto compilation
-streetworld_grpc/*_pb2*
-build/
-__pycache__/
-*.egg-info/
