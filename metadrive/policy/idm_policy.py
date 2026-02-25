@@ -36,6 +36,10 @@ class IDMPolicy(BasePolicy):
         timestamp_list = sorted(state.keys())
         self.spawn_timestamp = timestamp_list[0]
 
+        self.trajectory = state
+        if len(self.trajectory) == 0:
+            raise ValueError("IDMPolicy reset got empty state trajectory.")
+        self.static = sum([np.linalg.norm(traj["velocity"]) for traj in self.trajectory.values()]) / len(self.trajectory) < 0.1
         self.destination = init_state['destination']
 
     def act(self, observation, *args, **kwargs):
@@ -44,6 +48,8 @@ class IDMPolicy(BasePolicy):
 
         turn_signal = nav["turn_signal"]
         path = nav["waypoint"]
+        if path is None:
+            return [0.0, 0.0]
         pts = np.asarray(path, dtype=np.float32)
         cumlen = nav['cummulative_length']
 
@@ -83,13 +89,14 @@ class IDMPolicy(BasePolicy):
         R = np.array([[heading_vec[0], -heading_vec[1]], [heading_vec[1], heading_vec[0]]])
         if lead is not None:
             # Project lead to path to get arclen gap and tangent
-            pos_ego = np.array([lead["position"]])
+            pos_ego = np.asarray(lead["position"], dtype=np.float32)
             pos_world = ego_xy + R @ pos_ego
             obj_closest_idx = np.argmin(np.sum((pts - pos_world[None, :]) ** 2, axis=1))
             delta_dist = float(cumlen[obj_closest_idx] - cumlen[front_idx])
             ego_len = self.controller.LENGTH
             obj_len = lead["size"][0]
-            s0 = self.front_distance if lead["type"] == MetaDriveType.VEHICLE else 2.0
+            lead_type = lead["type"]
+            s0 = self.front_distance if lead_type == MetaDriveType.VEHICLE else 2.0
 
             # Gap s computed from path arclen minus half lengths
             s = max(1e-3, delta_dist - 0.5 * ego_len - 0.5 * obj_len)
@@ -102,7 +109,7 @@ class IDMPolicy(BasePolicy):
             path_dir = t_vec / (np.linalg.norm(t_vec) + 1e-9)
 
             # Tangential velocities (km/h)
-            v_obj_world = R @ np.array([lead["velocity"]])
+            v_obj_world = R @ np.asarray(lead["velocity"], dtype=np.float32)
             v_obj_t = np.dot(v_obj_world, path_dir) * 3.6
             dv = max(0.0, v - v_obj_t)
 

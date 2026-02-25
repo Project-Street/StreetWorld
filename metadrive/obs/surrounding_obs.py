@@ -64,8 +64,8 @@ class SurroundingObservation(BaseObservation):
                 "position": [float(pos_ego[0]), float(pos_ego[1])],
                 "velocity": [float(v_ego[0]), float(v_ego[1])],
                 "heading": float(rel_heading),
-                "size": size
-                # "type": self.collector.metadrive_type
+                "size": size,
+                "type": ctrl.metadrive_type
             })
 
         return surrounding

@@ -65,6 +65,11 @@ class AssemblyObservation(BaseObservation):
         for name, obs in self._observers.items():
             ret[name] = obs.observe()
 
+        # Lightweight pass-through mode for rule-based policies (e.g. IDM),
+        # where we only need sub-observations in dict form.
+        if "gaussian" not in ret and "states" not in ret:
+            return ret
+
         obs_gaussian = ret.get('gaussian', {})
         obs_img = obs_gaussian.get('image', {})
         camera_info = obs_gaussian.get('camera_info', {})
