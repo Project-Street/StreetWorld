@@ -8,13 +8,6 @@ import math
 from scipy.spatial.transform import Rotation as R
 from typing import Dict, Any
 
-lidar2ego = np.array([
-    [1, 0, 0,  0.5], 
-    [0, 1, 0,  0.00],
-    [0, 0, 1,  1.50], 
-    [0, 0, 0,  1.00],
-], dtype=np.float32)
-
 def build_camera_params(camera_configs):
     camera_params = {}
     R_ego2cam_base = np.array([
@@ -75,6 +68,7 @@ class GaussianObservation(BaseObservation):
 
     def __init__(self, config):
         super().__init__(config)
+        # grpc based env can only support STACK_SIZE=1, otherwise the data transmission will be too heavy and cause latency
         self.STACK_SIZE = config["stack_size"]
         self.clip_rgb = config['clip_rgb']
         self.camera_configs = config['cameras']
@@ -177,32 +171,12 @@ class GaussianObservation(BaseObservation):
             else:
                 K = np.array(K)
 
-            H = int(params['H'])
-            W = int(params['W'])
-
-            fx = float(K[0, 0])
-            fy = float(K[1, 1])
-            cx = float(K[0, 2])
-            cy = float(K[1, 2])
-
-            fovx = 2 * math.atan(W / (2 * fx))
-            fovy = 2 * math.atan(H / (2 * fy))
-
-            lidar2cam = ego2cam @ lidar2ego
-            
             camera_info[cam_name] = {
-            'l2c': lidar2cam.numpy().astype(np.float32),
-            'intrinsic': {
-                'fovx': float(fovx),
-                'fovy': float(fovy),
-                'H': H,
-                'W': W,
-                'cx': float(cx),
-                'cy': float(cy)
-            },
-            'ego2camera': ego2cam.numpy().astype(np.float32),
-            'K': K.astype(np.float32)
-        }
+                'ego2camera': ego2cam.numpy().astype(np.float32),
+                'K': K.astype(np.float32),
+                'H': params['H'],
+                'W': params['W']
+            }
 
         return {
             'camera_info': camera_info,

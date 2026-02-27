@@ -23,6 +23,8 @@ class BaseTrafficParticipant(BaseObject):
             size,
             position: Sequence[float], 
             heading_theta: float = 0., 
+            velocity: np.ndarray = None,
+            angluar_velocity: float = 0.0,
             random_seed=None, 
             name=None,
             **kwargs
@@ -33,6 +35,13 @@ class BaseTrafficParticipant(BaseObject):
 
         self.set_position(position)
         self.set_heading_theta(heading_theta)
+        self.set_velocity(velocity)
+        self.set_angular_velocity(angluar_velocity)
+        
+        self.last_position = position
+        self.last_heading_theta = heading_theta
+        self.last_velocity = velocity
+        self.last_angular_velocity = angluar_velocity
 
         self.set_metadrive_type(self.TYPE_NAME)
 

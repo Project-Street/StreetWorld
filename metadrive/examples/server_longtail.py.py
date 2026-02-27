@@ -230,22 +230,29 @@ class EnvServicer(service_pb2_grpc.EnvServiceServicer):
         """
         params_list = []
         for cam_name, cam_info in camera_info.items():
-            intrinsic = cam_info['intrinsic']
-            params_list.append(common_pb2.CameraParams(
-                camera_name=cam_name,
-                intrinsic=common_pb2.CameraIntrinsic(
+            params = common_pb2.CameraParams(camera_name=cam_name)
+
+            intrinsic = cam_info.get('intrinsic')
+            if intrinsic is not None:
+                params.intrinsic.CopyFrom(common_pb2.CameraIntrinsic(
                     fovx=float(intrinsic['fovx']),
                     fovy=float(intrinsic['fovy']),
                     height=int(intrinsic['H']),
                     width=int(intrinsic['W']),
                     cx=float(intrinsic['cx']),
                     cy=float(intrinsic['cy'])
-                ),
-                l2c=self._serialize_matrix(cam_info['l2c']),
-                ego2camera=self._serialize_matrix(cam_info['ego2camera']),
-                K=self._serialize_matrix(cam_info['K']),
-                w2c=self._serialize_matrix(cam_info['w2c'])
-            ))
+                ))
+
+            if 'l2c' in cam_info:
+                params.l2c.CopyFrom(self._serialize_matrix(cam_info['l2c']))
+            if 'ego2camera' in cam_info:
+                params.ego2camera.CopyFrom(self._serialize_matrix(cam_info['ego2camera']))
+            if 'K' in cam_info:
+                params.K.CopyFrom(self._serialize_matrix(cam_info['K']))
+            if 'w2c' in cam_info:
+                params.w2c.CopyFrom(self._serialize_matrix(cam_info['w2c']))
+
+            params_list.append(params)
         return params_list
 
     def _serialize_obs_info(self, obs_info: Dict) -> common_pb2.ObservationInfo:

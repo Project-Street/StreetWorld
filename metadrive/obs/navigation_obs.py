@@ -57,7 +57,6 @@ class NavigationObservation(BaseObservation, Randomizable):
 
     def observe(self):
         return {
-            'map': self.trajdata_map, 
             'turn_signal': self._get_turn_signal(), 
             'waypoint': self._path_xy,
             'cummulative_length': self._path_cumlen

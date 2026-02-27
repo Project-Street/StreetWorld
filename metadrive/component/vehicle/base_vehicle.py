@@ -138,11 +138,6 @@ class BaseVehicle(BaseObject, BaseVehicleState):
         self.throttle_brake = 0.0
         self.steering = 0
         self.last_current_action = deque([(0.0, 0.0), (0.0, 0.0)], maxlen=2)
-        self.last_position = (0, 0)
-        self.last_velocity = 0
-        self.last_heading = 0
-        self.dist_to_left_side = None
-        self.dist_to_right_side = None
 
         # step info
         self.out_of_route = None
@@ -155,11 +150,8 @@ class BaseVehicle(BaseObject, BaseVehicleState):
         if _calling_reset:
             self.reset(position=position, heading_theta=heading_theta, vehicle_config=config, **kwargs)
 
-        self.accelerate = 0.0
-        self.last_speed = 0.0
         self.last_steering = 0.0  # 添加：记录上一时刻的转向角
         self.steer_rate = 0.0
-        self.timestamp = 0.0
 
     def _init_step_info(self):
         # done info will be initialized every frame
@@ -205,32 +197,33 @@ class BaseVehicle(BaseObject, BaseVehicleState):
             self.seed(random_seed)
             self.sample_parameters()
 
+        # self.set_wheel_friction(self.config["wheel_friction"])
 
         self.set_heading_theta(heading_theta)
-        # self.set_wheel_friction(self.config["wheel_friction"])
+        self.last_heading_theta = heading_theta
+
         if len(position) == 2:
             self.set_position(position, height=self.HEIGHT / 2)
+            self.last_position = position
         elif len(position) == 3:
             self.set_position(position[:2], height=position[-1])
+            self.last_position = position[:2]
         else:
             raise ValueError()
-
-        # done info
-        self._init_step_info()
-
-        self.update_dist_to_left_right()
-        self.energy_consumption = 0
 
         if self.config["spawn_velocity"]:
             self.set_velocity(velocity)
             self.set_angular_velocity(angluar_velocity)
+            self.last_velocity = velocity
+            self.last_angular_velocity = angluar_velocity
 
-        self.accelerate = 0.0
-        self.last_speed = 0.0
+        # done info
+        self._init_step_info()
+
+        self.energy_consumption = 0
+
         self.steer_rate = 0.0
-        self.timestamp = 0.0
 
-        # self.add_light()
 
     def move(self, action=None, state_info=None):
         """
@@ -241,9 +234,6 @@ class BaseVehicle(BaseObject, BaseVehicleState):
         #     action = [0, 0]
 
         self._init_step_info()
-        self.last_position = self.position  # 2D vector
-        self.last_velocity = self.velocity  # 2D vector
-        self.last_heading_theta = self.heading_theta
 
         if state_info:
             self.set_transform(state_info["transform"])
@@ -252,38 +242,17 @@ class BaseVehicle(BaseObject, BaseVehicleState):
             self.set_angular_velocity(state_info["angular_velocity"])
             step_info = None
         else:
+            self.last_position = self.position
+            self.last_velocity = self.velocity
+            self.last_heading_theta = self.heading_theta
+            self.last_angular_velocity = self.angular_velocity
+
             action, step_info = self._preprocess_action(action)
             self.last_current_action.append(action)  # the real step of physics world is implemented in taskMgr.step()
             # if self.increment_steering:
             #     self._set_incremental_action(action)
             # else:
             self._set_action(action)
-        return step_info
-
-    def after_step(self):
-        step_energy, episode_energy = self._update_energy_consumption()
-        # self.out_of_route = self._out_of_route()
-        self.accelerate = (self.speed - self.last_speed) / 0.1
-        self.last_speed = self.speed
-
-        current_steering_rad = self.steering * np.deg2rad(self.max_steering)
-        last_steering_rad = self.last_steering * np.deg2rad(self.max_steering)
-        self.steer_rate = (current_steering_rad - last_steering_rad) / 0.1  # rad/s
-        self.last_steering = self.steering
-        
-        self.timestamp += 0.1
-        step_info = {}
-        step_info.update(
-            {
-                "speed": float(self.speed),
-                "angular_speed": float(self.angular_velocity),
-                "steering": float(self.steering),
-                "acceleration": float(self.throttle_brake),
-                "step_energy": step_energy,
-                "episode_energy": episode_energy,
-            }
-        )
-
         return step_info
 
     def _out_of_route(self):
@@ -403,11 +372,6 @@ class BaseVehicle(BaseObject, BaseVehicleState):
                         self.vehicle.applyEngineForce(0.0, wheel_index)
                         self.vehicle.setBrake(abs(throttle_brake) * self.max_brake_force, wheel_index)
 
-    """---------------------------------------- vehicle info ----------------------------------------------"""
-
-    def update_dist_to_left_right(self):
-        self.dist_to_left_side, self.dist_to_right_side = 0, 0
-
     """---------------------------------------- some math tool ----------------------------------------------"""
 
     """-------------------------------------- for vehicle making ------------------------------------------"""
@@ -465,22 +429,13 @@ class BaseVehicle(BaseObject, BaseVehicleState):
         self.vehicle = None
         self.wheels = None
 
-    def set_velocity(self, velocity):
-        super(BaseVehicle, self).set_velocity(velocity)
-        self.last_velocity = self.velocity
-
     def set_position(self, position : List[float], height=None):
         if height is None:
             height = self.position[-1]
         if len(position) == 2:
             position.append(height)
         super(BaseVehicle, self).set_position(position)
-        self.last_position = self.position
-
-    def set_heading_theta(self, heading):
-        super(BaseVehicle, self).set_heading_theta(heading)
-        self.last_heading = self.heading_theta
-
+    
     def get_state(self):
         """
         Fetch more information

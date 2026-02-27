@@ -24,6 +24,9 @@ import numpy as np
 from google.protobuf import struct_pb2
 
 from metadrive.envs.scenario_env import ScenarioEnv
+from metadrive.obs.assembly_obs import AssemblyObservation
+from metadrive.obs.gaussian_obs import GaussianObservation
+from metadrive.obs.observation_base import DefaultObservation, DummyObservation
 from easydrive.models.scenes.simulator_interface import SimulatorInterface
 
 try:
@@ -129,70 +132,55 @@ class EnvServicer(service_pb2_grpc.EnvServiceServicer):
 
     def _serialize_observation(self, obs: Any) -> common_pb2.Observation:
         """
-        Serialize environment observation tuple to protobuf Observation.
-        """
-        if isinstance(obs, tuple) and len(obs) == 2:
-            obs_img, obs_info = obs
-        else:
-            obs_img, obs_info = {}, {}
+        Serialize environment observation to protobuf Observation.
 
-        # gRPC contract: observation.info must not carry numpy/torch objects.
-        obs_info = self._obs_info_to_grpc_builtin(obs_info if isinstance(obs_info, dict) else {})
+        Rules:
+        1) AssemblyObservation: gaussian -> images_observation, remaining dict -> other_observation
+        2) GaussianObservation: gaussian -> images_observation
+        3) Other observations: all payload -> other_observation
+        4) Dummy/Default observations: raise error
+        """
+        observer = self.env.agent_managers["actor"].observer
+
+        if isinstance(observer, AssemblyObservation):
+            assembly_obs = dict(obs)
+            gaussian_obs = assembly_obs.pop("gaussian")
+            images = self._serialize_gaussian_images(gaussian_obs["image"], gaussian_obs["camera_info"])
+            return common_pb2.Observation(
+                images_observation=images,
+                other_observation=self._dict_to_struct(assembly_obs),
+            )
+
+        if isinstance(observer, GaussianObservation):
+            images = self._serialize_gaussian_images(obs["image"], obs["camera_info"])
+            return common_pb2.Observation(images_observation=images)
+
+        if isinstance(observer, (DummyObservation, DefaultObservation)):
+            raise ValueError("DummyObservation and DefaultObservation are not supported in streetworld grpc mode.")
 
         return common_pb2.Observation(
-            images=self._serialize_images(obs_img if isinstance(obs_img, dict) else {}),
-            info=self._dict_to_struct(obs_info)
+            other_observation=self._dict_to_struct(obs),
         )
 
-    def _serialize_images(self, obs_img: Dict[str, np.ndarray]) -> List[common_pb2.CameraImage]:
+    def _serialize_gaussian_images(
+        self,
+        gaussian_images: Dict[str, np.ndarray],
+        camera_info: Dict[str, Dict[str, Any]],
+    ) -> List[common_pb2.CameraImage]:
         """
-        Serialize observation images to protobuf.
-
-        Args:
-            obs_img: Dict mapping camera_name -> (stack, H, W, 3) array
-
-        Returns:
-            List of CameraImage protobuf messages
+        Serialize gaussian observation image + camera_info to CameraImage.
         """
         images = []
-        for cam_name, stacked in obs_img.items():
-            # Get latest frame from stack (last element)
-            if stacked.ndim == 4:  # (stack, H, W, 3)
-                frame = stacked[-1]
-            else:  # (H, W, 3)
-                frame = stacked
-
-            h, w = frame.shape[:2]
-
-            # Convert to raw RGB bytes
-            image_bytes = frame.tobytes()
-            images.append(common_pb2.CameraImage(
-                camera_name=cam_name,
-                image_data=image_bytes,
-                height=h,
-                width=w
-            ))
-
+        for cam_name, stacked in gaussian_images.items():
+            frame = stacked[-1] if stacked.ndim == 4 else stacked
+            images.append(
+                common_pb2.CameraImage(
+                    camera_name=cam_name,
+                    image_data=frame.tobytes(),
+                    camera_info=self._dict_to_struct(camera_info[cam_name]),
+                )
+            )
         return images
-
-    def _obs_info_to_grpc_builtin(self, value: Any) -> Any:
-        """
-        Convert obs_info payload to plain python types.
-        Rule: numpy / torch values are converted to list (or scalar).
-        """
-        if isinstance(value, dict):
-            return {str(k): self._obs_info_to_grpc_builtin(v) for k, v in value.items()}
-        if isinstance(value, (list, tuple)):
-            return [self._obs_info_to_grpc_builtin(v) for v in value]
-        if isinstance(value, np.ndarray):
-            return [self._obs_info_to_grpc_builtin(v) for v in value.tolist()]
-        if isinstance(value, np.generic):
-            return value.item()
-        if torch is not None and isinstance(value, torch.Tensor):
-            return [self._obs_info_to_grpc_builtin(v) for v in value.detach().cpu().tolist()]
-        if isinstance(value, (str, int, float, bool)) or value is None:
-            return value
-        return str(value)
 
     def _to_builtin(self, value: Any) -> Any:
         """
@@ -206,6 +194,8 @@ class EnvServicer(service_pb2_grpc.EnvServiceServicer):
             return self._to_builtin(value.tolist())
         if isinstance(value, np.generic):
             return value.item()
+        if torch is not None and isinstance(value, torch.Tensor):
+            return self._to_builtin(value.detach().cpu().tolist())
         if isinstance(value, (str, int, float, bool)) or value is None:
             return value
         return str(value)
@@ -216,7 +206,7 @@ class EnvServicer(service_pb2_grpc.EnvServiceServicer):
         """
         payload = self._to_builtin(data)
         if not isinstance(payload, dict):
-            payload = {"value": payload}
+            payload = {"__payload__": payload}
         struct = struct_pb2.Struct()
         struct.update(payload)
         return struct

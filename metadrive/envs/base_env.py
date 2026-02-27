@@ -99,7 +99,10 @@ class BaseEnv(gym.Env):
         # self._register_manager("replay_manager", ReplayManager())
 
         # physics world
-        self.physics_world = PhysicsWorld(disable_collision=self.config["disable_collision"])
+        self.physics_world = PhysicsWorld(
+            disable_collision=self.config["disable_collision"],
+            dt=self.config["physics_world_step_size"] * 1e-6
+        )
 
         # collision callback
         self.physics_world.dynamic_world.setContactAddedCallback(PythonCallbackObject(collision_callback))
@@ -257,6 +260,8 @@ class BaseEnv(gym.Env):
 
         step_infos = concat_step_infos([done_infos, reward_infos, cost_infos])
         step_infos["scene_name"] = self.scene_name
+        step_infos["current_timestamp"] = int(self.step_manager.current_timestamp)
+        step_infos["relative_timestamp"] = int(self.step_manager.relative_timestamp)
 
         return obses, step_infos
 
@@ -267,7 +272,7 @@ class BaseEnv(gym.Env):
             for manager in self.agent_managers.values():
                 manager.step(actions)
 
-            self.step_physics_world()
+            self.physics_world.step()
             # the recording should happen after step physics world
             # if "record_manager" in self.managers and i < self.config["decision_repeat"] - 1:
             #     self.record_manager.step()
@@ -289,25 +294,35 @@ class BaseEnv(gym.Env):
         return self._get_step_return(actions, collected_obs=engine_info)  # collect observation, reward, termination
 
     def _update_scene(self):
+        self._surrounding_pre_collection = {}
         new_object_poses = {}
+
         for name, mgr in self.agent_managers.items():
             mgr.update_state()
-            if name == 'actor':
-                continue
+            obj_pose = mgr.get_pose()
             if mgr.state == AgentState.ALIVE:
-                new_object_poses[name] = torch.from_numpy(mgr.get_pose())
+                controller = mgr.controller
+                transform = obj_pose
+                velocity = np.asarray(controller.velocity, dtype=np.float32)
+                self._surrounding_pre_collection[name] = {
+                    "controller": controller,
+                    "transform": transform,
+                    "velocity": velocity,
+                    "heading_theta": float(controller.heading_theta),
+                    "angular_velocity": float(controller.angular_velocity),
+                    "length": float(controller.LENGTH),
+                    "width": float(controller.WIDTH),
+                    "type": controller.metadrive_type
+                }
+                if name != 'actor':
+                    new_object_poses[name] = torch.from_numpy(obj_pose)
         self.model.update_scene(self.step_manager.current_timestamp, new_object_poses)
 
     def _collect_all_object(self):
-        agent_state = {}
-        for name, mgr in self.agent_managers.items():
-            if mgr.state == AgentState.ALIVE:
-                agent_state[name] = mgr.controller
-        return agent_state
-
-    def step_physics_world(self):
-        dt = self.config["physics_world_step_size"] * 1e-6
-        self.physics_world.dynamic_world.doPhysics(dt, 1, dt)
+        if hasattr(self, "_surrounding_pre_collection"):
+            return self._surrounding_pre_collection
+        else:
+            raise RuntimeError("Can not find _surrounding_pre_collection, make sure _update_scene() is called before collecting objects")
 
     def _get_step_return(self, actions, collected_obs):
         # update obs, dones, rewards, costs, calculate done at first !
@@ -339,6 +354,8 @@ class BaseEnv(gym.Env):
         step_infos["episode_reward"] = self.episode_rewards
         step_infos["episode_length"] = self.episode_lengths
         step_infos["scene_name"] = self.scene_name
+        step_infos["current_timestamp"] = int(self.step_manager.current_timestamp)
+        step_infos["relative_timestamp"] = int(self.step_manager.relative_timestamp)
 
         return obses, rewards, terminateds, truncateds, step_infos
 

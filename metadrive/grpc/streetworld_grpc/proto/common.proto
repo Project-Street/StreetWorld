@@ -13,12 +13,10 @@ message Matrix {
 message CameraImage {
     string camera_name = 1;
     bytes image_data = 2;  // Raw RGB bytes (H * W * 3)
-    int32 height = 3;
-    int32 width = 4;
+    google.protobuf.Struct camera_info = 2;
 }
 
 message Observation {
-    
-    repeated CameraImage images = 1;  // All camera images (latest frame only)
-    google.protobuf.Struct info = 2;
+    repeated CameraImage images_observation = 1;  // All camera images (latest frame only)
+    optional google.protobuf.Struct other_observation = 2;
 }

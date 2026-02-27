@@ -1,8 +1,8 @@
 import math
 import numpy as np
+from typing import Any, Dict
 
 from metadrive.obs.observation_base import BaseObservation
-
 
 class SurroundingObservation(BaseObservation):
     """
@@ -31,7 +31,8 @@ class SurroundingObservation(BaseObservation):
         return gym.spaces.Box(-np.inf, np.inf, shape=(1,), dtype=np.float32)
 
     def observe(self):
-        objs = self.collector()  # dict[name] -> controller
+        objs: Dict[str, Dict[str, Any]] = self.collector()  # dict[name] -> sampled data
+
         ego_T = self.controller.transform
         ego_T_inv = np.linalg.inv(ego_T)
         ego_R_inv = ego_T_inv[:3, :3]
@@ -39,33 +40,33 @@ class SurroundingObservation(BaseObservation):
 
         surrounding = []
         for name, ctrl in objs.items():
-            if ctrl is self.controller:
+            controller = ctrl.get("controller")
+            if controller is self.controller:
                 continue
 
+            transform = ctrl["transform"]
             # Relative transform in ego frame
-            T_rel = ego_T_inv @ ctrl.transform
+            T_rel = ego_T_inv @ transform
             pos_ego = T_rel[:2, 3]
 
             # Velocity transform to ego frame (use rotation part only)
-            v_world = ctrl.velocity  # [vx, vy]
-            v_world3 = np.array([float(v_world[0]), float(v_world[1]), 0.0], dtype=np.float32)
+            v_world = ctrl["velocity"]  # [vx, vy]
+            v_world3 = np.array([v_world[0], v_world[1], 0.0], dtype=np.float32)
             v_ego3 = ego_R_inv @ v_world3
             v_ego = v_ego3[:2]
 
             # Relative heading
-            rel_heading = self._wrap_pi(ctrl.heading_theta - ego_heading)
+            rel_heading = self._wrap_pi(ctrl["heading_theta"] - ego_heading)
 
-            # Size from controller
-            length = ctrl.LENGTH
-            width = ctrl.WIDTH
-            size = [float(length), float(width)]
-
+            size = [ctrl["length"], ctrl["width"]]
+            heading_velocity = ctrl["angular_velocity"]
             surrounding.append({
-                "position": [float(pos_ego[0]), float(pos_ego[1])],
-                "velocity": [float(v_ego[0]), float(v_ego[1])],
-                "heading": float(rel_heading),
+                "position": [pos_ego[0], pos_ego[1]],
+                "velocity": [v_ego[0], v_ego[1]],
+                "heading": rel_heading,
+                "heading_velocity": heading_velocity,
                 "size": size,
-                "type": ctrl.metadrive_type
+                "type": ctrl["type"]
             })
 
         return surrounding

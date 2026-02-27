@@ -62,6 +62,11 @@ class BaseObject(BaseRunnable, MetaDriveType, ABC):
 
         if size:
             self.LENGTH, self.WIDTH, self.HEIGHT = size
+        
+        self.last_position = np.zeros(2)
+        self.last_velocity = np.zeros(2)
+        self.last_heading_theta = 0
+        self.last_angular_velocity = 0
 
     # @property
     # def z(self):
@@ -84,6 +89,7 @@ class BaseObject(BaseRunnable, MetaDriveType, ABC):
         :param height: give a fixed height
         """
         assert len(position) == 3
+        self.last_position = self.position
         self.body.setTransform(self.body.getTransform().setPos(panda_vector(position)))
 
     @property
@@ -96,6 +102,8 @@ class BaseObject(BaseRunnable, MetaDriveType, ABC):
         :param heading_theta: float
         :param in_rad: when set to True, heading theta should be in rad, otherwise, in degree
         """
+        self.last_heading_theta = self.heading_theta
+        
         h = heading_theta
         if to_deg:
             h = heading_theta * 180 / np.pi
@@ -117,6 +125,9 @@ class BaseObject(BaseRunnable, MetaDriveType, ABC):
         return wrap_to_pi(h_ego / 180 * np.pi)
 
     def set_transform(self, m):
+        self.last_position = self.position
+        self.last_heading_theta = self.heading_theta
+        
         M = m[:3, :3] @ BaseObject.YFront2X
         self.body.setTransform(TransformState.makeMat(LMatrix4(
             M[0, 0], M[1, 0], M[2, 0], m[3, 0],
@@ -145,6 +156,7 @@ class BaseObject(BaseRunnable, MetaDriveType, ABC):
         :param value: speed [m/s]
         :param in_local_frame: True, apply speed to local fram
         """
+        self.last_velocity = self.velocity
         self.body.setLinearVelocity(
             LVector3(velocity[0], velocity[1], self.body.getLinearVelocity()[-1])
         )
@@ -158,6 +170,7 @@ class BaseObject(BaseRunnable, MetaDriveType, ABC):
         return np.asarray([velocity[0], velocity[1]])
 
     def set_angular_velocity(self, angular_velocity, in_rad=True):
+        self.last_angular_velocity = self.angular_velocity
         if not in_rad:
             angular_velocity = angular_velocity / 180 * np.pi
         self.body.setAngularVelocity(LVector3(0, 0, angular_velocity))

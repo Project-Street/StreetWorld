@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-import sys
 import time
-from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
 import grpc
@@ -20,8 +18,8 @@ class GrpcClientEnv(gym.Env):
     Gym-compatible gRPC client env.
 
     It mirrors ScenarioEnv's IO contract:
-    - reset() returns: ((obs_img, obs_info), reset_info)
-    - step(action) returns: ((obs_img, obs_info), reward, terminated, truncated, step_info)
+    - reset() returns: (obs, reset_info)
+    - step(action) returns: (obs, reward, terminated, truncated, step_info)
     """
 
     metadata = {}
@@ -62,44 +60,51 @@ class GrpcClientEnv(gym.Env):
         *,
         seed: Optional[int] = None,
         options: Optional[Dict[str, Any]] = None,
-    ) -> Tuple[Tuple[Dict[str, np.ndarray], Dict[str, Any]], Dict[str, Any]]:
+    ) -> Tuple[Any, Dict[str, Any]]:
         del seed
 
-        req_kwargs: Dict[str, Any] = {}
+        if options is None:
+            request = service_pb2.ResetRequest()
+        else:
+            request = service_pb2.ResetRequest(
+                transforms_json_path=options["transforms_json_path"],
+                render_server_url=options["render_server_url"],
+            )
+
         # Reset often includes heavy scene/model initialization, so allow a longer RPC deadline.
         response = self.stub.Reset(
-            service_pb2.ResetRequest(**req_kwargs),
+            request,
             timeout=self.timeout_sec * 2.0,
             wait_for_ready=True,
         )
-        if getattr(response, "status", False):
-            raise RuntimeError(f"Reset failed: {getattr(response, 'message', '')}")
+        if response.status:
+            raise RuntimeError(f"Reset failed: {response.message}")
 
-        obs_img, obs_info = self._deserialize_observation(response.observation)
-        reset_info = self._struct_to_dict(getattr(response, "StepInfo", None))
+        obs = self._deserialize_observation(response.observation)
+        reset_info = self._struct_to_builtin(response.StepInfo)
 
-        return (obs_img, obs_info), reset_info
+        return obs, reset_info
 
     def step(
         self, action: np.ndarray
-    ) -> Tuple[Tuple[Dict[str, np.ndarray], Dict[str, Any]], float, bool, bool, Dict[str, Any]]:
+    ) -> Tuple[Any, float, bool, bool, Dict[str, Any]]:
         act = np.asarray(action, dtype=np.float32).reshape(-1)
-        if act.size < 2:
-            raise ValueError(f"Action must have at least 2 elements, got shape {act.shape}")
+        if act.size != 2:
+            raise ValueError(f"Action must have shape (2,), got {act.shape}")
 
         response = self.stub.Step(
             service_pb2.StepRequest(action=act[:2].tolist()),
             timeout=self.timeout_sec,
             wait_for_ready=True,
         )
-        if getattr(response, "status", False):
-            raise RuntimeError(f"Step failed: {getattr(response, 'message', '')}")
+        if response.status:
+            raise RuntimeError(f"Step failed: {response.message}")
 
-        obs_img, obs_info = self._deserialize_observation(response.observation)
-        step_info = self._struct_to_dict(getattr(response, "StepInfo", None))
+        obs = self._deserialize_observation(response.observation)
+        step_info = self._struct_to_builtin(response.StepInfo)
 
         return (
-            (obs_img, obs_info),
+            obs,
             float(response.reward),
             bool(response.terminated),
             bool(response.truncated),
@@ -107,7 +112,7 @@ class GrpcClientEnv(gym.Env):
         )
 
     def close(self) -> None:
-        if getattr(self, "channel", None) is not None:
+        if self.channel is not None:
             self.channel.unsubscribe(self._on_connectivity_change)
             self.channel.close()
             self.channel = None
@@ -131,41 +136,44 @@ class GrpcClientEnv(gym.Env):
 
     def _deserialize_observation(
         self, observation: Any
-    ) -> Tuple[Dict[str, np.ndarray], Dict[str, Any]]:
-        obs_img: Dict[str, np.ndarray] = {}
-        for img in observation.images:
-            frame = np.frombuffer(img.image_data, dtype=np.uint8).reshape(img.height, img.width, 3)
-            obs_img[img.camera_name] = frame
+    ) -> Any:
+        has_images = len(observation.images_observation) > 0
+        has_other = observation.HasField("other_observation")
 
-        obs_info = self._struct_to_dict(observation.info)
-        self._normalize_obs_info(obs_info)
-        return obs_img, obs_info
+        if has_images and has_other:
+            obs = self._struct_to_builtin(observation.other_observation)
+            obs["gaussian"] = self._deserialize_gaussian_observation(observation.images_observation)
+            return obs
+
+        if has_images:
+            return self._deserialize_gaussian_observation(observation.images_observation)
+
+        if has_other:
+            return self._struct_to_builtin(observation.other_observation)
+
+        raise ValueError("Observation payload is empty.")
+
+    def _deserialize_gaussian_observation(self, images_observation: Any) -> Dict[str, Any]:
+        camera_info: Dict[str, Any] = {}
+        image: Dict[str, Any] = {}
+
+        for camera_image in images_observation:
+            cam_name = camera_image.camera_name
+            cam_info = self._struct_to_builtin(camera_image.camera_info)
+            h = int(cam_info["H"])
+            w = int(cam_info["W"])
+            frame = np.frombuffer(camera_image.image_data, dtype=np.uint8).reshape(h, w, 3)
+            camera_info[cam_name] = cam_info
+            image[cam_name] = np.expand_dims(frame, axis=0)
+
+        return {
+            "camera_info": camera_info,
+            "image": image,
+        }
 
     @staticmethod
-    def _struct_to_dict(struct_msg: Any) -> Dict[str, Any]:
-        if struct_msg is None:
-            return {}
-        try:
-            result = MessageToDict(struct_msg, preserving_proto_field_name=True)
-            return result if isinstance(result, dict) else {}
-        except Exception:
-            return {}
-
-    @staticmethod
-    def _normalize_obs_info(obs_info: Dict[str, Any]) -> None:
-        for key in ("ego_pos", "ego_rot", "linear_velocity", "linear_acceleration", "angular_velocity"):
-            value = obs_info.get(key)
-            if isinstance(value, list):
-                obs_info[key] = np.asarray(value, dtype=np.float32)
-
-        cam_params = obs_info.get("cam_params")
-        if not isinstance(cam_params, dict):
-            return
-
-        for _, cam in cam_params.items():
-            if not isinstance(cam, dict):
-                continue
-            for mat_key in ("l2c", "ego2camera", "K", "w2c"):
-                mat = cam.get(mat_key)
-                if isinstance(mat, list):
-                    cam[mat_key] = np.asarray(mat, dtype=np.float32)
+    def _struct_to_builtin(struct_msg: Any) -> Any:
+        result = MessageToDict(struct_msg, preserving_proto_field_name=True)
+        if "__payload__" in result and len(result) == 1:
+            return result["__payload__"]
+        return result

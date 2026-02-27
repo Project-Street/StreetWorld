@@ -35,7 +35,7 @@ BASE_DEFAULT_CONFIG = dict(
             gaussian = dict(
                 observer_class=GaussianObservation,
                 clip_rgb=False,
-                stack_size=3,
+                stack_size=1,
                 cameras={
                 'BACK': {
                     'offset': [-2.65, 0, 1.8],
