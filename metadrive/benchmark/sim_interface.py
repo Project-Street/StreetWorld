@@ -36,6 +36,17 @@ class SharpVideoSimulatorInterface:
         self.fg_gaussians = None
         self.bg_gaussians = None
         self.bg_gaussians_back = None
+        self._depth_max_meters = 1000.0
+
+    def _encode_depth_rgb(self, depth_m: np.ndarray) -> np.ndarray:
+        """Encode depth in meters to 3x8-bit RGB (CARLA-style)."""
+        depth_norm = np.clip(depth_m / self._depth_max_meters, 0.0, 1.0)
+        depth_int = (depth_norm * (256**3 - 1)).astype(np.uint32)
+        r = (depth_int // 65536) % 256
+        g = (depth_int // 256) % 256
+        b = depth_int % 256
+        depth_rgb = np.stack([r, g, b], axis=-1).astype(np.uint8)
+        return depth_rgb
 
     def load_metadata(self, cfg_path) -> tuple:
         """
@@ -81,7 +92,7 @@ class SharpVideoSimulatorInterface:
             tracking_data[obj_id]['poses'] = new_poses
 
             # StreetGaussian expects (l,w,h) as size order.
-            tracking_data[obj_id]['size'] = [tracking_data[obj_id]['size'][i] * 0.7 for i in [1, 0, 2]] # (w,l,h) -> (l,w,h)
+            tracking_data[obj_id]['size'] = [tracking_data[obj_id]['size'][i] for i in [1, 0, 2]] # (w,l,h) -> (l,w,h)
             # print([s * 0.1 for s in tracking_data[obj_id]['size']])
         # tracking_data = {}
 
@@ -204,13 +215,23 @@ class SharpVideoSimulatorInterface:
                 height=H,
             )
 
-        return rendering_result['rgb']
+        rgb = rendering_result['rgb']
+        if meta is not None and meta.get("return_depth", False):
+            depth_rgb = self._encode_depth_rgb(rendering_result['depth'])
+            return {
+                'rgb': rgb,
+                'depth': depth_rgb
+            }
+
+        return rgb
 
     def _load_camera_rig(self, camera_rig_config):
         """Load camera intrinsics and extrinsics from the rig file."""
         camera_rig_path = camera_rig_config['camera_rig_path']
         camera_rig_type = camera_rig_config.get('camera_rig_type', None)
         front = camera_rig_config.get('front_camera', None)
+        return_depth = bool(camera_rig_config.get('return_depth', False))
+        return_depth_cameras = set(camera_rig_config.get('return_depth_cameras', []) or [])
         Hs = camera_rig_config.get('Hs', None)
         Ws = camera_rig_config.get('Ws', None)
 
@@ -254,16 +275,19 @@ class SharpVideoSimulatorInterface:
 
             ego2camera = np.linalg.inv(c2e)
             assert K_3x3.shape == (3, 3) and ego2camera.shape == (4, 4)
+            meta = {
+                "render_gaussian": "front" if cam_idx in front else "back",
+                "camera_rig_type": camera_rig_type
+            }
+            if return_depth or cam_idx in return_depth_cameras:
+                meta["return_depth"] = True
+
             camera_param_dict[f"camera_{cam_idx}"] = {
                 "K": K_3x3,
                 "H": H,
                 "W": W,
                 "ego2camera": ego2camera.astype(np.float32),
-                "meta":
-                    {
-                        "render_gaussian": "front" if cam_idx in front else "back",
-                        "camera_rig_type": camera_rig_type
-                    }
+                "meta": meta
             }
         return camera_param_dict
     

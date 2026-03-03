@@ -15,13 +15,14 @@ camera_rig_config:
   front_camera: [0, 1, 2]
   Hs: [900, 900, 900, 900, 900, 900]
   Ws: [1600, 1600, 1600, 1600, 1600, 1600]
+  return_depth: True
 
 c2w_path: /nas2/home/jrguo/CarCrash/submodules/ml-sharp/cam_dict.npy
 
 fg_gaussians_path: /nas2/home/jrguo/CarCrash/submodules/ml-sharp/output/incre-100-validprojbg+fg-da3mix-sky-keepmaskfg-rgbbar0.01-alphabar0.9-dptbar50-opa0.01-wodptadd-bgmaskprune-wofloater/foreground
 bg_gaussians_path: /nas2/home/jrguo/CarCrash/submodules/ml-sharp/output/incre-100-validprojbg+fg-da3mix-sky-keepmaskfg-rgbbar0.01-alphabar0.9-dptbar50-opa0.01-wodptadd-bgmaskprune-wofloater/background
 
-tracking_data_path: /home/guojiarui/river/CarCrash/submodules/ml-sharp/bbox/centerpoint.json
+tracking_data_path: /home/guojiarui/river/CarCrash/submodules/ml-sharp/bbox/output/incre-100-validprojbg+fg-da3mix-sky-keepmaskfg-rgbbar0.01-alphabar0.9-dptbar50-opa0.01-wodptadd-bgmaskprune-wofloater/tracking.json
 
 # scene_name: 1e6
 

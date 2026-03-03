@@ -116,7 +116,8 @@ class ScenarioDataManager(BaseManager):
                 parsed_data[timestamp_list[idx]] = parse_object_state(
                     traj_mat, 
                     idx, 
-                    include_z_position=True
+                    include_z_position=True,
+                    zero_velocity=(name != 'actor')
                 )
             
             first_state, last_state = parsed_data[first_ts], parsed_data[last_ts]

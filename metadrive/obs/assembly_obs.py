@@ -80,8 +80,7 @@ class AssemblyObservation(BaseObservation):
         else:
             command = 2
 
-        expert_path = obs_nav.get('waypoints', None)
-
+        expert_path = obs_nav.get('waypoint', None)
         ego_pos = obs_state.get('ego_pos', np.zeros(3, dtype=np.float32))
         ego_rot = obs_state.get('ego_rot', np.zeros(3, dtype=np.float32))
         R_ego2world = SCR.from_euler('XYZ', ego_rot).as_matrix().astype(np.float32)

@@ -68,7 +68,8 @@ class SurroundingObservation(BaseObservation):
                 "velocity": [float(v_ego[0]), float(v_ego[1])],
                 "heading": float(rel_heading),
                 "size": size,
-                "type": obj_type
+                "type": obj_type,
+                "name": name
             })
 
         return surrounding

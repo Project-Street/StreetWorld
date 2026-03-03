@@ -1,29 +1,25 @@
 # StreetWorld
 
-> This code integrates rl training framework and sharp-video scenes.
-
-StreetWorld is an open-source driving simulator built on MetaDrive, integrating Gaussian Splatting rendering for photorealistic visualization. It supports loading real-world driving scenarios, remote visualization in client/server mode, and reinforcement learning training.
+StreetWorld is an open-source driving simulator built on MetaDrive with Gaussian Splatting for photorealistic rendering. It supports real-world scenario replay, remote client/server visualization, and RL training.
 
 ## Features
 
-- **Photorealistic Rendering**: Integration with Gaussian Splatting for real-world scene visualization
-- **Real-World Scenarios**: Load and replay driving scenarios from various datasets (nuScenes, Waymo, StreetStudio, custom datasets)
-- **Remote Visualization**: Client/server architecture for remote interactive driving
-- **RL Training Ready**: Gymnasium-compatible interface for reinforcement learning
-- **Multiple Observations**: Modular observation system (Gaussian, Navigation, State, Surrounding)
-- **Flexible Policies**: Support for human control (keyboard/steering wheel/Xbox), replay policies, and custom policies
-- **OnSite Integration**: Compatible with OnSite platform for distributed simulation
+- Photorealistic rendering with Gaussian Splatting
+- Real-world scenario replay (nuScenes, Waymo, StreetStudio, custom datasets)
+- Remote visualization via client/server mode
+- Gymnasium-compatible RL interface
+- Modular observations (Gaussian, Navigation, State, Surrounding)
+- Flexible policies (human control, replay, custom)
+- OnSite integration for distributed simulation
 
 ## Installation
 
 ### Prerequisites
 
-- Python >= 3.8 (Python 3.10 recommended)
+- Python >= 3.8 (3.10 recommended)
 - CUDA 12.1 (for GPU acceleration)
 
-### Environment Setup
-
-Create a conda environment:
+### Environment setup
 
 ```bash
 mamba create -n st-world python=3.10 -y
@@ -40,31 +36,37 @@ pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
 pip install -e .[gym]
 ```
 
+## Quick start
 
-## Quick Start
-
-### StreetStudio Integration
-
-Load and replay scenarios from StreetStudio transforms.json:
+### Local simulation (StreetStudio)
 
 ```bash
 mamba run -n st-world python -m metadrive.examples.drive_with_streetstudio \
   --transforms /path/to/transforms.json
 ```
 
-## RL Training
+If you are not using `mamba`, run the module with your active Python environment.
 
-To train UniAD with RL, please apply the patch to UniAD_SIM submodule.
+## RL training
+
+To train UniAD with RL, apply the patch to the `UniAD_SIM` submodule:
 
 ```bash
 cd UniAD_SIM && git apply ../uniad.patch
 ```
 
-## gRPC Mode
+## Evaluate other AD policies
 
-### As Server
+1. Install the target AD policy environment per its official guidance.
+2. Install StreetWorld gRPC in that environment:
 
-Run gRPC server for remote RL training:
+```bash
+pip install ./grpc
+```
+
+## gRPC mode (client/server)
+
+### Server (simulation host)
 
 ```bash
 # On server environment
@@ -76,9 +78,7 @@ mamba run -n st-world python -m metadrive.examples.server \
   --port 50062
 ```
 
-### As Client (example script)
-
-Connect to gRPC server:
+### Client (example)
 
 ```bash
 # On client environment

@@ -99,7 +99,7 @@ def parse_full_trajectory(object_dict):
     return trajectory
 
 
-def parse_object_state(poses, idx, check_last_state=True, include_z_position=False):
+def parse_object_state(poses, idx, check_last_state=True, include_z_position=False, zero_velocity=False):
     """
     Parse object state from 4x4 ego-to-world transformation matrices
     matrix_list: List of 4x4 numpy arrays representing ego2world transforms
@@ -158,9 +158,9 @@ def parse_object_state(poses, idx, check_last_state=True, include_z_position=Fal
     
     ret = {
         "position": position,
-        "velocity": velocity,
+        "velocity": velocity if not zero_velocity else [0.0, 0.0],
         "heading_theta": heading_theta,
-        "angular_velocity": angular_velocity,
+        "angular_velocity": angular_velocity if not zero_velocity else 0.0,
         "transform": current_matrix,
         "valid": True,  # Assume valid if matrix exists
         "vehicle_class": None

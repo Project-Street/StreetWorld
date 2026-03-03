@@ -37,6 +37,8 @@ class GaussianFrameRecorder:
         # valid_cams = [0, 1, 2, 5,6,7]
         valid_cams = [0, 1, 2, 3,4,5]
         for cam_name, stacked_images in obs_img.items():
+            if 'depth' in cam_name:
+                continue
             # stacked_images shape: (stack_size, H, W, 3)
             # Get the most recent frame (last in stack)
             if int(cam_name[-1]) not in valid_cams: #>= 3:
@@ -75,7 +77,7 @@ class GaussianFrameRecorder:
         z = float(z_pos)
         ones = np.ones((pts_xy.shape[0], 1), dtype=np.float32)
         pts_lidar = np.concatenate([pts_xy, np.full((pts_xy.shape[0], 1), z, dtype=np.float32), ones], axis=1)
-        print(pts_lidar)
+        
         l2c = np.asarray(lidar2cam, dtype=np.float32)
         if l2c.shape != (4, 4):
             return img

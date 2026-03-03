@@ -241,7 +241,7 @@ class UniADClient:
             'ego_steer': float(info.ego_steer),
             'timestamp': float(info.timestamp),
             'command': int(info.command),
-            'expert_path': list(info.expert_path),
+            "expert_path": np.array(info.expert_path).reshape(-1, 2),
             # Additional fields for UniAD
             'linear_velocity': np.array(info.linear_velocity) if info.linear_velocity else np.zeros(3),
             'linear_acceleration': np.array(info.linear_acceleration) if info.linear_acceleration else np.zeros(3),

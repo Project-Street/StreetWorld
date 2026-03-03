@@ -7,3 +7,6 @@
 [submodule "VAD"]
 	path = VAD
 	url = https://github.com/hustvl/VAD.git
+[submodule "transfuser"]
+	path = transfuser
+	url = https://github.com/autonomousvision/transfuser.git

@@ -76,6 +76,8 @@ class GaussianObservation(BaseObservation):
         self.STACK_SIZE = config["stack_size"]
         self.clip_rgb = config['clip_rgb']
         self.camera_configs = config['cameras']
+        self.return_depth = bool(config.get("return_depth", False))
+        self.depth_suffix = config.get("depth_suffix", "_depth")
 
     def reset(self, controller, render_fn, camera_params, step_mgr=None, **kwargs):
         """
@@ -103,10 +105,27 @@ class GaussianObservation(BaseObservation):
 
         self.params = merged_params
 
+        self._depth_cameras = set()
+        for cam_name, cam in self.params.items():
+            if self.return_depth or cam.get("meta", {}).get("return_depth", False):
+                self._depth_cameras.add(cam_name)
+
         if self.clip_rgb:
             self.state = {cam_name: np.zeros(self.an_observation_shape(cam['H'], cam['W']), dtype=np.float32) for cam_name, cam in self.params.items()}
+            if self._depth_cameras:
+                for cam_name in self._depth_cameras:
+                    cam = self.params[cam_name]
+                    self.state[f"{cam_name}{self.depth_suffix}"] = np.zeros(
+                        self.an_observation_shape(cam['H'], cam['W']), dtype=np.float32
+                    )
         else:
             self.state = {cam_name: np.zeros(self.an_observation_shape(cam['H'], cam['W']), dtype=np.uint8) for cam_name, cam in self.params.items()}
+            if self._depth_cameras:
+                for cam_name in self._depth_cameras:
+                    cam = self.params[cam_name]
+                    self.state[f"{cam_name}{self.depth_suffix}"] = np.zeros(
+                        self.an_observation_shape(cam['H'], cam['W']), dtype=np.uint8
+                    )
 
 
     @property
@@ -121,6 +140,13 @@ class GaussianObservation(BaseObservation):
                 space[name] = gym.spaces.Box(-0.0, 1.0, shape=shape, dtype=np.float32)
             else:
                 space[name] = gym.spaces.Box(0, 255, shape=shape, dtype=np.uint8)
+
+            if self.return_depth:
+                depth_key = f"{name}{self.depth_suffix}"
+                if self.clip_rgb:
+                    space[depth_key] = gym.spaces.Box(-0.0, 1.0, shape=shape, dtype=np.float32)
+                else:
+                    space[depth_key] = gym.spaces.Box(0, 255, shape=shape, dtype=np.uint8)
         return space
 
     def an_observation_shape(self, h, w):
@@ -175,8 +201,19 @@ class GaussianObservation(BaseObservation):
                 timestamp_us=timestamp_us,
                 meta=params.get('meta', {})
             )
+            if isinstance(ret, dict):
+                rgb = ret.get('rgb')
+                depth = ret.get('depth')
+            else:
+                rgb = ret
+                depth = None
+
             self.state[cam_name] = np.roll(self.state[cam_name], -1, axis=0)
-            self.state[cam_name][-1] = ret
+            self.state[cam_name][-1] = rgb
+            if cam_name in self._depth_cameras and depth is not None:
+                depth_key = f"{cam_name}{self.depth_suffix}"
+                self.state[depth_key] = np.roll(self.state[depth_key], -1, axis=0)
+                self.state[depth_key][-1] = depth
 
             K = params['K']
             if hasattr(K, 'cpu'):

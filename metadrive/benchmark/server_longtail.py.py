@@ -168,6 +168,8 @@ class StreetStudioServicer(service_pb2_grpc.StreetStudioServiceServicer):
                 )
 
             except Exception as e:
+                print(e)
+                raise e
                 context.set_code(grpc.StatusCode.INTERNAL)
                 context.set_details(f"Step failed: {str(e)}")
                 return control_pb2.StepResponse()
@@ -282,7 +284,7 @@ class StreetStudioServicer(service_pb2_grpc.StreetStudioServiceServicer):
             ego_steer=float(obs_info.get('ego_steer', 0.0)),
             timestamp=float(obs_info.get('timestamp', 0.0)),
             command=int(obs_info.get('command', 2)),
-            expert_path=list(obs_info.get('expert_path', []) or []),
+            expert_path=list(obs_info.get('expert_path', np.array([])).flatten().tolist()),
             # Additional fields for UniAD
             linear_velocity=linear_velocity.flatten().tolist() if linear_velocity.size > 0 else [0.0, 0.0, 0.0],
             linear_acceleration=linear_acceleration.flatten().tolist() if linear_acceleration.size > 0 else [0.0, 0.0, 0.0],
