@@ -11,24 +11,23 @@ import json
 import os
 import sys
 from pathlib import Path
-from typing import Dict, List, Tuple, Optional
+from typing import Dict, List, Tuple, Optional, Any
 
-import grpc
 import cv2
 import numpy as np
 
-import streetworld_grpc.service_pb2 as service_pb2
-import streetworld_grpc.service_pb2_grpc as service_pb2_grpc
-import streetworld_grpc.common_pb2 as common_pb2
-import streetworld_grpc.control_pb2 as control_pb2
+from grpc_obs_adapter import unpack_ad_observation
+from grpc_client import GrpcClient
 
-import os
 os.environ['no_proxy'] = '127.0.0.1,localhost'
 
 TRANSFUSER_ROOT = Path(__file__).resolve().parents[2] / "transfuser" / "team_code_transfuser"
 if str(TRANSFUSER_ROOT) not in sys.path:
     sys.path.insert(0, str(TRANSFUSER_ROOT))
+RL_FRAMEWORK_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(RL_FRAMEWORK_ROOT))
 
+from rl_framework.uniad.traj_parser import traj2control
 
 def _decode_depth_from_rgb(depth_rgb: np.ndarray, max_depth_m: float) -> np.ndarray:
     depth_rgb = depth_rgb.astype(np.float32)
@@ -111,6 +110,7 @@ def _path_to_target_point(path_xy: np.ndarray, ego_pos: np.ndarray, ego_yaw: flo
 
 def _normalize_plan_traj(plan_traj: np.ndarray) -> Optional[np.ndarray]:
     # [x, y] -> [-y, x]
+    print(plan_traj)
     if plan_traj is None:
         return None
     traj = np.asarray(plan_traj)
@@ -122,6 +122,7 @@ def _normalize_plan_traj(plan_traj: np.ndarray) -> Optional[np.ndarray]:
     converted_traj[:, 0] = -traj[:, 1]
     converted_traj[:, 1] = traj[:, 0]
     traj = converted_traj
+    print(traj)
     return traj[:, :2]
 
 
@@ -170,7 +171,7 @@ def _load_transfuser(model_dir: Path, checkpoint: str, device: str):
     return net, config
 
 
-class TransFuserClient:
+class TransFuserClient(GrpcClient):
     def __init__(
         self,
         model_dir: str,
@@ -185,53 +186,17 @@ class TransFuserClient:
         lookahead: float = 8.0,
         lateral: float = 3.0,
     ):
-        self.host = host
-        self.port = port
+        super().__init__(host=host, port=port)
         self.device = device
-
-        self.channel = grpc.insecure_channel(
-            f"{host}:{port}",
-            options=[
-                ("grpc.max_send_message_length", 200 * 1024 * 1024),
-                ("grpc.max_receive_message_length", 200 * 1024 * 1024),
-            ],
-        )
-        self.stub = service_pb2_grpc.StreetStudioServiceStub(self.channel)
 
         self.model, self.config = _load_transfuser(Path(model_dir), checkpoint, device)
 
-        self.cameras = cameras or ["camera_0", "camera_1", "camera_2"]
+        self.cameras = cameras or ["camera_2", "camera_0", "camera_1"]
         self.depth_cameras = depth_cameras or ["camera_0"]
         self.depth_stride = max(1, int(depth_stride))
         self.depth_max_m = float(depth_max_m)
         self.lookahead = float(lookahead)
         self.lateral = float(lateral)
-
-    def reset(self, transforms_json_path: str = "", render_server_url: str = "") -> Tuple[Dict, Dict]:
-        request = service_pb2.ResetRequest(
-            transforms_json_path=transforms_json_path,
-            render_server_url=render_server_url,
-        )
-        response = self.stub.Reset(request)
-        if not response.success:
-            raise RuntimeError(f"Reset failed: {response.message}")
-        obs_img = self._parse_images(response.images)
-        obs_info = self._parse_obs_info(response.info)
-        obs_info["scene_token"] = response.scene_name
-        return obs_img, obs_info
-
-    def step(self, action: List[float]) -> Tuple[Dict, float, bool, bool, Dict]:
-        request = control_pb2.StepRequest(action=action)
-        response = self.stub.Step(request)
-        obs_img = self._parse_images(response.images)
-        obs_info = self._parse_obs_info(response.info)
-        return (
-            obs_img,
-            float(response.reward),
-            bool(response.terminated),
-            bool(response.truncated),
-            obs_info,
-        )
 
     def run_transfuser_inference(
         self,
@@ -247,7 +212,7 @@ class TransFuserClient:
         for cam_name in self.cameras:
             if cam_name not in obs_img:
                 raise KeyError(f"Missing camera image: {cam_name}")
-            rgb_list.append(obs_img[cam_name])
+            rgb_list.append(obs_img[cam_name][0])
 
         rgb_concat = np.concatenate(rgb_list, axis=1)
         rgb_cropped = crop_image_cv2(rgb_concat, crop=self.config.img_resolution, crop_shift=0)
@@ -262,7 +227,7 @@ class TransFuserClient:
             cam_params = cam_params_all.get(cam_name, {})
             if not cam_params:
                 continue
-            depth_rgb = obs_img[depth_key]
+            depth_rgb = obs_img[depth_key][0]
             depth_m = _decode_depth_from_rgb(depth_rgb, self.depth_max_m)
             k_mat = cam_params.get("K")
             l2c = cam_params.get("l2c")
@@ -340,60 +305,6 @@ class TransFuserClient:
             steer, throttle, brake = self.model.control_pid(pred_wp, velocity_tensor, is_stuck=False)
         return float(steer), float(throttle), float(brake), pred_wp.detach().cpu().numpy()
 
-    def _parse_images(self, images: List[common_pb2.CameraImage]) -> Dict[str, np.ndarray]:
-        obs_img = {}
-        for img in images:
-            frame = np.frombuffer(img.image_data, dtype=np.uint8)
-            frame = frame.reshape(img.height, img.width, 3)
-            obs_img[img.camera_name] = frame
-        return obs_img
-
-    def _parse_obs_info(self, info: common_pb2.ObservationInfo) -> Dict:
-        obs_info = {
-            "ego_pos": np.array([info.ego_pos_x, info.ego_pos_y, info.ego_pos_z]),
-            "ego_rot": np.array([info.ego_rot_x, info.ego_rot_y, info.ego_rot_z]),
-            "ego_velo": float(info.ego_velo),
-            "ego_steer": float(info.ego_steer),
-            "timestamp": float(info.timestamp),
-            "command": int(info.command),
-            "expert_path": np.array(info.expert_path).reshape(-1, 2),
-            "linear_velocity": np.array(info.linear_velocity) if info.linear_velocity else np.zeros(3),
-            "linear_acceleration": np.array(info.linear_acceleration) if info.linear_acceleration else np.zeros(3),
-            "angular_velocity": np.array(info.angular_velocity) if info.angular_velocity else np.zeros(3),
-            "accelerate": float(info.accelerate),
-            "steer_rate": float(info.steer_rate),
-            "cam_params": self._parse_camera_params(info.camera_params),
-        }
-        print(obs_info["expert_path"])
-        return obs_info
-
-    def _parse_camera_params(self, params_proto) -> Dict:
-        cam_params = {}
-        for p in params_proto:
-            l2c = np.array(p.l2c.data).reshape(p.l2c.rows, p.l2c.cols)
-            ego2camera = np.array(p.ego2camera.data).reshape(p.ego2camera.rows, p.ego2camera.cols)
-            K = np.array(p.K.data).reshape(p.K.rows, p.K.cols)
-            w2c = np.array(p.w2c.data).reshape(p.w2c.rows, p.w2c.cols)
-            intrinsic = {
-                "fovx": float(p.intrinsic.fovx),
-                "fovy": float(p.intrinsic.fovy),
-                "H": int(p.intrinsic.height),
-                "W": int(p.intrinsic.width),
-                "cx": float(p.intrinsic.cx),
-                "cy": float(p.intrinsic.cy),
-            }
-            cam_params[p.camera_name] = {
-                "l2c": l2c,
-                "ego2camera": ego2camera,
-                "K": K,
-                "w2c": w2c,
-                "intrinsic": intrinsic,
-            }
-        return cam_params
-
-    def close(self):
-        self.channel.close()
-
 
 def main():
     parser = argparse.ArgumentParser(description="TransFuser client for StreetStudio gRPC")
@@ -436,7 +347,8 @@ def main():
     gaussian_recorder = GaussianFrameRecorder(output_path=args.gaussian_video, fps=10)
 
     try:
-        obs_img, obs_info = client.reset(transforms_json_path=args.transforms)
+        obs, reset_info = client.reset(transforms_json_path=args.transforms)
+        obs_img, obs_info, navigation, surrounding = unpack_ad_observation(obs)
         print(f"Environment ready. Cameras: {list(obs_img.keys())}")
 
         steer, throttle, brake, pred_wp = client.run_transfuser_inference(
@@ -446,12 +358,17 @@ def main():
             step_idx=0,
         )
         gaussian_recorder.update_frame((obs_img, obs_info), _normalize_plan_traj(pred_wp))
-        action = [steer, 0.0 if brake > 0.5 else throttle]
+        acc, steer = traj2control(_normalize_plan_traj(pred_wp), obs_info, horizon=2.0, control_dt=0.1)
+        action = [steer, acc]
+
         print(f"Initial action: steer={steer:.4f}, throttle={action[1]:.4f}, brake={brake:.4f}")
 
         reward_sum = 0.0
         for step in range(1, args.steps + 1):
-            obs_img, reward, terminated, truncated, obs_info = client.step(action)
+            obs, reward, terminated, truncated, info = client.step(action)
+            obs_img, obs_info, navigation, surrounding = unpack_ad_observation(obs)
+            print(info.keys())
+            exit(-1)
             reward_sum += reward
 
             steer, throttle, brake, pred_wp = client.run_transfuser_inference(
@@ -462,8 +379,9 @@ def main():
             )
             
             gaussian_recorder.update_frame((obs_img, obs_info), _normalize_plan_traj(pred_wp))
-            action = [steer, 0.0 if brake > 0.5 else throttle]
-
+            acc, steer = traj2control(_normalize_plan_traj(pred_wp), obs_info, horizon=2.0, control_dt=0.1)
+            action = [steer, acc]
+        
             if step % 1 == 0:
                 print(f"Step {step}: reward={reward:.2f}, steer={steer:.4f}, throttle={action[1]:.4f}")
 

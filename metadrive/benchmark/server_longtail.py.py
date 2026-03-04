@@ -19,23 +19,27 @@ import argparse
 import concurrent.futures
 import threading
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Any
+from google.protobuf import struct_pb2
 
+import torch
 import grpc
 import numpy as np
 
-from metadrive.envs.streetstudio_scenario_env import StreetStudioScenarioEnv
 from metadrive.envs.scenario_env import ScenarioEnv
+from metadrive.obs.assembly_obs import AssemblyObservation
+from metadrive.obs.gaussian_obs import GaussianObservation
+from metadrive.obs.observation_base import DefaultObservation, DummyObservation
+
 from sim_interface import SharpVideoSimulatorInterface as SimulatorInterface
 
 # Import generated protobuf modules
 import streetworld_grpc.service_pb2 as service_pb2
 import streetworld_grpc.service_pb2_grpc as service_pb2_grpc
 import streetworld_grpc.common_pb2 as common_pb2
-import streetworld_grpc.control_pb2 as control_pb2
 
 
-class StreetStudioServicer(service_pb2_grpc.StreetStudioServiceServicer):
+class StreetStudioServicer(service_pb2_grpc.EnvServiceServicer):
     """
     gRPC service for StreetStudio environment.
 
@@ -57,76 +61,51 @@ class StreetStudioServicer(service_pb2_grpc.StreetStudioServiceServicer):
 
     def Reset(self, request: service_pb2.ResetRequest, context) -> service_pb2.ResetResponse:
         """
-        Reset the environment with new scene configuration.
+        Reset the environment.
 
         Args:
-            request: ResetRequest with optional transforms_json_path and render_server_url
+            request: ResetRequest
             context: gRPC context
 
         Returns:
-            ResetResponse with success status, scene name, and initial observation
-
-        Note:
-            If transforms_json_path or render_server_url are empty strings,
-            the server will use its initial configuration from startup.
+            ResetResponse with initial observation and reset info.
         """
         with self._lock:
-            try:
-                # Update config with request parameters only if provided
-                if request.transforms_json_path:
-                    self.config["transforms_json_path"] = request.transforms_json_path
-                if request.render_server_url:
-                    self.config["render_server_url"] = request.render_server_url
+            # Update config with request parameters only if provided
+            if request.transforms_json_path:
+                self.config["transforms_json_path"] = request.transforms_json_path
+            if request.render_server_url:
+                self.config["render_server_url"] = request.render_server_url
 
-                # # Close existing environment if any
-                # if self.env is not None:
-                #     self.env.close()
+            # # Close existing environment if any
+            # if self.env is not None:
+            #     self.env.close()
 
-                # Create new model
-                if self.model is None:
-                    self.model = SimulatorInterface()
-                # Create new environment
-                if self.env is None:
-                    self.env = ScenarioEnv(self.model, self.config)
-                # self.env = StreetStudioScenarioEnv(self.config)
+            # Create new model
+            if self.model is None:
+                self.model = SimulatorInterface()
+            # Create new environment
+            if self.env is None:
+                self.env = ScenarioEnv(self.model, self.config)
+            # self.env = StreetStudioScenarioEnv(self.config)
 
-                # Reset environment and get initial observation
-                obs, info = self.env.reset()
+            # Reset environment and get initial observation
+            obs, reset_info = self.env.reset()
 
-                # Serialize observation
-                obs_img, obs_info = obs  # AssemblyObservation returns (obs_img, obs_info)
+            scene_name = str(self.env.scene_name) #Path(transforms_path).stem
+            self._current_scene = scene_name
 
-                # Convert images to protobuf
-                images = self._serialize_images(obs_img)
+            reset_info = dict(reset_info) if isinstance(reset_info, dict) else {}
+            reset_info.setdefault("scene_name", scene_name)
 
-                # Convert obs_info to protobuf
-                obs_info_proto = self._serialize_obs_info(obs_info)
+            return service_pb2.ResetResponse(
+                status=False,
+                message="",
+                observation=self._serialize_observation(obs),
+                StepInfo=self._dict_to_struct(reset_info)
+            )
 
-                # Get scene name from path
-                # transforms_path = self.config["transforms_json_path"]
-                scene_name = str(self.env.scene_name) #Path(transforms_path).stem
-                self._current_scene = scene_name
-
-                return service_pb2.ResetResponse(
-                    success=True,
-                    message="Environment reset successfully",
-                    scene_name=scene_name,
-                    images=images,
-                    info=obs_info_proto
-                )
-
-            except Exception as e:
-                print(e)
-                raise e
-                return service_pb2.ResetResponse(
-                    success=False,
-                    message=f"Reset failed: {str(e)}",
-                    scene_name="",
-                    images=[],
-                    info=common_pb2.ObservationInfo()
-                )
-
-    def Step(self, request: control_pb2.StepRequest, context) -> control_pb2.StepResponse:
+    def Step(self, request: service_pb2.StepRequest, context) -> service_pb2.StepResponse:
         """
         Execute one environment step.
 
@@ -141,159 +120,113 @@ class StreetStudioServicer(service_pb2_grpc.StreetStudioServiceServicer):
             if self.env is None:
                 context.set_code(grpc.StatusCode.FAILED_PRECONDITION)
                 context.set_details("Environment not initialized. Call Reset first.")
-                return control_pb2.StepResponse()
-
-            try:
-                # Extract action from request
-                action = list(request.action)  # [steering, throttle]
-                print(f"Steering: {action[0]:.4f}, Throttle: {action[1]:.4f}")
-                # Step environment
-                obs, reward, terminated, truncated, info = self.env.step(action)
-
-                # Serialize observation
-                obs_img, obs_info = obs  # AssemblyObservation returns (obs_img, obs_info)
-
-                # Convert images to protobuf
-                images = self._serialize_images(obs_img)
-
-                # Convert obs_info to protobuf
-                obs_info_proto = self._serialize_obs_info(obs_info)
-
-                return control_pb2.StepResponse(
-                    reward=float(reward),
-                    terminated=terminated,
-                    truncated=truncated,
-                    images=images,
-                    info=obs_info_proto
+                return service_pb2.StepResponse(
+                    status=True,
+                    message="Environment not initialized. Call Reset first.",
+                    observation=common_pb2.Observation(),
+                    reward=0.0,
+                    terminated=False,
+                    truncated=True,
+                    StepInfo=self._dict_to_struct({})
                 )
 
-            except Exception as e:
-                print(e)
-                raise e
-                context.set_code(grpc.StatusCode.INTERNAL)
-                context.set_details(f"Step failed: {str(e)}")
-                return control_pb2.StepResponse()
+            # Extract action from request
+            action = list(request.action)  # [steering, throttle]
+            print(f"Steering: {action[0]:.4f}, Throttle: {action[1]:.4f}")
+            # Step environment
+            obs, reward, terminated, truncated, info = self.env.step(action)
 
-    def _serialize_images(self, obs_img: Dict[str, np.ndarray]) -> List[common_pb2.CameraImage]:
+            return service_pb2.StepResponse(
+                status=False,
+                message="",
+                observation=self._serialize_observation(obs),
+                reward=float(reward),
+                terminated=bool(terminated),
+                truncated=bool(truncated),
+                StepInfo=self._dict_to_struct(info)
+            )
+
+    def _serialize_observation(self, obs: Any) -> common_pb2.Observation:
         """
-        Serialize observation images to protobuf.
+        Serialize environment observation to protobuf Observation.
 
-        Args:
-            obs_img: Dict mapping camera_name -> (stack, H, W, 3) array
+        Rules:
+        1) AssemblyObservation: gaussian -> images_observation, remaining dict -> other_observation
+        2) GaussianObservation: gaussian -> images_observation
+        3) Other observations: all payload -> other_observation
+        4) Dummy/Default observations: raise error
+        """
+        observer = self.env.agent_managers["actor"].observer
 
-        Returns:
-            List of CameraImage protobuf messages
+        if isinstance(observer, AssemblyObservation):
+            assembly_obs = dict(obs)
+            gaussian_obs = assembly_obs.pop("gaussian")
+            images = self._serialize_gaussian_images(gaussian_obs["image"], gaussian_obs["camera_info"])
+            return common_pb2.Observation(
+                images_observation=images,
+                other_observation=self._dict_to_struct(assembly_obs),
+            )
+
+        if isinstance(observer, GaussianObservation):
+            images = self._serialize_gaussian_images(obs["image"], obs["camera_info"])
+            return common_pb2.Observation(images_observation=images)
+
+        if isinstance(observer, (DummyObservation, DefaultObservation)):
+            raise ValueError("DummyObservation and DefaultObservation are not supported in streetworld grpc mode.")
+
+        return common_pb2.Observation(
+            other_observation=self._dict_to_struct(obs),
+        )
+
+    def _serialize_gaussian_images(
+        self,
+        gaussian_images: Dict[str, np.ndarray],
+        camera_info: Dict[str, Dict[str, Any]],
+    ) -> List[common_pb2.CameraImage]:
+        """
+        Serialize gaussian observation image + camera_info to CameraImage.
         """
         images = []
-        for cam_name, stacked in obs_img.items():
-            # Get latest frame from stack (last element)
-            if stacked.ndim == 4:  # (stack, H, W, 3)
-                frame = stacked[-1]
-            else:  # (H, W, 3)
-                frame = stacked
-
-            h, w = frame.shape[:2]
-
-            # Convert to raw RGB bytes
-            image_bytes = frame.tobytes()
-
-            images.append(common_pb2.CameraImage(
-                camera_name=cam_name,
-                image_data=image_bytes,
-                height=h,
-                width=w
-            ))
-
+        for cam_name, stacked in gaussian_images.items():
+            frame = stacked[-1] if stacked.ndim == 4 else stacked
+            images.append(
+                common_pb2.CameraImage(
+                    camera_name=cam_name,
+                    image_data=frame.tobytes(),
+                    # Depth cameras share the same intrinsics as RGB, so we look up the base name without "_depth" suffix for camera info
+                    camera_info=self._dict_to_struct(camera_info[cam_name if '_depth' not in cam_name else cam_name.replace('_depth', '')]),
+                )
+            )
         return images
 
-    def _serialize_matrix(self, matrix: np.ndarray) -> common_pb2.Matrix:
+    def _to_builtin(self, value: Any) -> Any:
         """
-        Serialize numpy matrix to protobuf.
-
-        Args:
-            matrix: 2D numpy array (3x3 or 4x4)
-
-        Returns:
-            Matrix protobuf message
+        Convert nested numpy-containing structures to protobuf-Struct-compatible python types.
         """
-        return common_pb2.Matrix(
-            data=matrix.flatten().tolist(),
-            rows=matrix.shape[0],
-            cols=matrix.shape[1]
-        )
+        if isinstance(value, dict):
+            return {str(k): self._to_builtin(v) for k, v in value.items()}
+        if isinstance(value, (list, tuple)):
+            return [self._to_builtin(v) for v in value]
+        if isinstance(value, np.ndarray):
+            return self._to_builtin(value.tolist())
+        if isinstance(value, np.generic):
+            return value.item()
+        if torch is not None and isinstance(value, torch.Tensor):
+            return self._to_builtin(value.detach().cpu().tolist())
+        if isinstance(value, (str, int, float, bool)) or value is None:
+            return value
+        return str(value)
 
-    def _serialize_camera_params(self, camera_info: Dict) -> List[common_pb2.CameraParams]:
+    def _dict_to_struct(self, data: Any) -> struct_pb2.Struct:
         """
-        Serialize camera parameters to protobuf.
-
-        Args:
-            camera_info: Dict from GaussianObservation with camera metadata
-
-        Returns:
-            List of CameraParams protobuf messages
+        Convert arbitrary dict-like payload to protobuf Struct.
         """
-        params_list = []
-        for cam_name, cam_info in camera_info.items():
-            intrinsic = cam_info['intrinsic']
-            params_list.append(common_pb2.CameraParams(
-                camera_name=cam_name,
-                intrinsic=common_pb2.CameraIntrinsic(
-                    fovx=float(intrinsic['fovx']),
-                    fovy=float(intrinsic['fovy']),
-                    height=int(intrinsic['H']),
-                    width=int(intrinsic['W']),
-                    cx=float(intrinsic['cx']),
-                    cy=float(intrinsic['cy'])
-                ),
-                l2c=self._serialize_matrix(cam_info['l2c']),
-                ego2camera=self._serialize_matrix(cam_info['ego2camera']),
-                K=self._serialize_matrix(cam_info['K']),
-                w2c=self._serialize_matrix(cam_info['w2c'])
-            ))
-        return params_list
-
-    def _serialize_obs_info(self, obs_info: Dict) -> common_pb2.ObservationInfo:
-        """
-        Serialize observation info to protobuf.
-
-        Args:
-            obs_info: Dict from AssemblyObservation with ego state and metadata
-
-        Returns:
-            ObservationInfo protobuf message
-        """
-        ego_pos = obs_info.get('ego_pos', np.zeros(3))
-        ego_rot = obs_info.get('ego_rot', np.zeros(3))
-
-        # Extract linear and angular velocities
-        linear_velocity = obs_info.get('linear_velocity', np.zeros(3))
-        linear_acceleration = obs_info.get('linear_acceleration', np.zeros(3))
-        angular_velocity = obs_info.get('angular_velocity', np.zeros(3))
-
-        # Serialize camera parameters
-        camera_params = self._serialize_camera_params(obs_info.get('cam_params', {}))
-
-        return common_pb2.ObservationInfo(
-            ego_pos_x=float(ego_pos[0]) if len(ego_pos) > 0 else 0.0,
-            ego_pos_y=float(ego_pos[1]) if len(ego_pos) > 1 else 0.0,
-            ego_pos_z=float(ego_pos[2]) if len(ego_pos) > 2 else 0.0,
-            ego_rot_x=float(ego_rot[0]) if len(ego_rot) > 0 else 0.0,
-            ego_rot_y=float(ego_rot[1]) if len(ego_rot) > 1 else 0.0,
-            ego_rot_z=float(ego_rot[2]) if len(ego_rot) > 2 else 0.0,
-            ego_velo=float(obs_info.get('ego_velo', 0.0)),
-            ego_steer=float(obs_info.get('ego_steer', 0.0)),
-            timestamp=float(obs_info.get('timestamp', 0.0)),
-            command=int(obs_info.get('command', 2)),
-            expert_path=list(obs_info.get('expert_path', np.array([])).flatten().tolist()),
-            # Additional fields for UniAD
-            linear_velocity=linear_velocity.flatten().tolist() if linear_velocity.size > 0 else [0.0, 0.0, 0.0],
-            linear_acceleration=linear_acceleration.flatten().tolist() if linear_acceleration.size > 0 else [0.0, 0.0, 0.0],
-            angular_velocity=angular_velocity.flatten().tolist() if angular_velocity.size > 0 else [0.0, 0.0, 0.0],
-            accelerate=float(obs_info.get('accelerate', 0.0)),
-            steer_rate=float(obs_info.get('steer_rate', 0.0)),
-            # Camera parameters
-            camera_params=camera_params
-        )
+        payload = self._to_builtin(data)
+        if not isinstance(payload, dict):
+            payload = {"__payload__": payload}
+        struct = struct_pb2.Struct()
+        struct.update(payload)
+        return struct
 
 
 def serve(
@@ -354,7 +287,7 @@ def serve(
     )
 
     # Add servicer to server
-    service_pb2_grpc.add_StreetStudioServiceServicer_to_server(servicer, server)
+    service_pb2_grpc.add_EnvServiceServicer_to_server(servicer, server)
 
     # Bind server to address
     server_address = f"{host}:{port}"

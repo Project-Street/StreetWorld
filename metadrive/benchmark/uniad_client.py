@@ -14,25 +14,19 @@ Usage:
 
 import argparse
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, Tuple
 import sys
-RL_FRAMEWORK_ROOT="../../"
+RL_FRAMEWORK_ROOT=Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(RL_FRAMEWORK_ROOT))
 import os
 os.environ['no_proxy'] = '127.0.0.1,localhost'
-from rl_framework.rl_modules.closeLoop import create_uniad
 
-import grpc
 import numpy as np
 
-# Import gRPC protobuf modules
-import streetworld_grpc.service_pb2 as service_pb2
-import streetworld_grpc.service_pb2_grpc as service_pb2_grpc
-import streetworld_grpc.common_pb2 as common_pb2
-import streetworld_grpc.control_pb2 as control_pb2
+from grpc_obs_adapter import unpack_ad_observation
+from grpc_client import GrpcClient
 
-
-class UniADClient:
+class UniADClient(GrpcClient):
     """
     gRPC client with UniAD model integration.
 
@@ -57,17 +51,7 @@ class UniADClient:
             port: Server port
             stack_size: Number of frames to stack for temporal input
         """
-        self.host = host
-        self.port = port
-
-        # Create gRPC channel and stub
-        self.channel = grpc.insecure_channel(
-            f"{host}:{port}",
-            options = [
-                ('grpc.max_send_message_length', 200 * 1024 * 1024),
-                ('grpc.max_receive_message_length', 200 * 1024 * 1024),
-            ])
-        self.stub = service_pb2_grpc.StreetStudioServiceStub(self.channel)
+        super().__init__(host=host, port=port)
 
         # Initialize UniAD model
         self.uniad = self._create_uniad(uniad_config)
@@ -96,72 +80,10 @@ class UniADClient:
     def _create_uniad(self, config: dict):
         """Create UniAD model from config."""
         # Import here to avoid dependency if not using UniAD
-        from rl_framework.rl_modules.closeLoop import create_uniad
+        from rl_framework.uniad.loader import create_uniad
         return create_uniad(config)
 
-    def reset(
-        self,
-        transforms_json_path: str = "",
-        render_server_url: str = ""
-    ) -> Tuple[Dict, Dict]:
-        """
-        Reset the remote environment.
-
-        Args:
-            transforms_json_path: Optional path to override server config
-            render_server_url: Optional renderer URL to override server config
-
-        Returns:
-            (obs_img, obs_info) tuple
-                - obs_img: Dict of latest camera frames (camera_name -> (H, W, 3))
-                - obs_info: Dict with metadata (ego state, camera params, etc.)
-        """
-        request = service_pb2.ResetRequest(
-            transforms_json_path=transforms_json_path,
-            render_server_url=render_server_url
-        )
-
-        response = self.stub.Reset(request)
-
-        if not response.success:
-            raise RuntimeError(f"Reset failed: {response.message}")
-
-        # Parse response
-        obs_img, obs_info = self._parse_reset_response(response)
-
-        # Initialize image stacks with repeated first frame
-        self._init_image_stacks(obs_img)
-
-        return obs_img, obs_info
-
-    def step(self, action: List[float]) -> Tuple[Dict, float, bool, bool, Dict]:
-        """
-        Execute one environment step.
-
-        Args:
-            action: Control action [steering, throttle]
-
-        Returns:
-            (obs_img, reward, terminated, truncated, obs_info) tuple
-        """
-        request = control_pb2.StepRequest(action=action)
-        response = self.stub.Step(request)
-
-        # Parse observation
-        obs_img, obs_info = self._parse_step_response(response)
-
-        # Update image stacks
-        self._update_image_stacks(obs_img)
-
-        return (
-            obs_img,
-            float(response.reward),
-            bool(response.terminated),
-            bool(response.truncated),
-            obs_info
-        )
-
-    def run_uniad_inference(self, obs_img: Dict, obs_info: Dict) -> np.ndarray:
+    def run_uniad_inference(self, obs_img: Dict, obs_info: Dict, step_info: Dict) -> np.ndarray:
         """
         Run UniAD inference on current observation.
 
@@ -179,7 +101,7 @@ class UniADClient:
                 obs_img_stacked[cam_name] = self.image_stacks[cam_name]
 
         # Prepare UniAD input
-        raw_data = self._prepare_uniad_input(obs_img_stacked, obs_info)
+        raw_data = self._prepare_uniad_input(obs_img_stacked, obs_info, step_info)
 
         # Run inference
         import torch
@@ -195,97 +117,11 @@ class UniADClient:
 
         return plan_traj
 
-    def _init_image_stacks(self, obs_img: Dict[str, np.ndarray]):
-        """Initialize image stacks with repeated first frame."""
-        for cam_name, frame in obs_img.items():
-            if cam_name in self.cameras:
-                self.image_stacks[cam_name] = np.stack([frame] * self.stack_size, axis=0)
-
-    def _update_image_stacks(self, obs_img: Dict[str, np.ndarray]):
-        """Roll stacks and add new frame."""
-        for cam_name, frame in obs_img.items():
-            if cam_name in self.cameras and cam_name in self.image_stacks:
-                self.image_stacks[cam_name] = np.roll(self.image_stacks[cam_name], -1, axis=0)
-                self.image_stacks[cam_name][-1] = frame
-
-    def _parse_reset_response(self, response: service_pb2.ResetResponse) -> Tuple[Dict, Dict]:
-        """Parse ResetResponse to obs_img and obs_info."""
-        obs_img = self._parse_images(response.images)
-        obs_info = self._parse_obs_info(response.info)
-        obs_info['scene_token'] = response.scene_name
-        self.scene_name = response.scene_name
-        return obs_img, obs_info
-
-    def _parse_step_response(self, response: control_pb2.StepResponse) -> Tuple[Dict, Dict]:
-        """Parse StepResponse to obs_img and obs_info."""
-        obs_img = self._parse_images(response.images)
-        obs_info = self._parse_obs_info(response.info)
-        obs_info['scene_token'] = self.scene_name
-        return obs_img, obs_info
-
-    def _parse_images(self, images: List[common_pb2.CameraImage]) -> Dict[str, np.ndarray]:
-        """Parse camera images from protobuf."""
-        obs_img = {}
-        for img in images:
-            frame = np.frombuffer(img.image_data, dtype=np.uint8)
-            frame = frame.reshape(img.height, img.width, 3)
-            obs_img[img.camera_name] = frame
-        return obs_img
-
-    def _parse_obs_info(self, info: common_pb2.ObservationInfo) -> Dict:
-        """Parse ObservationInfo from protobuf."""
-        obs_info = {
-            'ego_pos': np.array([info.ego_pos_x, info.ego_pos_y, info.ego_pos_z]),
-            'ego_rot': np.array([info.ego_rot_x, info.ego_rot_y, info.ego_rot_z]),
-            'ego_velo': float(info.ego_velo),
-            'ego_steer': float(info.ego_steer),
-            'timestamp': float(info.timestamp),
-            'command': int(info.command),
-            "expert_path": np.array(info.expert_path).reshape(-1, 2),
-            # Additional fields for UniAD
-            'linear_velocity': np.array(info.linear_velocity) if info.linear_velocity else np.zeros(3),
-            'linear_acceleration': np.array(info.linear_acceleration) if info.linear_acceleration else np.zeros(3),
-            'angular_velocity': np.array(info.angular_velocity) if info.angular_velocity else np.zeros(3),
-            'accelerate': float(info.accelerate),
-            'steer_rate': float(info.steer_rate),
-            # Camera parameters
-            'cam_params': self._parse_camera_params(info.camera_params)
-        }
-        return obs_info
-
-    def _parse_camera_params(self, params_proto) -> Dict:
-        """Parse CameraParams list from protobuf."""
-        cam_params = {}
-        for p in params_proto:
-            # Parse matrices
-            l2c = np.array(p.l2c.data).reshape(p.l2c.rows, p.l2c.cols)
-            ego2camera = np.array(p.ego2camera.data).reshape(p.ego2camera.rows, p.ego2camera.cols)
-            K = np.array(p.K.data).reshape(p.K.rows, p.K.cols)
-            w2c = np.array(p.w2c.data).reshape(p.w2c.rows, p.w2c.cols)
-
-            # Parse intrinsic
-            intrinsic = {
-                'fovx': float(p.intrinsic.fovx),
-                'fovy': float(p.intrinsic.fovy),
-                'H': int(p.intrinsic.height),
-                'W': int(p.intrinsic.width),
-                'cx': float(p.intrinsic.cx),
-                'cy': float(p.intrinsic.cy)
-            }
-
-            cam_params[p.camera_name] = {
-                'l2c': l2c,
-                'ego2camera': ego2camera,
-                'K': K,
-                'w2c': w2c,
-                'intrinsic': intrinsic
-            }
-        return cam_params
-
-    def _prepare_uniad_input(self, obs_img: Dict, obs_info: Dict) -> Dict:
+    def _prepare_uniad_input(self, obs_img: Dict, obs_info: Dict, step_info: Dict) -> Dict:
         """Convert observation to UniAD input format."""
-        from rl_framework.rl_modules.dataparser import parse_raw
-
+        from rl_framework.uniad.dataparser import parse_raw
+        obs_info['relative_timestamp'] = step_info['relative_timestamp']
+        obs_info['scene_token'] = step_info['scene_name']
         raw_data = parse_raw(obs_img, obs_info, self.cameras, self.img_norm_cfg)
         # Store raw images for reference
         self._raw_images = raw_data.get('raw_imgs', {})
@@ -293,9 +129,18 @@ class UniADClient:
         raw_data.pop('raw_imgs', None)
         return raw_data
 
-    def close(self):
-        """Close the gRPC channel."""
-        self.channel.close()
+    def _init_image_stacks(self, obs_img: Dict[str, np.ndarray]):
+        """Initialize image stacks with repeated first frame."""
+        for cam_name, frame in obs_img.items():
+            if cam_name in self.cameras:
+                self.image_stacks[cam_name] = np.stack([frame[0]] * self.stack_size, axis=0)
+
+    def _update_image_stacks(self, obs_img: Dict[str, np.ndarray]):
+        """Roll stacks and add new frame."""
+        for cam_name, frame in obs_img.items():
+            if cam_name in self.cameras and cam_name in self.image_stacks:
+                self.image_stacks[cam_name] = np.roll(self.image_stacks[cam_name], -1, axis=0)
+                self.image_stacks[cam_name][-1] = frame[0]
 
 
 def traj2control(plan_traj: np.ndarray, obs_info: Dict) -> Tuple[float, float]:
@@ -309,7 +154,7 @@ def traj2control(plan_traj: np.ndarray, obs_info: Dict) -> Tuple[float, float]:
     Returns:
         (steer, accel) tuple
     """
-    from rl_framework.rl_modules.env_wrapper import traj2control as _traj2control
+    from rl_framework.common.trajectory import traj2control as _traj2control
     return _traj2control(plan_traj, obs_info)
 
 def print_info(obs_info):
@@ -368,9 +213,10 @@ def main():
     # with open(args.uniad_config, 'r') as f:
     #     uniad_config = json.load(f)
     uniad_config = {
-        'config_path': "/nas2/home/jrguo/CarCrash/submodules/StreetWorld/UniAD_SIM/projects/configs/stage2_e2e/base_e2e.py",
-        'checkpoint_path': "/nas2/home/jrguo/CarCrash/submodules/StreetWorld/UniAD_SIM/ckpts/uniad_base_e2e.pth",
-        'device': 'cuda:0'
+        'config_path': Path(__file__).resolve().parents[2] / "UniAD_SIM/projects/configs/stage2_e2e/base_e2e.py",
+        'checkpoint_path': Path(__file__).resolve().parents[2] / "UniAD_SIM/ckpts/uniad_base_e2e.pth",
+        'device': 'cuda:0',
+        'AD_root': Path(__file__).resolve().parents[2] / "UniAD_SIM"
     }
 
     # Create client
@@ -387,12 +233,14 @@ def main():
     try:
         # Reset environment
         print("Resetting environment...")
-        obs_img, obs_info = client.reset(transforms_json_path=args.transforms)
+        obs, reset_info = client.reset(transforms_json_path=args.transforms)
+        obs_img, obs_info, navigation, surrounding = unpack_ad_observation(obs)
+        client._init_image_stacks(obs_img)
         print(f"Environment ready. Cameras: {list(obs_img.keys())}")
 
         # Run UniAD inference for first step
         print("Running initial UniAD inference...")
-        plan_traj = client.run_uniad_inference(obs_img, obs_info)
+        plan_traj = client.run_uniad_inference(obs_img, obs_info, reset_info, horizon=3.0, control_dt=0.1)
         acc, steer = traj2control(plan_traj, obs_info)
         action = [steer, acc]
         print(f"Initial action: steer={steer:.4f}, acc={acc:.4f}")
@@ -400,12 +248,13 @@ def main():
         # Main loop
         reward_sum = 0.0
         for step in range(1, args.steps + 1):
-            obs_img, reward, terminated, truncated, obs_info = client.step(action)
-
+            obs, reward, terminated, truncated, info = client.step(action)
+            obs_img, obs_info, navigation, surrounding = unpack_ad_observation(obs)
+            client._update_image_stacks(obs_img)
             reward_sum += reward
 
             # Run UniAD inference
-            plan_traj = client.run_uniad_inference(obs_img, obs_info)
+            plan_traj = client.run_uniad_inference(obs_img, obs_info, info, horizon=3.0, control_dt=0.1)
             gaussian_recorder.update_frame((obs_img, obs_info), plan_traj)
             acc, steer = traj2control(plan_traj, obs_info)
             action = [steer, acc]

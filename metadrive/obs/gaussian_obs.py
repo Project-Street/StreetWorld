@@ -235,18 +235,16 @@ class GaussianObservation(BaseObservation):
             lidar2cam = ego2cam @ lidar2ego
             
             camera_info[cam_name] = {
-            'l2c': lidar2cam.numpy().astype(np.float32),
-            'intrinsic': {
+                'l2c': lidar2cam.numpy().astype(np.float32),
                 'fovx': float(fovx),
                 'fovy': float(fovy),
                 'H': H,
                 'W': W,
                 'cx': float(cx),
-                'cy': float(cy)
-            },
-            'ego2camera': ego2cam.numpy().astype(np.float32),
-            'K': K.astype(np.float32)
-        }
+                'cy': float(cy),
+                'ego2camera': ego2cam.numpy().astype(np.float32),
+                'K': K.astype(np.float32)
+            }
 
         return {
             'camera_info': camera_info,

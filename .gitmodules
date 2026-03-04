@@ -10,3 +10,6 @@
 [submodule "transfuser"]
 	path = transfuser
 	url = https://github.com/autonomousvision/transfuser.git
+[submodule "DiffusionDrive"]
+	path = DiffusionDrive
+	url = https://github.com/hustvl/DiffusionDrive.git

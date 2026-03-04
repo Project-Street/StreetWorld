@@ -7,9 +7,9 @@ name = "streetworld-grpc"
 version = "0.1.0"
 description = "gRPC API package for StreetWorld OnSite protocol"
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.7"
 
-dependencies = ["grpcio", "grpcio-tools", "protobuf"]
+dependencies = ["grpcio", "grpcio-tools<1.49", "protobuf==3.19.4"]
 
 [project.optional-dependencies]
 server = ["grpcio-tools<1.49", "protobuf==3.19.4"] # Compatible for trajdata

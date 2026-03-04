@@ -53,17 +53,28 @@ def _compile_proto(proto_file: Path) -> bool:
               "Please install with: pip install grpcio-tools", file=sys.stderr)
         return False
 
+    grpc_tools_proto = None
+    try:
+        from importlib.resources import files
+
+        grpc_tools_proto = files("grpc_tools") / "_proto"
+    except Exception:
+        grpc_tools_proto = None
+
     pb2_file, pb2_grpc_file = _get_generated_files(proto_file)
 
-    args = [
-        "-I",
-        str(_PROTO_DIR),
-        "--python_out",
-        str(_PACKAGE_DIR),
-        "--grpc_python_out",
-        str(_PACKAGE_DIR),
-        str(proto_file.relative_to(_PROTO_DIR)),
-    ]
+    args = ["-I", str(_PROTO_DIR)]
+    if grpc_tools_proto is not None:
+        args.extend(["-I", str(grpc_tools_proto)])
+    args.extend(
+        [
+            "--python_out",
+            str(_PACKAGE_DIR),
+            "--grpc_python_out",
+            str(_PACKAGE_DIR),
+            str(proto_file.relative_to(_PROTO_DIR)),
+        ]
+    )
 
     try:
         ret = protoc.main(["protoc"] + args)

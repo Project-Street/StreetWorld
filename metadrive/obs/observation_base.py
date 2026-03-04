@@ -53,7 +53,7 @@ class DummyObservation(BaseObservation):
         return gym.spaces.Box(-0.0, 1.0, shape=(1, ), dtype=np.float32)
 
     def observe(self, *args, **kwargs):
-        return np.array([0])
+        return {}
 
 
 class DefaultObservation(BaseObservation):
@@ -68,4 +68,4 @@ class DefaultObservation(BaseObservation):
         return gym.spaces.Box(-0.0, 1.0, shape=(1, ), dtype=np.float32)
 
     def observe(self, *args, **kwargs):
-        return None
+        return {}
