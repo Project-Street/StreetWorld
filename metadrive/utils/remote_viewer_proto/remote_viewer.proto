@@ -17,5 +17,5 @@ message Image {
 }
 
 service OnsiteViewerService {
-  rpc SendImage(Image) returns (Action);
+  rpc SendAction(Action) returns (Image);
 }

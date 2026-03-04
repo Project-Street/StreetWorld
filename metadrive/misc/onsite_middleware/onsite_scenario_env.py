@@ -6,7 +6,7 @@ providing helper methods for state synchronization with OnSite server.
 """
 
 import logging
-import numpy as np
+from pathlib import Path
 import torch
 from metadrive.envs.scenario_env import ScenarioEnv
 from metadrive.manager.agent_manager import AgentState
@@ -19,9 +19,8 @@ class OnSiteScenarioEnv(ScenarioEnv):
     OnSite-integrated ScenarioEnv.
 
     Key features:
-    - Helper methods for extracting agent states for OnSite messages
-    - Helper methods for updating agents from OnSite messages
-    - Middleware is managed externally, not held by env
+    - In OnSite mode, actor lifecycle is controlled by Notify.
+    - Middleware is managed externally, not held by env.
     """
 
     def __init__(self, model, config=None):
@@ -29,74 +28,30 @@ class OnSiteScenarioEnv(ScenarioEnv):
         # Cache for last received PubRole (for preserving fields)
         self.last_received_pub_role = None
 
+    def reset(self, seed=None, scene_name=None):
+        if scene_name and scene_name not in self.data_manager.idx2scene:
+            cfg_path = Path(self.config["scene_config_directory"]) / f"{scene_name}.yaml"
+            self.model._ensure_scene_config(cfg_path)
+            self.data_manager.hotload_scenario(str(cfg_path))
+        return super().reset(seed=seed, scene_name=scene_name)
+
     def _update_scene(self):
         """
         In OnSite mode, actor state is controlled by Notify, so skip actor.update_state().
         """
+        self._surrounding_pre_collection = {}
         new_object_poses = {}
         for name, mgr in self.agent_managers.items():
             if name != "actor":
                 mgr.update_state()
-                if mgr.state == AgentState.ALIVE:
-                    new_object_poses[name] = torch.from_numpy(mgr.get_pose())
+
+            if mgr.state != AgentState.ALIVE:
                 continue
-            if mgr.state == AgentState.ALIVE:
-                new_object_poses[name] = torch.from_numpy(mgr.get_pose())
+
+            obj_pose = mgr.get_pose()
+            self._surrounding_pre_collection[name] = mgr.get_base_state(obj_pose)
+            new_object_poses[name] = torch.from_numpy(obj_pose)
         self.model.update_scene(self.step_manager.current_timestamp, new_object_poses)
-
-    def get_agent_state_dict(self, agent_name):
-        """
-        Get agent state as dictionary for OnSite message conversion.
-
-        Args:
-            agent_name: Name of the agent
-
-        Returns:
-            dict: Agent state with position, velocity, heading, etc.
-        """
-        if agent_name not in self.agent_managers:
-            return None
-
-        agent_mgr = self.agent_managers[agent_name]
-        if agent_mgr.state != AgentState.ALIVE:
-            return None
-
-        vehicle = agent_mgr.controller
-
-        return {
-            'position': vehicle.position,
-            'velocity': vehicle.velocity,
-            'heading_theta': vehicle.heading_theta,
-            'angular_velocity': vehicle.angular_velocity,
-            'length': vehicle.LENGTH,
-            'width': vehicle.WIDTH,
-            'height': vehicle.HEIGHT,
-            'steering_wheel_angle': vehicle.get_steering_wheel_angle(),
-            'steering_wheel_speed': vehicle.get_steering_wheel_speed(),
-            'left_directive_wheel_angle': vehicle.get_left_directive_wheel_angle(),
-            'right_directive_wheel_angle': vehicle.get_right_directive_wheel_angle(),
-            'throttle_brake': vehicle.throttle_brake,
-            'speed': vehicle.speed,
-            'longitudinal_acceleration': vehicle.get_longitudinal_acceleration(),
-            'front_left_wheel_speed': vehicle.get_front_left_wheel_speed(),
-            'front_right_wheel_speed': vehicle.get_front_right_wheel_speed(),
-            'rear_left_wheel_speed': vehicle.get_rear_left_wheel_speed(),
-            'rear_right_wheel_speed': vehicle.get_rear_right_wheel_speed(),
-        }
-
-    def get_all_agent_states(self):
-        """
-        Get all agent states as dictionary.
-
-        Returns:
-            dict: {agent_name: state_dict}
-        """
-        states = {}
-        for agent_name in self.agent_managers.keys():
-            state = self.get_agent_state_dict(agent_name)
-            if state is not None:
-                states[agent_name] = state
-        return states
 
     def update_agent_from_pub_role_single(self, agent_name, role):
         """
@@ -116,7 +71,7 @@ class OnSiteScenarioEnv(ScenarioEnv):
             return
 
         # Convert quaternion and position to transform matrix
-        from metadrive.onsite_middleware.onsite_middleware import OnSiteMiddleware
+        from metadrive.misc.onsite_middleware.onsite_middleware import OnSiteMiddleware
         middleware = OnSiteMiddleware.__new__(OnSiteMiddleware)  # Create instance without __init__
 
         transform = middleware._quaternion_to_matrix(

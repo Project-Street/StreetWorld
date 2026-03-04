@@ -1,4 +1,5 @@
 import logging
+from datetime import datetime
 
 global_logger = None
 dup_filter = None
@@ -119,3 +120,7 @@ def reset_logger():
     """
     global dup_filter
     dup_filter.reset()
+
+
+def get_log_timestamp() -> str:
+    return datetime.now().strftime("%Y_%m_%d_%H_%M_%S")

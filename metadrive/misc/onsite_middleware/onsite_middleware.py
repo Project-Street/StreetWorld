@@ -9,6 +9,7 @@ import json
 import logging
 import sys
 import time
+from pathlib import Path
 import numpy as np
 from google.protobuf.json_format import MessageToDict
 
@@ -17,6 +18,7 @@ import libMulticastNetwork
 # Import proto messages and enums
 from metadrive.misc.onsite_middleware.onsite_proto.chassis.proto.chassis_messages_pb2 import VehicleFeedback, VehicleControl
 from metadrive.misc.onsite_middleware.onsite_proto.chassis.proto.chassis_enums_pb2 import VEHICLE_FEEDBACK, VEHICLE_CONTROL
+from metadrive.misc.onsite_middleware.onsite_proto.chassis.proto import chassis_enums_pb2
 from metadrive.misc.onsite_middleware.onsite_proto.main.proto.messages_pb2 import (
     PubRole, SubRole, Notify, ActorPrepare, ActorPrepareResult, SessionInfo
 )
@@ -25,6 +27,8 @@ from metadrive.misc.onsite_middleware.onsite_proto.main.proto.enums_pb2 import (
     MT_ACTOR_PREPARE, MT_ACTOR_PREPARE_RESULT,
     NT_ABORT_TEST, NT_START_TEST, NT_FINISH_TEST, NT_DESTROY_ROLE
 )
+from metadrive.misc.onsite_middleware.onsite_proto.main.proto import enums_pb2
+from metadrive.utils.logger import get_log_timestamp
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +45,8 @@ class OnSiteMiddleware:
 
     # Constants for conversion
     MAX_STEERING_RAD = 1.047  # 60 degrees in radians
+    _ANSI_PURPLE = "\033[95m"
+    _ANSI_RESET = "\033[0m"
 
     def __init__(self, config_center, field_id, net_interface, local_ip):
         """
@@ -66,13 +72,164 @@ class OnSiteMiddleware:
         self.cmd_channel = None
         self.session_channel = None
         self.image_channel = None
-
+        self.actor_id 
         # Sequence counters
-        self.vehicle_feedback_seq = 0
         self.image_seq = 0
+        self._seq_by_type = {}
+
+        # Send only this logger to a dedicated file.
+        self._init_logger()
 
         # Initialize channels
         self.initialize_channels()
+
+    def _init_logger(self):
+        logger.setLevel(logging.DEBUG)
+        ts = get_log_timestamp()
+        self.log_ts = ts
+        # Share timestamp with other modules (e.g., onsite_integration).
+        try:
+            import os
+            os.environ["ONSITE_LOG_TS"] = ts
+        except Exception:
+            pass
+        log_dir = Path("logs")
+        log_dir.mkdir(parents=True, exist_ok=True)
+        log_file = log_dir / f"onsitemiddleware_{ts}.logs"
+        handler = logging.FileHandler(log_file, encoding="utf-8")
+        handler.setLevel(logging.DEBUG)
+        handler.setFormatter(logging.Formatter(
+            fmt="%(asctime)s %(levelname)s %(name)s: %(message)s",
+            datefmt="%Y-%m-%d %H:%M:%S",
+        ))
+        handler.addFilter(lambda record: record.name == __name__)
+        if not any(isinstance(h, logging.FileHandler) and getattr(h, "baseFilename", "") == str(log_file)
+                   for h in logger.handlers):
+            logger.addHandler(handler)
+
+    @classmethod
+    def _color_purple(cls, value):
+        return f"{cls._ANSI_PURPLE}{value}{cls._ANSI_RESET}"
+
+    @staticmethod
+    def _proto_to_dict(message):
+        return MessageToDict(
+            message,
+            preserving_proto_field_name=True,
+            use_integers_for_enums=False,
+            including_default_value_fields=True
+        )
+
+    @staticmethod
+    def _format_type_name(value, enum_scope):
+        if isinstance(value, str):
+            return value
+        if not isinstance(value, int):
+            return str(value)
+        if enum_scope == "main":
+            try:
+                return f"{enums_pb2.MsgType.Name(value)} ({value})"
+            except ValueError:
+                return f"UNKNOWN_MAIN_TYPE ({value})"
+        if enum_scope == "chassis":
+            try:
+                return f"{chassis_enums_pb2.MsgType.Name(value)} ({value})"
+            except ValueError:
+                return f"UNKNOWN_CHASSIS_TYPE ({value})"
+        return f"UNKNOWN_TYPE ({value})"
+
+    def _log_message_debug(self, direction, message_type, payload, enum_scope):
+        if not logger.isEnabledFor(logging.DEBUG):
+            return
+        if hasattr(payload, "DESCRIPTOR"):
+            payload_dict = self._proto_to_dict(payload)
+        elif isinstance(payload, dict):
+            payload_dict = payload
+        else:
+            payload_dict = {"value": payload}
+        if isinstance(payload_dict, dict):
+            if "expected_type" in payload_dict:
+                payload_dict = dict(payload_dict)
+                payload_dict["expected_type"] = self._format_type_name(payload_dict["expected_type"], enum_scope)
+        payload_text = json.dumps(payload_dict, ensure_ascii=False, sort_keys=True, indent=2)
+        logger.debug(
+            "%s type=%s dict=%s",
+            direction,
+            self._color_purple(self._format_type_name(message_type, enum_scope)),
+            self._color_purple(payload_text),
+        )
+
+    def _next_seq(self, message_type) -> int:
+        seq = int(self._seq_by_type.get(message_type, 0))
+        self._seq_by_type[message_type] = seq + 1
+        return seq
+
+    @staticmethod
+    def _to_float(value, default=0.0):
+        if value is None:
+            return float(default)
+        if isinstance(value, np.ndarray):
+            if value.size == 0:
+                return float(default)
+            return float(value.reshape(-1)[0])
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return float(default)
+
+    @staticmethod
+    def _to_int(value, default=0):
+        if value is None:
+            return int(default)
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return int(default)
+
+    @classmethod
+    def _to_vec3(cls, value, default=(0.0, 0.0, 0.0)):
+        if value is None:
+            return tuple(float(v) for v in default)
+        arr = np.asarray(value, dtype=np.float64).reshape(-1)
+        if arr.size < 3:
+            padded = np.asarray(default, dtype=np.float64).copy()
+            padded[:arr.size] = arr
+            arr = padded
+        return float(arr[0]), float(arr[1]), float(arr[2])
+
+    @staticmethod
+    def _map_role_type(type_value):
+        t = str(type_value).lower()
+        if t in ("vehicle", "motorvehicle", "car", "veh", "metadrivetype.vehicle"):
+            return enums_pb2.RT_MOTORVEHICLE
+        if t in ("pedestrian", "human", "person", "metadrivetype.pedestrian"):
+            return enums_pb2.RT_PEDESTRIAN
+        if t in ("bicycle", "cyclist", "bike", "nonmotorvehicle", "metadrivetype.cyclist"):
+            return enums_pb2.RT_NONMOTORVEHICLE
+        return enums_pb2.RT_MOTORVEHICLE
+
+    @staticmethod
+    def parse_scene_name_from_session_id(session_id: str) -> str:
+        """
+        Parse OnSite session_id into MetaDrive scene_name.
+
+        Expected session_id format:
+            用户-运行次数-场地编号-作业id-时间戳_目前运行的次数
+        Example:
+            tj2026-test1-1-1-1771007315895005_20260214022843_1
+
+        Returns:
+            scene_name in "{场地编号}_{作业id}" format, e.g. "1_1"
+        """
+        raw = str(session_id).strip()
+        parts = raw.rsplit("-", 3)
+        if len(parts) != 4:
+            raise ValueError(f"Invalid session_id format: {session_id}")
+        field_id = parts[1].strip()
+        job_id = parts[2].strip()
+        if not field_id or not job_id:
+            raise ValueError(f"Invalid session_id format: {session_id}")
+        return f"{field_id}_{job_id}"
 
     def initialize_channels(self):
         """
@@ -89,7 +246,7 @@ class OnSiteMiddleware:
         param.log_level = 1  # 1-info, 2-warning, 3-error
         param.client_name = "simulator"
         param.recv_self_msg = False
-        logger.debug(
+        logger.info(
             "OnSite create_channels param=%s",
             {
                 "config_center_addr": param.config_center_addr,
@@ -114,12 +271,12 @@ class OnSiteMiddleware:
             self.channel_map[c.name()] = c
 
         # Assign channel references
-        self.prepare_channel = self.channel_map.get('prepare')
-        self.notify_channel = self.channel_map.get('notify')
-        self.role_channel = self.channel_map.get('pubrole')
-        self.cmd_channel = self.channel_map.get('vehiclecontrol')
-        self.session_channel = self.channel_map.get('sessioninfo')
-        self.image_channel = self.channel_map.get('camera')
+        self.prepare_channel = self.channel_map['prepare']
+        self.notify_channel = self.channel_map['notify']
+        self.role_channel = self.channel_map['pubrole']
+        self.cmd_channel = self.channel_map['vehiclecontrol']
+        self.session_channel = self.channel_map['sessioninfo']
+        self.image_channel = self.channel_map['camera']
 
         # Initialize image decoder
         if not libMulticastNetwork.InitImageDecoder():
@@ -139,7 +296,7 @@ class OnSiteMiddleware:
         Receive ActorPrepare message from OnSite server.
 
         Returns:
-            tuple: (session_id, actor_id, brief_data) if message received, None otherwise
+            tuple: (session_id, actor_id, brief_data, scene_name) if message received, None otherwise
         """
         if self.prepare_channel is None:
             return None
@@ -152,19 +309,12 @@ class OnSiteMiddleware:
             data = libMulticastNetwork.getMessageData(msg)
             prepare_msg = ActorPrepare()
             prepare_msg.ParseFromString(data)
-            logger.debug(
-                "OnSite RX channel=prepare type=%s payload_bytes=%d payload=%s",
-                MT_ACTOR_PREPARE,
-                len(data),
-                MessageToDict(
-                    prepare_msg,
-                    preserving_proto_field_name=True,
-                    use_integers_for_enums=True,
-                ),
-            )
+            self._log_message_debug("recv", MT_ACTOR_PREPARE, prepare_msg, "main")
 
             session_id = prepare_msg.session_id
             actor_id = prepare_msg.actor_id
+            self.actor_id = actor_id
+            scene_name = self.parse_scene_name_from_session_id(session_id)
 
             # Parse brief_data if available
             brief_data = None
@@ -175,13 +325,9 @@ class OnSiteMiddleware:
                     logger.warning(f"Failed to parse brief_data: {e}")
 
             logger.info(f"Received ActorPrepare: session={session_id}, actor={actor_id}")
-            return (session_id, actor_id, brief_data)
+            return (session_id, actor_id, brief_data, scene_name)
 
-        logger.debug(
-            "OnSite RX channel=prepare unexpected_type=%s expected_type=%s",
-            msg.type(),
-            MT_ACTOR_PREPARE,
-        )
+        self._log_message_debug("recv", msg.type(), {"expected_type": MT_ACTOR_PREPARE}, "main")
         return None
 
     def recv_notify(self):
@@ -202,24 +348,10 @@ class OnSiteMiddleware:
             data = libMulticastNetwork.getMessageData(msg)
             notify = Notify()
             notify.ParseFromString(data)
-            logger.debug(
-                "OnSite RX channel=notify type=%s payload_bytes=%d payload=%s",
-                MT_NOTIFY,
-                len(data),
-                MessageToDict(
-                    notify,
-                    preserving_proto_field_name=True,
-                    use_integers_for_enums=True,
-                ),
-            )
-            logger.debug(f"Received Notify: type={notify.type}, role_id={notify.role_id}")
+            self._log_message_debug("recv", MT_NOTIFY, notify, "main")
             return notify
 
-        logger.debug(
-            "OnSite RX channel=notify unexpected_type=%s expected_type=%s",
-            msg.type(),
-            MT_NOTIFY,
-        )
+        self._log_message_debug("recv", msg.type(), {"expected_type": MT_NOTIFY}, "main")
         return None
 
     def recv_all_notifies(self):
@@ -257,24 +389,10 @@ class OnSiteMiddleware:
             data = libMulticastNetwork.getMessageData(msg)
             pub_role = PubRole()
             pub_role.ParseFromString(data)
-            logger.debug(
-                "OnSite RX channel=pubrole type=%s payload_bytes=%d payload=%s",
-                MT_PUBROLE,
-                len(data),
-                MessageToDict(
-                    pub_role,
-                    preserving_proto_field_name=True,
-                    use_integers_for_enums=True,
-                ),
-            )
-            logger.debug(f"Received PubRole with {len(pub_role.s_roles)} roles")
+            self._log_message_debug("recv", MT_PUBROLE, pub_role, "main")
             return pub_role
 
-        logger.debug(
-            "OnSite RX channel=pubrole unexpected_type=%s expected_type=%s",
-            msg.type(),
-            MT_PUBROLE,
-        )
+        self._log_message_debug("recv", msg.type(), {"expected_type": MT_PUBROLE}, "main")
         return None
 
     def recv_vehicle_control(self):
@@ -295,27 +413,13 @@ class OnSiteMiddleware:
             data = libMulticastNetwork.getMessageData(msg)
             control = VehicleControl()
             control.ParseFromString(data)
-            logger.debug(
-                "OnSite RX channel=vehiclecontrol type=%s payload_bytes=%d payload=%s",
-                VEHICLE_CONTROL,
-                len(data),
-                MessageToDict(
-                    control,
-                    preserving_proto_field_name=True,
-                    use_integers_for_enums=True,
-                ),
-            )
+            self._log_message_debug("recv", VEHICLE_CONTROL, control, "chassis")
 
             # Convert to MetaDrive action
             action = self._vehicle_control_to_action(control)
-            logger.debug(f"Received VehicleControl: steering={action[0]:.3f}, throttle_brake={action[1]:.3f}")
             return action
 
-        logger.debug(
-            "OnSite RX channel=vehiclecontrol unexpected_type=%s expected_type=%s",
-            msg.type(),
-            VEHICLE_CONTROL,
-        )
+        self._log_message_debug("recv", msg.type(), {"expected_type": VEHICLE_CONTROL}, "chassis")
         return None
 
     def recv_vehicle_feedback(self):
@@ -337,24 +441,10 @@ class OnSiteMiddleware:
             data = libMulticastNetwork.getMessageData(msg)
             feedback = VehicleFeedback()
             feedback.ParseFromString(data)
-            logger.debug(
-                "OnSite RX channel=vehiclecontrol type=%s payload_bytes=%d payload=%s",
-                VEHICLE_FEEDBACK,
-                len(data),
-                MessageToDict(
-                    feedback,
-                    preserving_proto_field_name=True,
-                    use_integers_for_enums=True,
-                ),
-            )
-            logger.debug("Received VehicleFeedback from OnSite")
+            self._log_message_debug("recv", VEHICLE_FEEDBACK, feedback, "chassis")
             return feedback
 
-        logger.debug(
-            "OnSite RX channel=vehiclecontrol unexpected_type=%s expected_type=%s",
-            msg.type(),
-            VEHICLE_FEEDBACK,
-        )
+        self._log_message_debug("recv", msg.type(), {"expected_type": VEHICLE_FEEDBACK}, "chassis")
         return None
 
     def recv_session_info(self):
@@ -375,24 +465,10 @@ class OnSiteMiddleware:
             data = libMulticastNetwork.getMessageData(msg)
             session_info = SessionInfo()
             session_info.ParseFromString(data)
-            logger.debug(
-                "OnSite RX channel=sessioninfo type=%s payload_bytes=%d payload=%s",
-                MT_SESSIONINFO,
-                len(data),
-                MessageToDict(
-                    session_info,
-                    preserving_proto_field_name=True,
-                    use_integers_for_enums=True,
-                ),
-            )
-            logger.debug("Received SessionInfo from OnSite")
+            self._log_message_debug("recv", MT_SESSIONINFO, session_info, "main")
             return session_info
 
-        logger.debug(
-            "OnSite RX channel=sessioninfo unexpected_type=%s expected_type=%s",
-            msg.type(),
-            MT_SESSIONINFO,
-        )
+        self._log_message_debug("recv", msg.type(), {"expected_type": MT_SESSIONINFO}, "main")
         return None
 
     # ==================== Send Methods ====================
@@ -414,21 +490,11 @@ class OnSiteMiddleware:
         msg.session_id = session_id
         msg.actor_id = actor_id
         msg.result = result
-
+        msg.reason = ""
         data = msg.SerializeToString()
         length = len(data)
         ret = self.prepare_channel.put(MT_ACTOR_PREPARE_RESULT, length, data)
-        logger.debug(
-            "OnSite TX channel=prepare type=%s payload_bytes=%d payload=%s ret=%s",
-            MT_ACTOR_PREPARE_RESULT,
-            length,
-            MessageToDict(
-                msg,
-                preserving_proto_field_name=True,
-                use_integers_for_enums=True,
-            ),
-            ret,
-        )
+        self._log_message_debug("send", MT_ACTOR_PREPARE_RESULT, {**self._proto_to_dict(msg), "ret": ret}, "main")
 
         if ret != 0:
             logger.error(f"Failed to send ActorPrepareResult, ret: {ret}")
@@ -454,30 +520,19 @@ class OnSiteMiddleware:
         data = msg.SerializeToString()
         length = len(data)
         ret = self.role_channel.put(MT_SUBROLE, length, data)
-        logger.debug(
-            "OnSite TX channel=pubrole type=%s payload_bytes=%d payload=%s ret=%s",
-            MT_SUBROLE,
-            length,
-            MessageToDict(
-                msg,
-                preserving_proto_field_name=True,
-                use_integers_for_enums=True,
-            ),
-            ret,
-        )
+        self._log_message_debug("send", MT_SUBROLE, {**self._proto_to_dict(msg), "ret": ret}, "main")
 
         if ret != 0:
             logger.error(f"Failed to send SubRole, ret: {ret}")
         else:
             logger.info(f"Sent SubRole: session={session_id}")
 
-    def send_pub_role(self, ego_state, participants_states, last_received_pub_role, current_timestamp):
+    def send_pub_role(self, obs, last_received_pub_role, current_timestamp):
         """
-        Send PubRole message to OnSite server with updated agent states.
+        Send PubRole message to OnSite server from env observation.
 
         Args:
-            ego_state: Dictionary with ego vehicle state
-            participants_states: Dictionary of participant states {agent_id: state_dict}
+            obs: Actor observation dict (must contain `states`, `surrounding`, optional `global_rlsl`)
             last_received_pub_role: Last received PubRole message (for preserving fields)
             current_timestamp: Current simulation timestamp in microseconds
         """
@@ -485,49 +540,43 @@ class OnSiteMiddleware:
             logger.warning("Role channel not available")
             return
 
-        msg = PubRole()
+        role_states = self._extract_role_states_from_obs(obs)
 
-        # Add ego vehicle
-        ego_role = self._agent_state_to_single_role(
-            'actor', ego_state, last_received_pub_role, current_timestamp
-        )
-        if ego_role:
-            msg.s_roles.append(ego_role)
+        msg = PubRole()
+        ts_us = int(current_timestamp)
+        pub_role_seq = self._next_seq(MT_PUBROLE)
+        msg.header.sim_ts = ts_us // 1000
+        msg.header.send_ts = int(time.time() * 1000)
+        msg.header.seq_no = pub_role_seq
+
+        # Add actor first
 
         # Add participants
-        for agent_id, state in participants_states.items():
-            role = self._agent_state_to_single_role(
-                agent_id, state, last_received_pub_role, current_timestamp
-            )
-            if role:
-                msg.s_roles.append(role)
+        for agent_id, state in role_states.items():
+            if agent_id == "actor":
+                role = self._agent_state_to_single_role(
+                    self.actor_id, role_states['actor'], last_received_pub_role, current_timestamp, pub_role_seq
+                )
+            else:
+                role = self._agent_state_to_single_role(
+                    agent_id, state, last_received_pub_role, current_timestamp, pub_role_seq
+                )
+            msg.s_roles.append(role)
 
         data = msg.SerializeToString()
         length = len(data)
         ret = self.role_channel.put(MT_PUBROLE, length, data)
-        logger.debug(
-            "OnSite TX channel=pubrole type=%s payload_bytes=%d payload=%s ret=%s",
-            MT_PUBROLE,
-            length,
-            MessageToDict(
-                msg,
-                preserving_proto_field_name=True,
-                use_integers_for_enums=True,
-            ),
-            ret,
-        )
+        self._log_message_debug("send", MT_PUBROLE, {**self._proto_to_dict(msg), "ret": ret}, "main")
 
         if ret != 0:
             logger.error(f"Failed to send PubRole, ret: {ret}")
-        else:
-            logger.debug(f"Sent PubRole with {len(msg.s_roles)} roles")
 
-    def send_vehicle_feedback(self, vehicle_state, current_timestamp, last_received_feedback=None):
+    def send_vehicle_feedback(self, obs, current_timestamp, last_received_feedback=None):
         """
-        Send VehicleFeedback message to OnSite server.
+        Send VehicleFeedback message to OnSite server from env observation.
 
         Args:
-            vehicle_state: Dictionary with vehicle state from MetaDrive
+            obs: Actor observation dict (must contain `states`)
             current_timestamp: Current simulation timestamp in microseconds
             last_received_feedback: Last received VehicleFeedback (for preserving fields)
         """
@@ -535,27 +584,19 @@ class OnSiteMiddleware:
             logger.warning("Command channel not available")
             return
 
+        if "states" not in obs:
+            logger.warning("Observation missing states, skip VehicleFeedback.")
+            return
+        vehicle_state = obs["states"]
         msg = self._vehicle_state_to_feedback(vehicle_state, current_timestamp, last_received_feedback)
 
         data = msg.SerializeToString()
         length = len(data)
         ret = self.cmd_channel.put(VEHICLE_FEEDBACK, length, data)
-        logger.debug(
-            "OnSite TX channel=vehiclecontrol type=%s payload_bytes=%d payload=%s ret=%s",
-            VEHICLE_FEEDBACK,
-            length,
-            MessageToDict(
-                msg,
-                preserving_proto_field_name=True,
-                use_integers_for_enums=True,
-            ),
-            ret,
-        )
+        self._log_message_debug("send", VEHICLE_FEEDBACK, {**self._proto_to_dict(msg), "ret": ret}, "chassis")
 
         if ret != 0:
             logger.error(f"Failed to send VehicleFeedback, ret: {ret}")
-        else:
-            logger.debug("Sent VehicleFeedback")
 
     def send_images(self, images, timestamp):
         """
@@ -572,8 +613,8 @@ class OnSiteMiddleware:
         if not images:
             return
 
-        py_images = []
         for img in images:
+            py_images = []
             py_img = libMulticastNetwork.PyImage()
             py_img.timestamp_sec = timestamp
             py_img.camera_timestamp = int(timestamp * 1e6)
@@ -581,34 +622,55 @@ class OnSiteMiddleware:
             py_img.measurement_time = timestamp
             py_img.height = img.shape[0]
             py_img.width = img.shape[1]
-            py_img.encoding = "bgr8"
+            py_img.encoding = "rgb8"
             py_img.data = img.ravel()
             py_images.append(py_img)
             self.image_seq += 1
 
-        ret = self.image_channel.put_image_simple(py_images)
-        images_meta = [
-            {
-                "timestamp_sec": float(py_img.timestamp_sec),
-                "camera_timestamp": int(py_img.camera_timestamp),
-                "sequence_num": int(py_img.sequence_num),
-                "measurement_time": float(py_img.measurement_time),
-                "height": int(py_img.height),
-                "width": int(py_img.width),
-                "encoding": py_img.encoding,
-            }
-            for py_img in py_images
-        ]
-        logger.debug(
-            "OnSite TX channel=camera type=image_batch image_count=%d images=%s ret=%s",
-            len(py_images),
-            images_meta,
-            ret,
-        )
-        if ret != 0:
-            logger.error(f"Failed to send images, ret: {ret}")
-        else:
-            logger.debug(f"Sent {len(py_images)} images")
+            ret = self.image_channel.put_image_simple(py_images)
+            images_meta = [
+                {
+                    "timestamp_sec": float(py_img.timestamp_sec),
+                    "camera_timestamp": int(py_img.camera_timestamp),
+                    "sequence_num": int(py_img.sequence_num),
+                    "measurement_time": float(py_img.measurement_time),
+                    "height": int(py_img.height),
+                    "width": int(py_img.width),
+                    "encoding": py_img.encoding,
+                }
+                for py_img in py_images
+            ]
+            self._log_message_debug(
+                "send",
+                "image_batch",
+                {"image_count": len(py_images), "images": images_meta, "ret": ret},
+                "raw",
+            )
+            if ret != 0:
+                logger.error(f"Failed to send images, ret: {ret}")
+
+    def _extract_role_states_from_obs(self, obs):
+        role_states = {}
+
+        actor_state = dict(obs["states"])
+        actor_state["rlsl"] = None
+        if "global_rlsl" in obs and "actor" in obs["global_rlsl"]:
+            actor_state["rlsl"] = obs["global_rlsl"]["actor"]
+        role_states["actor"] = actor_state
+
+        if "surrounding" not in obs:
+            return role_states
+
+        surrounding = obs["surrounding"]
+        has_global_rlsl = "global_rlsl" in obs
+        for role_id, s in surrounding.items():
+            state = dict(s)
+            state["rlsl"] = None
+            if has_global_rlsl and role_id in obs["global_rlsl"]:
+                state["rlsl"] = obs["global_rlsl"][role_id]
+            role_states[role_id] = state
+
+        return role_states
 
     # ==================== Conversion Utility Functions ====================
 
@@ -687,7 +749,7 @@ class OnSiteMiddleware:
 
         return T
 
-    def _agent_state_to_single_role(self, agent_id, state, last_received_pub_role, current_timestamp):
+    def _agent_state_to_single_role(self, agent_id, state, last_received_pub_role, current_timestamp, seq_no):
         """
         Convert agent state to SingleRole proto message.
 
@@ -700,12 +762,12 @@ class OnSiteMiddleware:
         Returns:
             SingleRole proto message
         """
-        from metadrive.misc.onsite_middleware.onsite_proto.main.proto.messages_pb2 import SingleRole
+        from metadrive.misc.onsite_middleware.onsite_proto.main.proto.fields_pb2 import SingleRole
 
         role = SingleRole()
         role.id = agent_id
         role.name = agent_id
-
+        role.f_status = [1] + [0] * 8  # Placeholder for status flags
         # Preserve type and size from last received PubRole if available
         cached_role = None
         if last_received_pub_role:
@@ -716,22 +778,21 @@ class OnSiteMiddleware:
 
         if cached_role:
             role.type = cached_role.type
-            role.box.size.CopyFrom(cached_role.box.size)
         else:
-            # Default values if no cached role
-            role.type = 1  # Default vehicle type
-            role.box.size.x = state.get('length', 4.5)
-            role.box.size.y = state.get('width', 2.0)
-            role.box.size.z = state.get('height', 1.5)
+            role.type = self._map_role_type(state["type"])
+        size_x, size_y, size_z = self._to_vec3(state["size"])
+        role.box.size.x = size_x
+        role.box.size.y = size_y
+        role.box.size.z = size_z
 
-        # Position
-        position = state.get('position', [0, 0, 0])
-        role.box.bottom_center.x = position[0]
-        role.box.bottom_center.y = position[1]
-        role.box.bottom_center.z = position[2]
+        # Position to ColliderBox bottom_center (x,y unchanged; z shifted by half height).
+        pos_x, pos_y, pos_z = self._to_vec3(state['position'])
+        role.box.bottom_center.x = pos_x
+        role.box.bottom_center.y = pos_y
+        role.box.bottom_center.z = pos_z - 0.5 * size_z
 
         # Rotation (from heading_theta to quaternion)
-        heading = state.get('heading_theta', 0)
+        heading = self._to_float(state['heading_theta'])
         quat = self._euler_to_quaternion(0, 0, heading)
         role.box.rotation.x = quat[0]
         role.box.rotation.y = quat[1]
@@ -739,17 +800,44 @@ class OnSiteMiddleware:
         role.box.rotation.w = quat[3]
 
         # Linear velocity
-        velocity = state.get('velocity', [0, 0, 0])
-        role.linear_speed.x = velocity[0]
-        role.linear_speed.y = velocity[1]
-        role.linear_speed.z = velocity[2]
+        vel_x, vel_y, vel_z = self._to_vec3(state['velocity'])
+        role.linear_speed.x = vel_x
+        role.linear_speed.y = vel_y
+        role.linear_speed.z = vel_z
 
         # Angular velocity
-        angular_velocity = state.get('angular_velocity', 0)
+        angular_velocity = self._to_float(state['angular_velocity'])
         role.angular_speed.z = angular_velocity
 
-        # Timestamp (microseconds to milliseconds)
-        role.report_ts = current_timestamp // 1000
+        # Linear acceleration
+        acc_x, acc_y, acc_z = self._to_vec3(state['acceleration'])
+        role.linear_acceleration.x = acc_x
+        role.linear_acceleration.y = acc_y
+        role.linear_acceleration.z = acc_z
+
+        # Angular acceleration
+        ang_acc = state["angular_acceleration"]
+        if isinstance(ang_acc, (int, float, np.integer, np.floating)):
+            ang_acc_x, ang_acc_y, ang_acc_z = 0.0, 0.0, float(ang_acc)
+        else:
+            ang_acc_x, ang_acc_y, ang_acc_z = self._to_vec3(ang_acc)
+        role.angular_acceleration.x = ang_acc_x
+        role.angular_acceleration.y = ang_acc_y
+        role.angular_acceleration.z = ang_acc_z
+
+        # RLSL (optional)
+        if "rlsl" in state and state["rlsl"] is not None:
+            rlsl = state["rlsl"]
+            role.rlsl.road_id = str(rlsl["road_id"])
+            role.rlsl.lane_id = self._to_int(rlsl["lane_id"])
+            role.rlsl.s = self._to_float(rlsl["s"])
+            role.rlsl.l = self._to_float(rlsl["l"])
+            role.rlsl.z = self._to_float(rlsl["z"])
+
+        # Timestamp (microseconds to milliseconds, int64)
+        ts_us = int(current_timestamp)
+        role.report_ts = ts_us // 1000
+        role.seq_no = int(seq_no)
 
         return role
 
@@ -768,31 +856,39 @@ class OnSiteMiddleware:
         feedback = VehicleFeedback()
 
         # Header
-        feedback.header.sim_ts = current_timestamp // 1000  # microseconds to milliseconds
+        ts_us = int(current_timestamp)
+        feedback.header.sim_ts = ts_us // 1000  # microseconds to milliseconds, int64
         feedback.header.send_ts = int(time.time() * 1000)
-        feedback.header.seq_no = self.vehicle_feedback_seq
-        self.vehicle_feedback_seq += 1
+        feedback.header.seq_no = self._next_seq(VEHICLE_FEEDBACK)
 
         # Steering feedback
-        feedback.steering_feedback.steering_wheel_angle = vehicle_state.get('steering_wheel_angle', 0.0)
-        feedback.steering_feedback.steering_wheel_speed = vehicle_state.get('steering_wheel_speed', 0.0)
-        feedback.steering_feedback.left_directive_wheel_angle = vehicle_state.get('left_directive_wheel_angle', 0.0)
-        feedback.steering_feedback.right_directive_wheel_angle = vehicle_state.get('right_directive_wheel_angle', 0.0)
+        feedback.steering_feedback.steering_wheel_angle = self._to_float(vehicle_state['steering_wheel_angle'])
+        feedback.steering_feedback.steering_wheel_speed = self._to_float(vehicle_state['steering_wheel_speed'])
+        feedback.steering_feedback.left_directive_wheel_angle = self._to_float(
+            vehicle_state['left_directive_wheel_angle']
+        )
+        feedback.steering_feedback.right_directive_wheel_angle = self._to_float(
+            vehicle_state['right_directive_wheel_angle']
+        )
 
         # Driving feedback
-        throttle_brake = vehicle_state.get('throttle_brake', 0.0)
+        throttle_brake = self._to_float(vehicle_state['throttle_brake'])
         feedback.driving_feedback.accelerator_pedal_position = max(0, throttle_brake * 100)
 
         # Brake feedback
         feedback.brake_feedback.brake_pedal_position = max(0, -throttle_brake * 100)
 
         # BCM feedback
-        feedback.bcm_feedback.vehicle_speed = vehicle_state.get('speed', 0.0) * 3.6  # m/s to km/h
-        feedback.bcm_feedback.longitudinal_acceleration = vehicle_state.get('longitudinal_acceleration', 0.0)
-        feedback.bcm_feedback.front_left_wheel_speed = vehicle_state.get('front_left_wheel_speed', 0.0)
-        feedback.bcm_feedback.front_right_wheel_speed = vehicle_state.get('front_right_wheel_speed', 0.0)
-        feedback.bcm_feedback.rear_left_wheel_speed = vehicle_state.get('rear_left_wheel_speed', 0.0)
-        feedback.bcm_feedback.rear_right_wheel_speed = vehicle_state.get('rear_right_wheel_speed', 0.0)
+        vel = np.asarray(vehicle_state["velocity"], dtype=np.float64).reshape(-1)
+        vehicle_speed = np.linalg.norm(vel[:2]) if vel.size >= 2 else 0.0
+        feedback.bcm_feedback.vehicle_speed = float(vehicle_speed)  # m/s
+        feedback.bcm_feedback.longitudinal_acceleration = self._to_float(
+            vehicle_state['longitudinal_acceleration']
+        )
+        feedback.bcm_feedback.front_left_wheel_speed = self._to_float(vehicle_state['front_left_wheel_speed'])  # m/s
+        feedback.bcm_feedback.fron_right_wheel_speed = self._to_float(vehicle_state['front_right_wheel_speed'])  # m/s
+        feedback.bcm_feedback.rear_left_wheel_speed = self._to_float(vehicle_state['rear_left_wheel_speed'])  # m/s
+        feedback.bcm_feedback.rear_right_wheel_speed = self._to_float(vehicle_state['rear_right_wheel_speed'])  # m/s
 
         # Preserve fields from last received feedback if available
         if last_received_feedback:

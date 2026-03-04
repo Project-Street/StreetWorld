@@ -1,82 +1,64 @@
 import gymnasium as gym
 import numpy as np
-from scipy.spatial.transform import Rotation as SCR
 
 from metadrive.obs.observation_base import BaseObservation
 
 
 class StateObservation(BaseObservation):
-    """
-    Simple state observation returning a dict with:
-    - position: [x, y]
-    - velocity: [vx, vy]
-    """
-
     def __init__(self, config=None):
         super().__init__(config or {})
         self.controller = None
-        self._last_timestamp = None
-        # Generous bounds for meters and m/s
-        self._pos_low = -1e6
-        self._pos_high = 1e6
-        self._vel_low = -1e3
-        self._vel_high = 1e3
 
     def reset(self, controller, seed=None, **kwargs):
         self.controller = controller
-        self._last_timestamp = None
 
     @property
     def observation_space(self):
         return gym.spaces.Dict({
-            'position': gym.spaces.Box(self._pos_low, self._pos_high, shape=(2,), dtype=np.float32),
-            'velocity': gym.spaces.Box(self._vel_low, self._vel_high, shape=(2,), dtype=np.float32),
+            "transform": gym.spaces.Box(-1e6, 1e6, shape=(4, 4), dtype=np.float32),
+            "position": gym.spaces.Box(-1e6, 1e6, shape=(3,), dtype=np.float32),
+            "velocity": gym.spaces.Box(-1e3, 1e3, shape=(3,), dtype=np.float32),
+            "acceleration": gym.spaces.Box(-1e4, 1e4, shape=(3,), dtype=np.float32),
+            "heading_theta": gym.spaces.Box(-np.pi, np.pi, shape=(), dtype=np.float32),
+            "angular_velocity": gym.spaces.Box(-1e3, 1e3, shape=(), dtype=np.float32),
+            "angular_acceleration": gym.spaces.Box(-1e5, 1e5, shape=(), dtype=np.float32),
+            "size": gym.spaces.Box(0.0, 1e3, shape=(3,), dtype=np.float32),
+            "type": gym.spaces.Text(max_length=64),
+            "steering_wheel_angle": gym.spaces.Box(-1e3, 1e3, shape=(), dtype=np.float32),
+            "steering_wheel_speed": gym.spaces.Box(-1e5, 1e5, shape=(), dtype=np.float32),
+            "left_directive_wheel_angle": gym.spaces.Box(-1e3, 1e3, shape=(), dtype=np.float32),
+            "right_directive_wheel_angle": gym.spaces.Box(-1e3, 1e3, shape=(), dtype=np.float32),
+            "throttle_brake": gym.spaces.Box(-1.0, 1.0, shape=(), dtype=np.float32),
+            "longitudinal_acceleration": gym.spaces.Box(-1e4, 1e4, shape=(2,), dtype=np.float32),
+            "front_left_wheel_speed": gym.spaces.Box(-1e5, 1e5, shape=(), dtype=np.float32),
+            "front_right_wheel_speed": gym.spaces.Box(-1e5, 1e5, shape=(), dtype=np.float32),
+            "rear_left_wheel_speed": gym.spaces.Box(-1e5, 1e5, shape=(), dtype=np.float32),
+            "rear_right_wheel_speed": gym.spaces.Box(-1e5, 1e5, shape=(), dtype=np.float32),
         })
 
     def observe(self):
-        ego_r = SCR.from_matrix(self.controller.transform[:3, :3]).as_euler('XYZ', degrees=False)
-        ego_t = self.controller.transform[:3, 3]
-        velo = float(self.controller.speed)
-        steer = float(self.controller.steering * np.deg2rad(self.controller.max_steering))
-        # Use throttle_brake as accelerate for DefaultVehicle compatibility
-        accel = float(getattr(self.controller, 'accelerate', getattr(self.controller, 'throttle_brake', 0.0)))
-        steer_rate = float(getattr(self.controller, 'steer_rate', 0.0))
-        # Use step manager timestamp if available, otherwise use controller timestamp or default
-        step_mgr = getattr(self.controller, 'step_manager', None)
-        if step_mgr is not None and hasattr(step_mgr, 'current_timestamp'):
-            timestamp = float(step_mgr.current_timestamp / 1_000_000)  # Convert us to sec
-        else:
-            timestamp = float(getattr(self.controller, 'timestamp', 0.1))
-        dt = 0.1
-        if self._last_timestamp is not None:
-            dt_candidate = timestamp - self._last_timestamp
-            if dt_candidate > 1e-4:
-                dt = dt_candidate
-        self._last_timestamp = timestamp
-
-        vel_xy = np.asarray(getattr(self.controller, 'velocity', np.zeros(2, dtype=np.float32)), dtype=np.float32)
-        linear_vel = np.zeros(3, dtype=np.float32)
-        linear_vel[:2] = vel_xy
-
-        prev_vel_xy = np.asarray(getattr(self.controller, 'last_velocity', vel_xy), dtype=np.float32)
-        linear_acc_xy = (vel_xy - prev_vel_xy) / dt
-        linear_acc = np.zeros(3, dtype=np.float32)
-        linear_acc[:2] = linear_acc_xy
-
-        angular_vel = np.zeros(3, dtype=np.float32)
-        angular_vel[2] = float(getattr(self.controller, 'angular_velocity', 0.0))
-
         return {
-            'ego_pos': ego_t.tolist(),
-            'ego_rot': ego_r.tolist(),
-            'ego_velo': velo,
-            'ego_steer': steer,
-            'accelerate': accel,
-            'steer_rate': steer_rate,
-            'timestamp': timestamp,
-            'linear_velocity': linear_vel,
-            'linear_acceleration': linear_acc,
-            'angular_velocity': angular_vel,
+            "transform": np.asarray(self.controller.transform, dtype=np.float32),
+            "position": np.asarray(self.controller.position, dtype=np.float32),
+            "velocity": np.asarray(self.controller.velocity, dtype=np.float32),
+            "acceleration": np.asarray(self.controller.acceleration, dtype=np.float32),
+            "heading_theta": float(self.controller.heading_theta),
+            "angular_velocity": float(self.controller.angular_velocity),
+            "angular_acceleration": float(self.controller.angular_acceleration),
+            "size": np.asarray(
+                [self.controller.LENGTH, self.controller.WIDTH, self.controller.HEIGHT], dtype=np.float32
+            ),
+            "type": str(self.controller.metadrive_type),
+            "steering_wheel_angle": float(self.controller.get_steering_wheel_angle()),
+            "steering_wheel_speed": float(self.controller.get_steering_wheel_speed()),
+            "left_directive_wheel_angle": float(self.controller.get_wheel_steering_angle_rad(0)),
+            "right_directive_wheel_angle": float(self.controller.get_wheel_steering_angle_rad(1)),
+            "throttle_brake": float(self.controller.throttle_brake),
+            "longitudinal_acceleration": np.asarray(self.controller.get_longitudinal_acceleration(), dtype=np.float32),
+            "front_left_wheel_speed": float(self.controller.get_wheel_speed(0)),
+            "front_right_wheel_speed": float(self.controller.get_wheel_speed(1)),
+            "rear_left_wheel_speed": float(self.controller.get_wheel_speed(2)),
+            "rear_right_wheel_speed": float(self.controller.get_wheel_speed(3)),
         }
 
     def destroy(self):

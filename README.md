@@ -16,27 +16,36 @@ StreetWorld is an open-source driving simulator built on MetaDrive, integrating 
 
 ### Prerequisites
 
-- Python >= 3.8 (Python 3.10 recommended)
-- CUDA 12.1 (for GPU acceleration)
+- Python >= 3.8 (Python 3.11 recommended)
+- CUDA >= 11.8 (for GPU acceleration)
 
 ### Environment Setup
 
 Create a conda environment:
 
 ```bash
-mamba create -n st-world python=3.10 -y
-mamba activate st-world
+conda create -n st-world python=3.11 -y
+conda activate st-world
 ```
 
 ### Install StreetWorld
 
 ```bash
-# Install PyTorch with CUDA support
-pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
+# Install PyTorch with CUDA support (You may visit https://pytorch.org/get-started/previous-versions/ to choose a PyTorch version compatible with your Python and CUDA environment).
+pip install torch==2.4.1 torchvision==0.19.1 torchaudio==2.4.1 --index-url https://download.pytorch.org/whl/cu121
+
+pip install "git+https://github.com/NVlabs/trajdata.git@a2a54e5"
+
+pip install /PATH_TO/libmulticastnetwork-1.0.2-cp311-cp311-linux_x86_64.whl
 
 # Install StreetWorld
-pip install -e .[gym]
+pip install -e . --no-build-isolation --index-url https://pypi.org/simple
 ```
+
+### Get Access to NuRec Model
+Register a [HuggingFace](https://huggingface.co/) account.
+Go to [HugginFace Access Token](https://huggingface.co/settings/tokens) page, and create a new one.
+`export` the token as `HF_TOKEN` to your environment.
 
 
 ## Quick Start
@@ -58,7 +67,7 @@ Run gRPC server for remote RL training:
 
 ```bash
 # On server environment
-pip install ./grpc/[server]
+# pip install ./grpc/[server]
 
 mamba run -n st-world python -m metadrive.examples.server \
   --transforms /path/to/transforms.json \

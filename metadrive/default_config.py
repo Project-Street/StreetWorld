@@ -28,6 +28,8 @@ BASE_DEFAULT_CONFIG = dict(
 
     # ===== actor =====
     actor_config=dict(
+        check_crash=True,
+        max_step=10_000,
         # Vehicle model. Candidates: "s", "m", "l", "xl", "default". random_agent_model makes this config invalid
         observer=AssemblyObservation,
         observer_config=dict(
@@ -35,15 +37,29 @@ BASE_DEFAULT_CONFIG = dict(
                 observer_class=GaussianObservation,
                 clip_rgb=False,
                 stack_size=6,
-                # cameras={ # an example of selfdefined camera config
-                #     'front': {
-                #         'offset': [-2.65, 0, 1.8], # in ego frame (+x front)
-                #         'hpr': [180, 0, 0], # orientation
-                #         'H': 900,
-                #         'W': 1600,
-                #         'focal': 2500, # in pixel
-                #     }
-                # }
+                cameras={ # an example of selfdefined camera config
+                    'head_front': {
+                        'offset': [1.65, 0, 1.3], # in ego frame (+x front)
+                        'hpr': [0, 0, 0], # orientation
+                        'H': 900,
+                        'W': 1600,
+                        'focal': 500, # in pixel
+                    },
+                    'left_front': {
+                        'offset': [1.45, 0.8, 1.3], # in ego frame (+x front)
+                        'hpr': [60, 0, 0], # orientation
+                        'H': 900,
+                        'W': 1600,
+                        'focal': 500, # in pixel
+                    },
+                    'right_front': {
+                        'offset': [1.45, -0.8, 1.3], # in ego frame (+x front)
+                        'hpr': [60, 0, 0], # orientation
+                        'H': 900,
+                        'W': 1600,
+                        'focal': 500, # in pixel
+                    }
+                }
             ),
             navigation = dict(
                 observer_class=NavigationObservation,
@@ -54,6 +70,7 @@ BASE_DEFAULT_CONFIG = dict(
             ),
             surrounding = dict(
                 observer_class=SurroundingObservation,
+                coordinate_mode="agent",
             )
         ),
         policy=EnvInputPolicy,
@@ -68,12 +85,15 @@ BASE_DEFAULT_CONFIG = dict(
         # dont set it, the controller will be random vehicle every turn
         controller=DefaultVehicle,
         controller_config=dict(
+            size=None,
             enable_reverse=True,
             spawn_velocity=True,
         )
     ),
     # ===== participant =====
     participant_config=dict(
+        check_crash=True,
+        max_step=10_000,
         # Vehicle model. Candidates: "s", "m", "l", "xl", "default". random_agent_model makes this config invalid
         observer=DefaultObservation,
         observer_config=dict(
@@ -86,6 +106,7 @@ BASE_DEFAULT_CONFIG = dict(
             action_check=False,
         ),
         controller_config=dict(
+            size=None,
             enable_reverse=True,
             spawn_velocity=True,
         )

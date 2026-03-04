@@ -1,20 +1,26 @@
 import math
+import os
 from collections import deque
-from typing import Union, List
+from typing import Union, Optional, List
 
 import numpy as np
 from panda3d.bullet import BulletVehicle, BulletBoxShape, ZUp
-from panda3d.core import Vec3, TransformState
+from panda3d.core import Material, Vec3, TransformState
 
 from metadrive.base_class.base_object import BaseObject
 # from metadrive.component.navigation_module.node_network_navigation import NodeNetworkNavigation
 from metadrive.component.pg_space import VehicleParameterSpace, ParameterSpace
+from metadrive.constants import CamMask, get_color_palette
 from metadrive.constants import MetaDriveType, CollisionGroup
 from metadrive.constants import Semantics
+from metadrive.engine.asset_loader import AssetLoader
 from metadrive.utils.logger import get_logger
 from metadrive.engine.physics_node import BaseRigidBodyNode
-from metadrive.utils import Config, safe_clip_for_small_array
-from metadrive.utils.math import norm
+from metadrive.utils.config import Config
+from metadrive.utils.math import safe_clip_for_small_array, Vector
+from metadrive.utils.math import get_vertical_vector, norm, clip
+from metadrive.utils.math import wrap_to_pi
+from metadrive.utils.utils import get_object_from_node
 import torch
 logger = get_logger()
 
@@ -132,11 +138,6 @@ class BaseVehicle(BaseObject, BaseVehicleState):
         self.throttle_brake = 0.0
         self.steering = 0
         self.last_current_action = deque([(0.0, 0.0), (0.0, 0.0)], maxlen=2)
-        self.last_position = (0, 0)
-        self.last_velocity = 0
-        self.last_heading = 0
-        self.dist_to_left_side = None
-        self.dist_to_right_side = None
 
         # VehicleFeedback state variables
         self._brake_pedal_position = 0.0  # 0-100
@@ -152,6 +153,9 @@ class BaseVehicle(BaseObject, BaseVehicleState):
         # if self.engine.current_map is not None:
         if _calling_reset:
             self.reset(position=position, heading_theta=heading_theta, vehicle_config=config, **kwargs)
+
+        self.last_steering = 0.0  # 添加：记录上一时刻的转向角
+        self.steer_rate = 0.0
 
     def _init_step_info(self):
         # done info will be initialized every frame
@@ -179,7 +183,7 @@ class BaseVehicle(BaseObject, BaseVehicleState):
         position: np.ndarray = None,
         heading_theta: float = 0.0,
         velocity: np.ndarray = None,
-        angluar_velocity: float = 0.0,
+        angular_velocity: float = 0.0,
         *args,
         **kwargs
     ):
@@ -197,27 +201,27 @@ class BaseVehicle(BaseObject, BaseVehicleState):
             self.seed(random_seed)
             self.sample_parameters()
 
+        # self.set_wheel_friction(self.config["wheel_friction"])
 
         self.set_heading_theta(heading_theta)
-        # self.set_wheel_friction(self.config["wheel_friction"])
-        if len(position) == 2:
-            self.set_position(position, height=self.HEIGHT / 2)
-        elif len(position) == 3:
-            self.set_position(position[:2], height=position[-1])
-        else:
-            raise ValueError()
+        self.last_heading_theta = heading_theta
+
+        self.set_position(position)
+        self.last_position = self.position
+
+        if self.config["spawn_velocity"]:
+            self.set_velocity(velocity)
+            self.set_angular_velocity(angular_velocity)
+            self.last_velocity = self.velocity
+            self.last_angular_velocity = self.angular_velocity
 
         # done info
         self._init_step_info()
 
-        self.update_dist_to_left_right()
         self.energy_consumption = 0
 
-        if self.config["spawn_velocity"]:
-            self.set_velocity(velocity)
-            self.set_angular_velocity(angluar_velocity)
+        self.steer_rate = 0.0
 
-        # self.add_light()
 
     def move(self, action=None, state_info=None):
         """
@@ -228,9 +232,6 @@ class BaseVehicle(BaseObject, BaseVehicleState):
         #     action = [0, 0]
 
         self._init_step_info()
-        self.last_position = self.position  # 2D vector
-        self.last_velocity = self.velocity  # 2D vector
-        self.last_heading_theta = self.heading_theta
 
         if state_info:
             self.set_transform(state_info["transform"])
@@ -239,29 +240,17 @@ class BaseVehicle(BaseObject, BaseVehicleState):
             self.set_angular_velocity(state_info["angular_velocity"])
             step_info = None
         else:
+            self.last_position = self.position
+            self.last_velocity = self.velocity
+            self.last_heading_theta = self.heading_theta
+            self.last_angular_velocity = self.angular_velocity
+
             action, step_info = self._preprocess_action(action)
             self.last_current_action.append(action)  # the real step of physics world is implemented in taskMgr.step()
             # if self.increment_steering:
             #     self._set_incremental_action(action)
             # else:
             self._set_action(action)
-        return step_info
-
-    def after_step(self):
-        step_energy, episode_energy = self._update_energy_consumption()
-        # self.out_of_route = self._out_of_route()
-        step_info = {}
-        step_info.update(
-            {
-                "speed": float(self.speed),
-                "angular_speed": float(self.angular_velocity),
-                "steering": float(self.steering),
-                "acceleration": float(self.throttle_brake),
-                "step_energy": step_energy,
-                "episode_energy": episode_energy,
-            }
-        )
-
         return step_info
 
     def _out_of_route(self):
@@ -314,7 +303,6 @@ class BaseVehicle(BaseObject, BaseVehicleState):
         self.contact_results.update(contact_infos)
 
     def _is_crash_world(self, contact_points):
-        return False # Disable this
         wheel_centers = []
         for i in range(self.vehicle.getNumWheels()):
             wheel = self.vehicle.getWheel(i)
@@ -453,22 +441,11 @@ class BaseVehicle(BaseObject, BaseVehicleState):
         self.vehicle = None
         self.wheels = None
 
-    def set_velocity(self, velocity):
-        super(BaseVehicle, self).set_velocity(velocity)
-        self.last_velocity = self.velocity
-
-    def set_position(self, position : List[float], height=None):
-        if height is None:
-            height = self.position[-1]
+    def set_position(self, position):
         if len(position) == 2:
-            position.append(height)
+            position.append(self.position[-1])
         super(BaseVehicle, self).set_position(position)
-        self.last_position = self.position
-
-    def set_heading_theta(self, heading):
-        super(BaseVehicle, self).set_heading_theta(heading)
-        self.last_heading = self.heading_theta
-
+    
     def get_state(self):
         """
         Fetch more information
@@ -561,6 +538,12 @@ class BaseVehicle(BaseObject, BaseVehicleState):
     # ===== VehicleFeedback API =====
     # These methods provide vehicle state feedback matching the VehicleFeedback protocol
 
+    def get_wheel_steering_angle_rad(self, wheel_index):
+        if len(self.wheels) <= wheel_index:
+            return 0.0
+        # BulletWheel.getSteering() returns degrees.
+        return self.wheels[wheel_index].getSteering() * (np.pi / 180.0)
+
     def get_steering_wheel_angle(self):
         """
         Get current steering wheel angle in radians.
@@ -568,54 +551,14 @@ class BaseVehicle(BaseObject, BaseVehicleState):
         """
         return self.steering * self.max_steering * (np.pi / 180.0)  # Convert to radians
 
-    def get_vehicle_speed(self):
+    def get_wheel_speed(self, wheel_index):
         """
-        Get current vehicle speed in km/h.
+        Get wheel speed in m/s by wheel index.
         """
-        return self.speed_km_h
-
-    def get_front_left_wheel_speed(self):
-        """
-        Get front left wheel speed in m/s.
-        Calculated from wheel rotation speed and wheel radius.
-        """
-        if len(self.wheels) < 1:
+        if len(self.wheels) <= wheel_index:
             return 0.0
-        wheel = self.wheels[0]  # Front left wheel (index 0)
-        rotation_speed = wheel.getDeltaRotation()  # rad/s
-        wheel_radius = wheel.getWheelRadius()  # meters
-        return rotation_speed * wheel_radius  # m/s
-
-    def get_front_right_wheel_speed(self):
-        """
-        Get front right wheel speed in m/s.
-        """
-        if len(self.wheels) < 2:
-            return 0.0
-        wheel = self.wheels[1]  # Front right wheel (index 1)
-        rotation_speed = wheel.getDeltaRotation()
-        wheel_radius = wheel.getWheelRadius()
-        return rotation_speed * wheel_radius
-
-    def get_rear_left_wheel_speed(self):
-        """
-        Get rear left wheel speed in m/s.
-        """
-        if len(self.wheels) < 3:
-            return 0.0
-        wheel = self.wheels[2]  # Rear left wheel (index 2)
-        rotation_speed = wheel.getDeltaRotation()
-        wheel_radius = wheel.getWheelRadius()
-        return rotation_speed * wheel_radius
-
-    def get_rear_right_wheel_speed(self):
-        """
-        Get rear right wheel speed in m/s.
-        """
-        if len(self.wheels) < 4:
-            return 0.0
-        wheel = self.wheels[3]  # Rear right wheel (index 3)
-        rotation_speed = wheel.getDeltaRotation()
+        wheel = self.wheels[wheel_index]
+        rotation_speed = wheel.getDeltaRotation() / self.physics_world.step_size_sec
         wheel_radius = wheel.getWheelRadius()
         return rotation_speed * wheel_radius
 
@@ -638,32 +581,12 @@ class BaseVehicle(BaseObject, BaseVehicleState):
         Get steering wheel angular velocity in rad/s.
         Uses the chassis angular velocity around Z-axis.
         """
-        angular_velocity = self.body.getAngularVelocity()
-        return angular_velocity[2]  # Z-axis angular velocity in rad/s
+
+        return self.get_wheel_speed(0) + self.get_wheel_speed(1) / 2
 
     def get_longitudinal_acceleration(self):
         """
         Get longitudinal acceleration in m/s^2.
         Calculated from velocity change.
         """
-        current_velocity = self.speed
-        acceleration = (current_velocity - self.last_velocity) / (self.physics_world.physics_world_step_size / 1e6)
-        return acceleration
-
-    def get_left_directive_wheel_angle(self):
-        """
-        Get left front wheel steering angle in radians.
-        """
-        if len(self.wheels) < 1:
-            return 0.0
-        return self.wheels[0].getSteering() * (np.pi / 180.0)  # Convert to radians
-
-    def get_right_directive_wheel_angle(self):
-        """
-        Get right front wheel steering angle in radians.
-        """
-        if len(self.wheels) < 2:
-            return 0.0
-        return self.wheels[1].getSteering() * (np.pi / 180.0)  # Convert to radians
-
-
+        return self.acceleration[:2] * self.heading  # Project acceleration onto heading direction

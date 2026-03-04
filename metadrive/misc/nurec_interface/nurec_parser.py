@@ -3,8 +3,10 @@ from __future__ import annotations
 import copy
 import json
 import logging
+import os
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple
+from collections import defaultdict
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 import torch
@@ -36,7 +38,6 @@ def parse_camera_models(rig: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
     models: Dict[str, Dict[str, Any]] = {}
     for camera_uid, calib in rig["camera_calibrations"].items():
         name = calib.get("logical_sensor_name") or camera_uid
-        if name != 'camera_front_tele_30fov': continue
         models[name] = {
             "camera_uid": camera_uid,
             "type": calib["camera_model"]["type"],
@@ -145,7 +146,7 @@ def parse_camera_params(
     return camera_params, camera_models
 
 
-def parse_ego_poses(rig: Dict[str, Any]) -> Tuple[Dict[int, List[List[float]]], List[int]]:
+def parse_ego_poses_deprecated(rig: Dict[str, Any]) -> Tuple[Dict[int, List[List[float]]], List[int]]:
     traj = rig["rig_trajectories"][0]
     timestamps = [int(ts) for ts in traj["T_rig_world_timestamps_us"]]
     poses = np.array(traj["T_rig_worlds"], dtype=np.float64)
@@ -157,7 +158,7 @@ def parse_ego_poses(rig: Dict[str, Any]) -> Tuple[Dict[int, List[List[float]]], 
     return ego_poses, timestamps
 
 
-def parse_tracking_data(
+def parse_tracking_data_deprecated(
     tracks: Dict[str, Any],
     apply_world_to_nre: bool = False,
     world_to_nre: Optional[np.ndarray] = None,
@@ -212,12 +213,109 @@ def parse_tracking_data(
         tracking[obj_id] = {"poses": pose_map, "size": size, "type": obj_type}
     return tracking
 
+def compute_sim_world_to_xodr_map(rig_data: Dict[str, Any], xodr_path: Path) -> np.ndarray:
+    from trajdata.dataset_specific.xodr.geo_transform import get_t_rig_enu_from_ecef
 
-def load_rig_data(rig_path: Path | str) -> Dict[str, Any]:
-    return _load_json(rig_path)
+    xodr_xml = xodr_path.read_text(encoding="utf-8")
+    t_world_base = np.asarray(rig_data["T_world_base"], dtype=np.float64)
+    return np.asarray(get_t_rig_enu_from_ecef(t_world_base, xodr_xml), dtype=np.float64)
 
 
-def load_tracks_data(tracks_path: Optional[Path | str]) -> Dict[str, Any]:
-    if not tracks_path:
+def parse_tracking_data_for_export(
+    tracks: Dict[str, Any],
+    t_sim_world_to_xodr_map: np.ndarray,
+) -> Dict[str, Dict[str, Any]]:
+    if not tracks:
         return {}
-    return _load_json(tracks_path)
+    chunk_key = next(iter(tracks))
+    tracks_data = tracks[chunk_key]["tracks_data"]
+    cuboid_data = tracks[chunk_key]["cuboidtracks_data"]
+    track_ids = tracks_data["tracks_id"]
+    labels = tracks_data["tracks_label_class"]
+    timestamps_list = tracks_data["tracks_timestamps_us"]
+    poses_list = tracks_data["tracks_poses"]
+    sizes = cuboid_data["cuboids_dims"]
+    tracking: Dict[str, Dict[str, Any]] = {}
+    for idx, track_id in enumerate(track_ids):
+        obj_id = str(track_id)
+        size = sizes[idx]
+        raw_obj_type = str(labels[idx])
+        obj_type_key = raw_obj_type.lower()
+        obj_type = {
+            "automobile": "vehicle",
+            "trailer": "vehicle",
+            "heavy_truck": "vehicle",
+            "other_vehicle": "vehicle",
+            "bus": "vehicle",
+            "person": "pedestrian",
+            "bicycle": "cyclist",
+            "stroller": "pedestrian",
+        }.get(obj_type_key, obj_type_key)
+        if obj_type not in ("vehicle", "pedestrian", "cyclist"):
+            logger.warning(
+                "Drop unsupported NuRec object type: track_id=%s, type=%s",
+                obj_id,
+                raw_obj_type,
+            )
+            continue
+        pose_map: Dict[int, List[List[float]]] = {}
+        for ts, pose in zip(timestamps_list[idx], poses_list[idx]):
+            x, y, z, qx, qy, qz, qw = pose
+            rot = _quat_xyzw_to_matrix(qx, qy, qz, qw)
+            mat = np.eye(4, dtype=np.float64)
+            mat[:3, :3] = rot
+            mat[:3, 3] = [x, y, z]
+            mat = t_sim_world_to_xodr_map @ mat
+            pose_map[int(ts)] = mat.tolist()
+        tracking[obj_id] = {"poses": pose_map, "size": size, "type": obj_type}
+    return tracking
+
+
+def discover_scenes(nurec_path: Path) -> Dict[Path, List[Tuple[str, Path]]]:
+    by_batch: Dict[Path, List[Tuple[str, Path]]] = defaultdict(list)
+    for root, _, files in os.walk(nurec_path, followlinks=True):
+        if "rig_trajectories.json" not in files:
+            continue
+        scene_dir = (Path(root) / "rig_trajectories.json").parent
+        wrapper_dir = scene_dir.parent
+        batch_dir = wrapper_dir.parent
+        if not batch_dir.name.startswith("Batch"):
+            continue
+        if scene_dir.name != wrapper_dir.name:
+            continue
+        by_batch[batch_dir].append((scene_dir.name, scene_dir))
+    for batch_dir in by_batch:
+        by_batch[batch_dir].sort(key=lambda x: x[0])
+    return dict(sorted(by_batch.items(), key=lambda x: x[0].name))
+
+
+def export_one_scene(scene_dir: Path, out_dir: Path) -> None:
+    rig = _load_json(scene_dir / "rig_trajectories.json")
+    t_sim_world_to_xodr_map = compute_sim_world_to_xodr_map(rig, scene_dir / "map.xodr")
+
+    traj = rig["rig_trajectories"][0]
+    timestamps = [int(ts) for ts in traj["T_rig_world_timestamps_us"]]
+    poses = np.array(traj["T_rig_worlds"], dtype=np.float64)
+    ego_pose_out = {
+        str(ts): (t_sim_world_to_xodr_map @ pose).tolist()
+        for ts, pose in sorted(zip(timestamps, poses), key=lambda x: int(x[0]))
+    }
+
+    tracks = _load_json(scene_dir / "sequence_tracks.json")
+    tracking = parse_tracking_data_for_export(tracks, t_sim_world_to_xodr_map)
+
+    trajectory_out: Dict[str, Dict[str, Any]] = {}
+    for obj_id, obj in tracking.items():
+        local2world = {
+            str(int(ts)): mat
+            for ts, mat in sorted(obj["poses"].items(), key=lambda x: int(x[0]))
+        }
+        trajectory_out[str(obj_id)] = {
+            "type": obj["type"],
+            "size": list(obj["size"]),
+            "local2world": local2world,
+        }
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+    (out_dir / "ego_pose.json").write_text(json.dumps(ego_pose_out, ensure_ascii=False, indent=2), encoding="utf-8")
+    (out_dir / "trajectory.json").write_text(json.dumps(trajectory_out, ensure_ascii=False, indent=2), encoding="utf-8")

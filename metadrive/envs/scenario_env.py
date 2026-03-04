@@ -379,6 +379,8 @@ class ScenarioEnv(BaseEnv):
         surroundings = surrounding_obs.observe()
         if not surroundings:
             return None
+        if isinstance(surroundings, dict):
+            surroundings = surroundings.values()
         # ego velocity in ego frame
         vel_world = np.array(getattr(vehicle, "velocity", [0.0, 0.0]), dtype=np.float32)
         if vel_world.shape[0] < 2:
@@ -389,7 +391,7 @@ class ScenarioEnv(BaseEnv):
             return None
         R_world_vehicle = transform[:3, :3]
         R_vehicle_world = np.linalg.inv(R_world_vehicle)
-        ego_vel_ego = (R_vehicle_world @ vel_world3)[:2]
+        ego_vel_ego = (R_vehicle_world @ vel_world3)
         min_ttc = None
         for obj in surroundings:
             rel_pos = np.asarray(obj.get("position", [0.0, 0.0]), dtype=np.float32)

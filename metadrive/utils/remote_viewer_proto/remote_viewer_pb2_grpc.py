@@ -14,17 +14,17 @@ class OnsiteViewerServiceStub(object):
         Args:
             channel: A grpc.Channel.
         """
-        self.SendImage = channel.unary_unary(
-                '/onsite.viewer.OnsiteViewerService/SendImage',
-                request_serializer=remote__viewer__pb2.Image.SerializeToString,
-                response_deserializer=remote__viewer__pb2.Action.FromString,
+        self.SendAction = channel.unary_unary(
+                '/onsite.viewer.OnsiteViewerService/SendAction',
+                request_serializer=remote__viewer__pb2.Action.SerializeToString,
+                response_deserializer=remote__viewer__pb2.Image.FromString,
                 )
 
 
 class OnsiteViewerServiceServicer(object):
     """Missing associated documentation comment in .proto file."""
 
-    def SendImage(self, request, context):
+    def SendAction(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -33,10 +33,10 @@ class OnsiteViewerServiceServicer(object):
 
 def add_OnsiteViewerServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
-            'SendImage': grpc.unary_unary_rpc_method_handler(
-                    servicer.SendImage,
-                    request_deserializer=remote__viewer__pb2.Image.FromString,
-                    response_serializer=remote__viewer__pb2.Action.SerializeToString,
+            'SendAction': grpc.unary_unary_rpc_method_handler(
+                    servicer.SendAction,
+                    request_deserializer=remote__viewer__pb2.Action.FromString,
+                    response_serializer=remote__viewer__pb2.Image.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -49,7 +49,7 @@ class OnsiteViewerService(object):
     """Missing associated documentation comment in .proto file."""
 
     @staticmethod
-    def SendImage(request,
+    def SendAction(request,
             target,
             options=(),
             channel_credentials=None,
@@ -59,8 +59,8 @@ class OnsiteViewerService(object):
             wait_for_ready=None,
             timeout=None,
             metadata=None):
-        return grpc.experimental.unary_unary(request, target, '/onsite.viewer.OnsiteViewerService/SendImage',
-            remote__viewer__pb2.Image.SerializeToString,
-            remote__viewer__pb2.Action.FromString,
+        return grpc.experimental.unary_unary(request, target, '/onsite.viewer.OnsiteViewerService/SendAction',
+            remote__viewer__pb2.Action.SerializeToString,
+            remote__viewer__pb2.Image.FromString,
             options, channel_credentials,
             insecure, call_credentials, compression, wait_for_ready, timeout, metadata)

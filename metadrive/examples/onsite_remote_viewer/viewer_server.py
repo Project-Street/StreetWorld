@@ -1,17 +1,21 @@
 #!/usr/bin/env python3
 """OnSite remote viewer server.
 
-This process connects to the OnSite multicast network, receives images, and
-forwards them to remote clients over gRPC. It also receives actions from the
-remote client via gRPC and sends VehicleControl to the OnSite server.
+This process connects to the OnSite multicast network, receives images, exposes
+an RPC endpoint for remote clients, and sends VehicleControl to the OnSite
+server using the latest action from remote clients.
 """
 
 import argparse
+import json
 import logging
 import fcntl
 import socket
 import struct
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 from typing import Optional
 
 import numpy as np
@@ -26,6 +30,7 @@ import libMulticastNetwork
 
 from metadrive.misc.onsite_middleware.onsite_proto.chassis.proto.chassis_enums_pb2 import VEHICLE_CONTROL
 from metadrive.misc.onsite_middleware.onsite_proto.chassis.proto.chassis_messages_pb2 import VehicleControl
+from metadrive.misc.onsite_middleware.onsite_proto.chassis.proto import chassis_enums_pb2
 from metadrive.misc.onsite_middleware.onsite_proto.main.proto.enums_pb2 import (
     MT_NOTIFY,
     MT_ACTOR_PREPARE,
@@ -35,14 +40,14 @@ from metadrive.misc.onsite_middleware.onsite_proto.main.proto.enums_pb2 import (
     NT_FINISH_TEST,
 )
 from metadrive.misc.onsite_middleware.onsite_proto.main.proto.messages_pb2 import Notify, ActorPrepare, ActorPrepareResult
+from metadrive.misc.onsite_middleware.onsite_proto.main.proto import enums_pb2
+from metadrive.utils.logger import get_log_timestamp
 
 from metadrive.utils.remote_viewer_proto import remote_viewer_pb2, remote_viewer_pb2_grpc
 
 logger = logging.getLogger("onsite_viewer_server")
 
 MAX_STEERING_RAD = 1.047  # 60 degrees
-
-
 def get_ip_address(ifname: str) -> str:
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     try:
@@ -60,10 +65,14 @@ def get_ip_address(ifname: str) -> str:
 
 
 class OnSiteBridge:
-    def __init__(self, args: argparse.Namespace, action_state, grpc_client) -> None:
+    _ANSI_PURPLE = "\033[95m"
+    _ANSI_RESET = "\033[0m"
+
+    def __init__(self, args: argparse.Namespace, action_state, frame_state, state_lock: threading.Lock) -> None:
         self._args = args
         self._action_state = action_state
-        self._grpc_client = grpc_client
+        self._frame_state = frame_state
+        self._state_lock = state_lock
         self._stop = False
 
         self._recv_prepare = False
@@ -76,8 +85,82 @@ class OnSiteBridge:
         self._cmd_channel = None
         self._prepare_channel = None
         self._image_channel = None
+        self._seq_by_type = {}
 
+        self._init_logger()
         self._init_channels()
+
+    @classmethod
+    def _color_purple(cls, value):
+        return f"{cls._ANSI_PURPLE}{value}{cls._ANSI_RESET}"
+
+    def _init_logger(self) -> None:
+        logger.setLevel(logging.DEBUG)
+        ts = get_log_timestamp()
+        log_dir = Path("logs")
+        log_dir.mkdir(parents=True, exist_ok=True)
+        log_file = log_dir / f"onsitebridge_{ts}.logs"
+        handler = logging.FileHandler(log_file, encoding="utf-8")
+        handler.setLevel(logging.DEBUG)
+        handler.setFormatter(logging.Formatter(
+            fmt="%(asctime)s %(levelname)s %(name)s: %(message)s",
+            datefmt="%Y-%m-%d %H:%M:%S",
+        ))
+        handler.addFilter(lambda record: record.name == logger.name)
+        if not any(isinstance(h, logging.FileHandler) and getattr(h, "baseFilename", "") == str(log_file)
+                   for h in logger.handlers):
+            logger.addHandler(handler)
+
+    def _log_message_debug(self, direction, message_type, payload, enum_scope):
+        if not logger.isEnabledFor(logging.DEBUG):
+            return
+        payload_text = payload
+        if hasattr(payload, "DESCRIPTOR"):
+            payload_text = self._proto_to_dict(payload)
+        elif not isinstance(payload, dict):
+            payload_text = {"value": payload}
+        if isinstance(payload_text, dict) and "expected_type" in payload_text:
+            payload_text = dict(payload_text)
+            payload_text["expected_type"] = self._format_type_name(payload_text["expected_type"], enum_scope)
+        payload_text = json.dumps(payload_text, ensure_ascii=False, sort_keys=True, indent=2)
+        logger.debug(
+            "%s type=%s dict=%s",
+            direction,
+            self._color_purple(self._format_type_name(message_type, enum_scope)),
+            self._color_purple(payload_text),
+        )
+
+    def _next_seq(self, message_type) -> int:
+        seq = int(self._seq_by_type.get(message_type, 0))
+        self._seq_by_type[message_type] = seq + 1
+        return seq
+
+    @staticmethod
+    def _proto_to_dict(message):
+        return MessageToDict(
+            message,
+            preserving_proto_field_name=True,
+            use_integers_for_enums=False,
+            including_default_value_fields=True
+        )
+
+    @staticmethod
+    def _format_type_name(value, enum_scope):
+        if isinstance(value, str):
+            return value
+        if not isinstance(value, int):
+            return str(value)
+        if enum_scope == "main":
+            try:
+                return f"{enums_pb2.MsgType.Name(value)} ({value})"
+            except ValueError:
+                return f"UNKNOWN_MAIN_TYPE ({value})"
+        if enum_scope == "chassis":
+            try:
+                return f"{chassis_enums_pb2.MsgType.Name(value)} ({value})"
+            except ValueError:
+                return f"UNKNOWN_CHASSIS_TYPE ({value})"
+        return f"UNKNOWN_TYPE ({value})"
 
     def _init_channels(self) -> None:
         param = libMulticastNetwork.CreateChannelsParam()
@@ -92,7 +175,7 @@ class OnSiteBridge:
         param.log_level = 1
         param.client_name = "apollo_testee"
         param.recv_self_msg = False
-        logger.debug(
+        logger.info(
             "OnSite create_channels param=%s",
             {
                 "config_center_addr": param.config_center_addr,
@@ -133,15 +216,11 @@ class OnSiteBridge:
             notify = Notify()
             data = libMulticastNetwork.getMessageData(msg)
             notify.ParseFromString(data)
-            logger.debug(
-                "OnSite RX channel=notify type=%s payload_bytes=%d payload=%s",
+            self._log_message_debug(
+                "recv",
                 MT_NOTIFY,
-                len(data),
-                MessageToDict(
-                    notify,
-                    preserving_proto_field_name=True,
-                    use_integers_for_enums=True,
-                ),
+                notify,
+                "main",
             )
 
             if notify.type in [NT_ABORT_TEST, NT_FINISH_TEST]:
@@ -154,14 +233,10 @@ class OnSiteBridge:
                 logger.info("Start session")
                 self._start_test = True
             else:
-                logger.info("Notify: session=%s type=%s", notify.session_id, notify.type)
+                notify_type = f"{enums_pb2.NotifyType.Name(notify.type)}({notify.type})"
+                logger.info("Notify: session=%s type=%s", notify.session_id, notify_type)
         else:
-            logger.debug(
-                "OnSite RX channel=notify unexpected_type=%s ret=%s expected_type=%s",
-                None if msg is None else msg.type(),
-                ret,
-                MT_NOTIFY,
-            )
+            self._log_message_debug("recv", msg.type(), {"expected_type": MT_NOTIFY}, "main")
 
     def _get_prepare(self) -> None:
         ret, msg = self._prepare_channel.get()
@@ -172,15 +247,11 @@ class OnSiteBridge:
             data = libMulticastNetwork.getMessageData(msg)
             prepare_msg = ActorPrepare()
             prepare_msg.ParseFromString(data)
-            logger.debug(
-                "OnSite RX channel=prepare type=%s payload_bytes=%d payload=%s",
+            self._log_message_debug(
+                "recv",
                 MT_ACTOR_PREPARE,
-                len(data),
-                MessageToDict(
-                    prepare_msg,
-                    preserving_proto_field_name=True,
-                    use_integers_for_enums=True,
-                ),
+                prepare_msg,
+                "main",
             )
             self._recv_prepare = True
             self._prepare_sent = False
@@ -188,31 +259,22 @@ class OnSiteBridge:
             self._actor_id = prepare_msg.actor_id
             logger.info("Received prepare: session_id=%s actor_id=%s", self._session_id, self._actor_id)
         else:
-            logger.debug(
-                "OnSite RX channel=prepare unexpected_type=%s ret=%s expected_type=%s",
-                None if msg is None else msg.type(),
-                ret,
-                MT_ACTOR_PREPARE,
-            )
+            self._log_message_debug("recv", msg.type(), {"expected_type": MT_ACTOR_PREPARE}, "main")
 
     def _send_prepare_result(self) -> None:
         result = ActorPrepareResult()
         result.session_id = self._session_id
         result.actor_id = self._actor_id
         result.result = True
+        result.reason = ""
 
         data = result.SerializeToString()
         ret = self._prepare_channel.put(MT_ACTOR_PREPARE_RESULT, len(data), data)
-        logger.debug(
-            "OnSite TX channel=prepare type=%s payload_bytes=%d payload=%s ret=%s",
+        self._log_message_debug(
+            "send",
             MT_ACTOR_PREPARE_RESULT,
-            len(data),
-            MessageToDict(
-                result,
-                preserving_proto_field_name=True,
-                use_integers_for_enums=True,
-            ),
-            ret,
+            {**self._proto_to_dict(result), "ret": ret},
+            "main",
         )
         if ret != 0:
             logger.warning("send prepare result error")
@@ -221,7 +283,7 @@ class OnSiteBridge:
             self._prepare_sent = True
 
     def _get_image(self) -> Optional[np.ndarray]:
-        msg = self._image_channel.get_image()
+        msg = self._image_channel.get_image_simple()
         if len(msg) == 0:
             return None
 
@@ -240,15 +302,19 @@ class OnSiteBridge:
                     "encoding": image.encoding,
                 }
             )
-        logger.debug(
-            "OnSite RX channel=camera type=image_batch image_count=%d images=%s",
-            len(images_meta),
-            images_meta,
+        self._log_message_debug(
+            "recv",
+            "image_batch",
+            {"image_count": len(images_meta), "images": images_meta},
+            "raw",
         )
         return img
 
     def _send_vehicle_control(self, steering: float, throttle_brake: float) -> None:
         cmd = VehicleControl()
+        cmd.header.send_ts = int(time.time() * 1000)
+        cmd.header.sim_ts = int(time.time() * 1000)
+        cmd.header.seq_no = self._next_seq(VEHICLE_CONTROL)
         cmd.steering_control.target_steering_wheel_angle = steering * MAX_STEERING_RAD
 
         if throttle_brake >= 0:
@@ -260,22 +326,16 @@ class OnSiteBridge:
 
         data = cmd.SerializeToString()
         ret = self._cmd_channel.put(VEHICLE_CONTROL, len(data), data)
-        logger.debug(
-            "OnSite TX channel=vehiclecontrol type=%s payload_bytes=%d payload=%s ret=%s",
+        self._log_message_debug(
+            "send",
             VEHICLE_CONTROL,
-            len(data),
-            MessageToDict(
-                cmd,
-                preserving_proto_field_name=True,
-                use_integers_for_enums=True,
-            ),
-            ret,
+            {**self._proto_to_dict(cmd), "ret": ret},
+            "chassis",
         )
         if ret != 0:
             logger.warning("send vehicle control error")
 
     def run(self) -> None:
-
         while not self._stop:
             self._process_notify()
 
@@ -294,73 +354,43 @@ class OnSiteBridge:
             if img is None:
                 continue
 
-            frame = {
-                "data": img.tobytes(),
-                "width": img.shape[1],
-                "height": img.shape[0],
-                "channels": img.shape[2],
-                "format": "BGR",
-                "timestamp_us": int(time.time() * 1e6),
-            }
-            action = self._grpc_client.send_image(
-                remote_viewer_pb2.Image(
-                    data=frame["data"],
-                    width=frame["width"],
-                    height=frame["height"],
-                    channels=frame["channels"],
-                    format=frame["format"],
-                    timestamp_us=frame["timestamp_us"],
-                )
+            image_msg = remote_viewer_pb2.Image(
+                data=img.tobytes(),
+                width=img.shape[1],
+                height=img.shape[0],
+                channels=img.shape[2],
+                format="BGR",
+                timestamp_us=int(time.time() * 1e6),
             )
-            if action is not None:
-                self._action_state["steering"] = float(action.steering)
-                self._action_state["throttle_brake"] = float(action.throttle_brake)
+            with self._state_lock:
+                self._frame_state["image"] = image_msg
+                steering = float(self._action_state["steering"])
+                throttle_brake = float(self._action_state["throttle_brake"])
 
-            steering = float(self._action_state["steering"])
-            throttle_brake = float(self._action_state["throttle_brake"])
             self._send_vehicle_control(steering, throttle_brake)
 
 
-class OnsiteViewerGrpcClient:
-    def __init__(self, host: str, port: int, max_message_bytes: int) -> None:
-        self._target = f"{host}:{port}"
-        self._options = [
-            ("grpc.max_send_message_length", max_message_bytes),
-            ("grpc.max_receive_message_length", max_message_bytes),
-        ]
-        self._channel = None
-        self._stub = None
+class OnsiteViewerGrpcServicer(remote_viewer_pb2_grpc.OnsiteViewerServiceServicer):
+    def __init__(self, action_state, frame_state, state_lock: threading.Lock) -> None:
+        self._action_state = action_state
+        self._frame_state = frame_state
+        self._state_lock = state_lock
 
-    def _connect(self) -> bool:
-        if self._stub is not None:
-            return True
-        channel = grpc.insecure_channel(self._target, options=self._options)
-        try:
-            grpc.channel_ready_future(channel).result(timeout=1.0)
-        except grpc.FutureTimeoutError as exc:
-            logger.warning("gRPC channel not ready: %s", exc)
-            channel.close()
-            return False
-        self._channel = channel
-        self._stub = remote_viewer_pb2_grpc.OnsiteViewerServiceStub(channel)
-        logger.info("Connected to viewer client at %s", self._target)
-        return True
-
-    def send_image(self, frame: remote_viewer_pb2.Image) -> Optional[remote_viewer_pb2.Action]:
-        if not self._connect():
-            return None
-        try:
-            return self._stub.SendImage(frame, timeout=1.0)
-        except grpc.RpcError as exc:
-            logger.warning("SendImage RPC error: %s", exc)
-            self.close()
-            return None
-
-    def close(self) -> None:
-        if self._channel is not None:
-            self._channel.close()
-            self._channel = None
-            self._stub = None
+    def SendAction(self, request, context):
+        with self._state_lock:
+            self._action_state["steering"] = float(request.steering)
+            self._action_state["throttle_brake"] = float(request.throttle_brake)
+            image = self._frame_state["image"]
+            if image is None:
+                return remote_viewer_pb2.Image()
+            return remote_viewer_pb2.Image(
+                data=image.data,
+                width=image.width,
+                height=image.height,
+                channels=image.channels,
+                format=image.format,
+                timestamp_us=image.timestamp_us,
+            )
 
 
 def main() -> None:
@@ -368,18 +398,34 @@ def main() -> None:
     parser.add_argument("--config_center", type=str, default="www.zjvts.cn:52009")
     parser.add_argument("--field_id", type=str, default="unique_fieldid")
     parser.add_argument("--net_interface", type=str, default="eno2")
-    parser.add_argument("--grpc_host", type=str, default="127.0.0.1", help="viewer client host")
-    parser.add_argument("--grpc_port", type=int, default=50051, help="viewer client port")
+    parser.add_argument("--grpc_host", type=str, default="0.0.0.0", help="viewer server bind host")
+    parser.add_argument("--grpc_port", type=int, default=50051, help="viewer server bind port")
     parser.add_argument("--log_level", type=str, default="INFO")
     args = parser.parse_args()
 
     logging.basicConfig(level=getattr(logging, args.log_level.upper(), logging.INFO), force=True)
 
     action_state = {"steering": 0.0, "throttle_brake": 0.0}
+    frame_state = {"image": None}
+    state_lock = threading.Lock()
+
     max_bytes = 2048 * 2048 * 3
     logger.info("Using gRPC max message bytes: %d", max_bytes)
-    grpc_client = OnsiteViewerGrpcClient(args.grpc_host, args.grpc_port, max_bytes)
-    bridge = OnSiteBridge(args, action_state, grpc_client)
+
+    server_options = [
+        ("grpc.max_send_message_length", max_bytes),
+        ("grpc.max_receive_message_length", max_bytes),
+    ]
+    grpc_server = grpc.server(ThreadPoolExecutor(max_workers=2), options=server_options)
+    remote_viewer_pb2_grpc.add_OnsiteViewerServiceServicer_to_server(
+        OnsiteViewerGrpcServicer(action_state, frame_state, state_lock),
+        grpc_server,
+    )
+    grpc_server.add_insecure_port(f"{args.grpc_host}:{args.grpc_port}")
+    grpc_server.start()
+    logger.info("Viewer gRPC server listening at %s:%s", args.grpc_host, args.grpc_port)
+
+    bridge = OnSiteBridge(args, action_state, frame_state, state_lock)
 
     try:
         bridge.run()
@@ -387,7 +433,7 @@ def main() -> None:
         logger.info("Interrupted by user")
     finally:
         bridge.stop()
-        grpc_client.close()
+        grpc_server.stop(grace=1)
 
 
 if __name__ == "__main__":

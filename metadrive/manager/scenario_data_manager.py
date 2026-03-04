@@ -19,6 +19,7 @@ class ScenarioDataManager(BaseManager):
 
         super(ScenarioDataManager, self).__init__()
         self.base_config = config
+        self.loader = loader
 
         # self.store_data = engine.global_config["store_data"]
         # Allow subclasses to set directory differently
@@ -41,47 +42,36 @@ class ScenarioDataManager(BaseManager):
     def _post_process_config(self, config):
         pass
 
+    def _load_single_scene(self, cfg_path):
+        scene_name, cfg, timestamp_range, camera_params, ego_poses, participants, scene_mesh_path = self.loader(cfg_path)
+        metadata = self.restructure_metadata(
+            config=cfg,
+            timestamp_range=timestamp_range,
+            camera_params=camera_params,
+            ego_poses=ego_poses,
+            participants=participants,
+        )
+        metadata["scene_mesh_path"] = scene_mesh_path
+        return scene_name, metadata
+
     def read_metadata(self, loader):
         self.metadata, self.idx2scene = {}, []
         self.num_scenarios = 0
         for config_file in os.listdir(self.directory):
-            self.num_scenarios += 1
             cfg_path = os.path.join(self.directory, config_file)
-
-            scene_name, cfg, timestamp_range, camera_params, ego_poses, participants, scene_mesh_path = loader(cfg_path)
-            # scene_name : str
-            # cfg : object
-            # timestamp : list|tuple [2]
-            # camera params : 
-            #     "camera_name" :
-            #         "K" : list[3][3]
-            #         "H" : int
-            #         "W" : int
-            #         "ego2camera" : list[4][4]
-            # ego poses : 
-            #     1 : list[4][4]
-            #     ...
-            #     n : list[4][4]            
-            # participants :
-            #     "unique_name" : 
-            #         "size" : list[3]
-            #         "type" : str (vehicle/pedestrian/bicycle)
-            #         "poses" :
-            #             1 : list[4][4]
-            #             ...
-            #             n : list[4][4]
-            # scene_mesh_path : str
-
-            self.metadata[scene_name] = self.restructure_metadata(
-                config=cfg,
-                timestamp_range=timestamp_range,
-                camera_params=camera_params,
-                ego_poses=ego_poses,
-                participants=participants,
-            )
-            self.metadata[scene_name]['scene_mesh_path'] = scene_mesh_path
-
+            scene_name, metadata = self._load_single_scene(cfg_path)
+            self.metadata[scene_name] = metadata
             self.idx2scene.append(scene_name)
+            self.num_scenarios += 1
+
+    def hotload_scenario(self, cfg_path):
+        scene_name, metadata = self._load_single_scene(cfg_path)
+        if scene_name not in self.metadata:
+            self.idx2scene.append(scene_name)
+            self.num_scenarios += 1
+            self.base_config["num_scenarios"] = self.num_scenarios
+        self.metadata[scene_name] = metadata
+        return scene_name
 
     def restructure_metadata(self, config, timestamp_range, camera_params, ego_poses, participants):
         init_state, agent_state = {}, {}

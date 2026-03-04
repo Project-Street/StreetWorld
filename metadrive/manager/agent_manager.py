@@ -47,7 +47,8 @@ class AgentManager(BaseManager):
         """
         super().__init__()
         self.INITIALIZED = False
-        self.max_step = config.get('max_step', 10_000)
+        self.max_step = config["max_step"]
+        self.check_crash = config["check_crash"]
 
 
         # for getting {agent_id: BaseObject}, use agent_manager.active_agents
@@ -69,6 +70,8 @@ class AgentManager(BaseManager):
         self.last_observation = None
         if config is not None:
             self.config = config
+        self.max_step = self.config["max_step"]
+        self.check_crash = self.config["check_crash"]
 
         if not self.INITIALIZED:
             self.lazy_init()
@@ -97,11 +100,11 @@ class AgentManager(BaseManager):
             config=self.config['controller_config'], 
             physics_world=physics_world,
             random_seed=self.generate_seed(),
-            size=self.config['controller_config'].get('size', None),
+            size=self.config['controller_config']['size'],
             position=init_state['spawn_position'],
             heading_theta=init_state['spawn_yaw'],
-            velocity=init_state.get('spawn_velocity', None),
-            angluar_velocity=init_state.get('spawn_angular_velocity', 0.0),
+            velocity=init_state['spawn_velocity'],
+            angluar_velocity=init_state['spawn_angular_velocity'],
             **kwargs
         )
         # self.init_pos = init_state['spawn_position']
@@ -140,7 +143,7 @@ class AgentManager(BaseManager):
 
         if self.state == AgentState.ALIVE:
             # crash checks from controller
-            if isinstance(self.controller, BaseVehicle):
+            if self.check_crash and isinstance(self.controller, BaseVehicle):
                 self.controller.crash_check()
                 
                 if self.controller.crash_human:
@@ -217,6 +220,31 @@ class AgentManager(BaseManager):
 
     def get_pose(self):
         return self.controller.transform
+
+    def get_base_state(self, transform=None):
+        if transform is None:
+            transform = self.get_pose()
+        velocity = np.asarray(self.controller.velocity, dtype=np.float32)
+        position = np.asarray(self.controller.position, dtype=np.float32)
+        acceleration = np.asarray(self.controller.acceleration, dtype=np.float32)
+        length = float(self.controller.LENGTH)
+        width = float(self.controller.WIDTH)
+        height = float(self.controller.HEIGHT)
+        angular_velocity = float(self.controller.angular_velocity)
+        angular_acceleration = float(self.controller.angular_acceleration)
+
+        return {
+            "controller": self.controller,
+            "transform": transform,
+            "position": position,
+            "velocity": velocity,
+            "acceleration": acceleration,
+            "heading_theta": float(self.controller.heading_theta),
+            "angular_velocity": angular_velocity,
+            "angular_acceleration": angular_acceleration,
+            "size": [length, width, height],
+            "type": self.controller.metadrive_type
+        }
     
     def get_observation_spaces(self):
         return self.observer.observation_space

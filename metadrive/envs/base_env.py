@@ -97,7 +97,7 @@ class BaseEnv(gym.Env):
         # self._register_manager("replay_manager", ReplayManager())
 
         # physics world
-        self.physics_world = PhysicsWorld(disable_collision=self.config["disable_collision"])
+        self.physics_world = PhysicsWorld(disable_collision=self.config["disable_collision"], physics_world_step_size=self.config['physics_world_step_size'])
 
         # collision callback
         self.physics_world.dynamic_world.setContactAddedCallback(PythonCallbackObject(collision_callback))
@@ -186,7 +186,7 @@ class BaseEnv(gym.Env):
         if force_seed is not None:
             current_seed = force_seed
         else:
-            current_seed = get_np_random(None).randint(0, 0xffffffff)
+            current_seed = get_np_random(None).randint(0, 0x7fffffff)
         self.current_seed = current_seed
         for mgr in [self.data_manager, self.map_manager] + list(self.agent_managers.values()):
             mgr.seed(current_seed)
@@ -248,18 +248,21 @@ class BaseEnv(gym.Env):
 
             self.agent_managers[name].reset(**input_data)
 
-    def _get_reset_return(self, reset_info):
+    def _get_reset_return(self, collected_obs):
         # TODO: figure out how to get the information of the before step
         obses = {}
         done_infos = {}
         cost_infos = {}
         reward_infos = {}
-        obses = reset_info['actor']['observation']
+        obses = collected_obs['actor']['observation']
         _, reward_infos = self.reward_function()
         _, done_infos = self.done_function()
         _, cost_infos = self.cost_function()
 
-        step_infos = concat_step_infos([reset_info, done_infos, reward_infos, cost_infos])
+        step_infos = concat_step_infos([done_infos, reward_infos, cost_infos])
+        step_infos["scene_name"] = self.scene_name
+        step_infos["current_timestamp"] = int(self.step_manager.current_timestamp)
+        step_infos["relative_timestamp"] = int(self.step_manager.relative_timestamp)
 
         return obses, step_infos
 
@@ -270,7 +273,7 @@ class BaseEnv(gym.Env):
             for manager in self.agent_managers.values():
                 manager.step(actions)
 
-            self.step_physics_world()
+            self.physics_world.step()
             # the recording should happen after step physics world
             # if "record_manager" in self.managers and i < self.config["decision_repeat"] - 1:
             #     self.record_manager.step()
@@ -289,30 +292,28 @@ class BaseEnv(gym.Env):
         #     after_step_infos, allow_new_keys=True, without_copy=True
         # )
         engine_info = after_step_infos
-        return self._get_step_return(actions, engine_info=engine_info)  # collect observation, reward, termination
+        return self._get_step_return(actions, collected_obs=engine_info)  # collect observation, reward, termination
 
     def _update_scene(self):
+        self._surrounding_pre_collection = {}
         new_object_poses = {}
+
         for name, mgr in self.agent_managers.items():
             mgr.update_state()
-            if name == 'actor':
-                continue
+            obj_pose = mgr.get_pose()
             if mgr.state == AgentState.ALIVE:
-                new_object_poses[name] = torch.from_numpy(mgr.get_pose())
+                self._surrounding_pre_collection[name] = mgr.get_base_state(obj_pose)
+                if name != 'actor':
+                    new_object_poses[name] = torch.from_numpy(obj_pose)
         self.model.update_scene(self.step_manager.current_timestamp, new_object_poses)
 
     def _collect_all_object(self):
-        agent_state = {}
-        for name, mgr in self.agent_managers.items():
-            if mgr.state == AgentState.ALIVE:
-                agent_state[name] = mgr.controller
-        return agent_state
+        if hasattr(self, "_surrounding_pre_collection"):
+            return self._surrounding_pre_collection
+        else:
+            raise RuntimeError("Can not find _surrounding_pre_collection, make sure _update_scene() is called before collecting objects")
 
-    def step_physics_world(self):
-        dt = self.config["physics_world_step_size"] * 1e-6
-        self.physics_world.dynamic_world.doPhysics(dt, 1, dt)
-
-    def _get_step_return(self, actions, engine_info):
+    def _get_step_return(self, actions, collected_obs):
         # update obs, dones, rewards, costs, calculate done at first !
         obses = {}
         done_infos = {}
@@ -326,9 +327,9 @@ class BaseEnv(gym.Env):
         done_function_result, done_infos = self.done_function()
         _, cost_infos = self.cost_function()
         self.dones = done_function_result
-        obses = engine_info['actor']['observation']
+        obses = collected_obs['actor']['observation']
 
-        step_infos = concat_step_infos([engine_info, done_infos, reward_infos, cost_infos])
+        step_infos = concat_step_infos([done_infos, reward_infos, cost_infos])
         truncateds = done_infos['reason'] == AgentState.OUT_OF_STEP
         terminateds = self.dones
 
@@ -341,6 +342,9 @@ class BaseEnv(gym.Env):
 
         step_infos["episode_reward"] = self.episode_rewards
         step_infos["episode_length"] = self.episode_lengths
+        step_infos["scene_name"] = self.scene_name
+        step_infos["current_timestamp"] = int(self.step_manager.current_timestamp)
+        step_infos["relative_timestamp"] = int(self.step_manager.relative_timestamp)
 
         return obses, rewards, terminateds, truncateds, step_infos
 
@@ -369,6 +373,10 @@ class BaseEnv(gym.Env):
     def scene_name(self) -> str:
         return self.data_manager.idx2scene[self.data_manager.current_scenario_id]
 
+    @property
+    def actor_manager(self):
+        return self.agent_managers['actor']
+    
     @property
     def actor_controller(self):
         return self.agent_managers['actor'].controller

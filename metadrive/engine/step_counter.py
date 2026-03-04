@@ -12,5 +12,9 @@ class StepCounter:
         # assert self.current_timestamp > self.end_timestamp, "Counter exceed."
     
     @property
+    def relative_timestamp(self):
+        return self.eposide_step * self.step_size
+
+    @property
     def current_timestamp(self):
-        return self.begin_timestamp + self.eposide_step * self.step_size
+        return self.begin_timestamp + self.relative_timestamp

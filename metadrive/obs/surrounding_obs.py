@@ -1,22 +1,22 @@
 import math
 import numpy as np
+from typing import Any, Dict
 
 from metadrive.obs.observation_base import BaseObservation
 
-
 class SurroundingObservation(BaseObservation):
     """
-    Collect surrounding dynamic objects and express them in ego coordinates.
+    Collect surrounding dynamic objects.
 
-    observe() returns a list of dicts per surrounding object:
-    - position: [x, y] in ego frame
-    - velocity: [vx, vy] in ego frame
-    - heading: relative heading in radians (object heading minus ego heading)
-    - size: [length, width]
+    observe() returns a dict: {object_id: state_dict}.
+    - position: [x, y, z]
+    - velocity: [vx, vy, vz]
+    - size: [length, width, height]
     """
 
     def __init__(self, config):
         super().__init__(config)
+        self.coordinate_mode = self.config["coordinate_mode"]
         self.collector = None
         self.controller = None
 
@@ -31,45 +31,46 @@ class SurroundingObservation(BaseObservation):
         return gym.spaces.Box(-np.inf, np.inf, shape=(1,), dtype=np.float32)
 
     def observe(self):
-        objs = self.collector()  # dict[name] -> controller
+        objs: Dict[str, Dict[str, Any]] = self.collector()  # dict[name] -> sampled data
+
         ego_T = self.controller.transform
         ego_T_inv = np.linalg.inv(ego_T)
         ego_R_inv = ego_T_inv[:3, :3]
         ego_heading = self.controller.heading_theta
 
-        surrounding = []
+        surrounding = {}
         for name, ctrl in objs.items():
-            if ctrl is self.controller:
+            controller = ctrl["controller"]
+            if controller is self.controller:
                 continue
 
-            # Relative transform in ego frame
-            T_rel = ego_T_inv @ ctrl.transform
-            pos_ego = T_rel[:2, 3]
+            if self.coordinate_mode == "agent":
+                transform = ctrl["transform"]
+                transform_out = ego_T_inv @ transform
+                pos = transform_out[:3, 3]
 
-            # Velocity transform to ego frame (use rotation part only)
-            v_world = ctrl.velocity  # [vx, vy]
-            v_world3 = np.array([float(v_world[0]), float(v_world[1]), 0.0], dtype=np.float32)
-            v_ego3 = ego_R_inv @ v_world3
-            v_ego = v_ego3[:2]
+                velocity = ego_R_inv @ ctrl["velocity"]
 
-            # Relative heading
-            rel_heading = self._wrap_pi(ctrl.heading_theta - ego_heading)
+                acceleration = ego_R_inv @ ctrl["acceleration"]
+                heading_theta = self._wrap_pi(ctrl["heading_theta"] - ego_heading)
+            else:
+                transform_out = ctrl["transform"]
+                pos = ctrl["position"]
+                velocity = ctrl["velocity"]
+                acceleration = ctrl["acceleration"]
+                heading_theta = ctrl["heading_theta"]
 
-            # Size from controller
-            length = ctrl.LENGTH
-            width = ctrl.WIDTH
-            size = [float(length), float(width)]
-
-            # Get object type from controller class if available
-            obj_type = getattr(ctrl, 'metadrive_type', getattr(type(ctrl), '__name__', 'unknown'))
-
-            surrounding.append({
-                "position": [float(pos_ego[0]), float(pos_ego[1])],
-                "velocity": [float(v_ego[0]), float(v_ego[1])],
-                "heading": float(rel_heading),
-                "size": size,
-                "type": obj_type
-            })
+            surrounding[name] = {
+                "transform": transform_out,
+                "position": pos,
+                "velocity": velocity,
+                "acceleration": acceleration,
+                "heading_theta": float(heading_theta),
+                "angular_velocity": ctrl["angular_velocity"],
+                "angular_acceleration": ctrl["angular_acceleration"],
+                "size": ctrl["size"],
+                "type": ctrl["type"]
+            }
 
         return surrounding
 

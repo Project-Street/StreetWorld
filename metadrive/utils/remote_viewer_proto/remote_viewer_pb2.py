@@ -13,7 +13,7 @@ _sym_db = _symbol_database.Default()
 
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x13remote_viewer.proto\x12\ronsite.viewer\"2\n\x06\x41\x63tion\x12\x10\n\x08steering\x18\x01 \x01(\x02\x12\x16\n\x0ethrottle_brake\x18\x02 \x01(\x02\"l\n\x05Image\x12\x0c\n\x04\x64\x61ta\x18\x01 \x01(\x0c\x12\r\n\x05width\x18\x02 \x01(\r\x12\x0e\n\x06height\x18\x03 \x01(\r\x12\x10\n\x08\x63hannels\x18\x04 \x01(\r\x12\x0e\n\x06\x66ormat\x18\x05 \x01(\t\x12\x14\n\x0ctimestamp_us\x18\x06 \x01(\x03\x32O\n\x13OnsiteViewerService\x12\x38\n\tSendImage\x12\x14.onsite.viewer.Image\x1a\x15.onsite.viewer.Actionb\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x13remote_viewer.proto\x12\ronsite.viewer\"2\n\x06\x41\x63tion\x12\x10\n\x08steering\x18\x01 \x01(\x02\x12\x16\n\x0ethrottle_brake\x18\x02 \x01(\x02\"l\n\x05Image\x12\x0c\n\x04\x64\x61ta\x18\x01 \x01(\x0c\x12\r\n\x05width\x18\x02 \x01(\r\x12\x0e\n\x06height\x18\x03 \x01(\r\x12\x10\n\x08\x63hannels\x18\x04 \x01(\r\x12\x0e\n\x06\x66ormat\x18\x05 \x01(\t\x12\x14\n\x0ctimestamp_us\x18\x06 \x01(\x03\x32P\n\x13OnsiteViewerService\x12\x39\n\nSendAction\x12\x15.onsite.viewer.Action\x1a\x14.onsite.viewer.Imageb\x06proto3')
 
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, globals())
 _builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, 'remote_viewer_pb2', globals())
@@ -25,5 +25,5 @@ if _descriptor._USE_C_DESCRIPTORS == False:
   _IMAGE._serialized_start=90
   _IMAGE._serialized_end=198
   _ONSITEVIEWERSERVICE._serialized_start=200
-  _ONSITEVIEWERSERVICE._serialized_end=279
+  _ONSITEVIEWERSERVICE._serialized_end=280
 # @@protoc_insertion_point(module_scope)
