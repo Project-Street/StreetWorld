@@ -15,7 +15,7 @@ import sys
 import os
 from pathlib import Path
 
-from metadrive.misc.onsite_middleware import OnSiteMiddleware, OnSiteScenarioEnv
+from metadrive.misc.onsite_middleware import OnSiteMiddleware, OnSiteScenarioEnv, TERMINAL_TYPE
 from metadrive.manager.agent_manager import AgentState
 from metadrive.misc.nurec_interface.simulator_interface import SimulatorInterface
 from metadrive.onstite_config import ONSITE_DEFAULT_CONFIG
@@ -230,7 +230,9 @@ def main():
     try:
         middleware = OnSiteMiddleware(
             onsite_dir=args.onsite_dir,
+            terminal_type=TERMINAL_TYPE.SIMULATOR,
         )
+        middleware.start_onsite_daemon()
         logger.info("OnSite middleware initialized successfully")
     except Exception:
         logger.exception("Failed to initialize OnSite middleware")

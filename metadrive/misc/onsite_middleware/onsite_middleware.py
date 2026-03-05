@@ -10,6 +10,7 @@ import logging
 import sys
 import time
 import subprocess
+from enum import Enum
 from pathlib import Path
 import numpy as np
 import torch
@@ -37,6 +38,11 @@ from metadrive.utils.logger import get_log_timestamp
 logger = logging.getLogger(__name__)
 
 
+class TERMINAL_TYPE(Enum):
+    SIMULATOR = "simulator"
+    TESTEE = "apollo_testee"
+
+
 class OnSiteMiddleware:
     """
     OnSite communication middleware for MetaDrive.
@@ -54,17 +60,21 @@ class OnSiteMiddleware:
     _ANSI_PURPLE = "\033[95m"
     _ANSI_RESET = "\033[0m"
 
-    def __init__(self, onsite_dir, recv_none_sleep=0.02):
+    def __init__(self, onsite_dir, recv_none_sleep=0.02, terminal_type=TERMINAL_TYPE.SIMULATOR):
         """
         Initialize OnSite middleware.
 
         Args:
             onsite_dir: OnSite workspace directory, containing config/common.yaml and daemon/start.sh
             recv_none_sleep: Sleep time (seconds) when recv returns None/invalid
+            terminal_type: OnSite terminal type enum for channel client_name
         """
         self.onsite_dir = Path(onsite_dir).expanduser().resolve()
         self._daemon_proc = None
         self.recv_none_sleep = float(recv_none_sleep)
+        if not isinstance(terminal_type, TERMINAL_TYPE):
+            raise TypeError("terminal_type must be TERMINAL_TYPE enum")
+        self.terminal_type = terminal_type
 
         multicast = self._load_multicast_config(self.onsite_dir)
         self.config_center = multicast["config_center_addr"]
@@ -89,9 +99,6 @@ class OnSiteMiddleware:
         # Send only this logger to a dedicated file.
         self._init_logger()
 
-        # Start OnSite daemon process.
-        self._start_onsite_daemon()
-
         # Initialize channels
         self.initialize_channels()
 
@@ -108,10 +115,13 @@ class OnSiteMiddleware:
             raise ValueError(f"Missing multicast config keys in {cfg_path}: {missing}")
         return multicast
 
-    def _start_onsite_daemon(self):
+    def start_onsite_daemon(self):
         start_script = self.onsite_dir / "daemon" / "start.sh"
         if not start_script.exists():
             raise FileNotFoundError(f"OnSite daemon start script not found: {start_script}")
+        if self._daemon_proc is not None and self._daemon_proc.poll() is None:
+            logger.info("OnSite daemon already running, pid=%s", self._daemon_proc.pid)
+            return
         self._daemon_proc = subprocess.Popen(
             ["bash", str(start_script)],
             cwd=str(start_script.parent),
@@ -135,7 +145,7 @@ class OnSiteMiddleware:
             logger.exception("Failed to set ONSITE_LOG_TS")
         log_dir = Path("logs")
         log_dir.mkdir(parents=True, exist_ok=True)
-        log_file = log_dir / f"onsitemiddleware_{ts}.logs"
+        log_file = log_dir / f"{self.terminal_type.value}_{ts}.logs"
         handler = logging.FileHandler(log_file, encoding="utf-8")
         handler.setLevel(logging.DEBUG)
         handler.setFormatter(logging.Formatter(
@@ -226,16 +236,16 @@ class OnSiteMiddleware:
         )
 
     @staticmethod
-    def _timed_get(channel):
+    def _timed_get(get_fn, *args):
         t0 = time.perf_counter()
-        ret, msg = channel.get()
+        result = get_fn(*args)
         elapsed_ms = (time.perf_counter() - t0) * 1000.0
-        return ret, msg, elapsed_ms
+        return result, elapsed_ms
 
     @staticmethod
-    def _timed_put(channel, msg_type, length, data):
+    def _timed_put(send_fn, *args):
         t0 = time.perf_counter()
-        ret = channel.put(msg_type, length, data)
+        ret = send_fn(*args)
         elapsed_ms = (time.perf_counter() - t0) * 1000.0
         return ret, elapsed_ms
 
@@ -324,7 +334,7 @@ class OnSiteMiddleware:
         param.net_interface_name = self.net_interface
         param.field_id = self.field_id
         param.log_level = 1  # 1-info, 2-warning, 3-error
-        param.client_name = "simulator"
+        param.client_name = self.terminal_type.value
         param.recv_self_msg = False
         logger.info(
             "OnSite create_channels param=%s",
@@ -390,7 +400,7 @@ class OnSiteMiddleware:
             time.sleep(self.recv_none_sleep)
             return None
 
-        ret, msg, get_ms = self._timed_get(self.prepare_channel)
+        (ret, msg), get_ms = self._timed_get(self.prepare_channel.get)
         if msg is None or ret < 0:
             time.sleep(self.recv_none_sleep)
             return None
@@ -433,7 +443,7 @@ class OnSiteMiddleware:
             time.sleep(self.recv_none_sleep)
             return None
 
-        ret, msg, get_ms = self._timed_get(self.notify_channel)
+        (ret, msg), get_ms = self._timed_get(self.notify_channel.get)
         if msg is None or ret < 0:
             time.sleep(self.recv_none_sleep)
             return None
@@ -478,7 +488,7 @@ class OnSiteMiddleware:
             time.sleep(self.recv_none_sleep)
             return None
 
-        ret, msg, get_ms = self._timed_get(self.role_channel)
+        (ret, msg), get_ms = self._timed_get(self.role_channel.get)
         if msg is None or ret < 0:
             time.sleep(self.recv_none_sleep)
             return None
@@ -506,7 +516,7 @@ class OnSiteMiddleware:
             time.sleep(self.recv_none_sleep)
             return None
 
-        ret, msg, get_ms = self._timed_get(self.cmd_channel)
+        (ret, msg), get_ms = self._timed_get(self.cmd_channel.get)
         if msg is None or ret < 0:
             time.sleep(self.recv_none_sleep)
             return None
@@ -540,7 +550,7 @@ class OnSiteMiddleware:
             time.sleep(self.recv_none_sleep)
             return None
 
-        ret, msg, get_ms = self._timed_get(self.cmd_channel)
+        (ret, msg), get_ms = self._timed_get(self.cmd_channel.get)
         if msg is None or ret < 0:
             time.sleep(self.recv_none_sleep)
             return None
@@ -570,7 +580,7 @@ class OnSiteMiddleware:
             time.sleep(self.recv_none_sleep)
             return None
 
-        ret, msg, get_ms = self._timed_get(self.session_channel)
+        (ret, msg), get_ms = self._timed_get(self.session_channel.get)
         if msg is None or ret < 0:
             time.sleep(self.recv_none_sleep)
             return None
@@ -588,6 +598,64 @@ class OnSiteMiddleware:
             "recv", msg.type(), {"expected_type": MT_SESSIONINFO}, "main", channel_op="get", channel_elapsed_ms=get_ms
         )
         return None
+
+    def recv_image_rgb(self):
+        """
+        Receive latest RGB image from OnSite camera channel.
+
+        Returns:
+            np.ndarray: Latest image in (H, W, 3) RGB uint8, or None if unavailable
+        """
+        if self.image_channel is None:
+            time.sleep(self.recv_none_sleep)
+            return None
+
+        msg, get_ms = self._timed_get(self.image_channel.get_image_simple)
+        if len(msg) == 0:
+            time.sleep(self.recv_none_sleep)
+            return None
+
+        img = None
+        images_meta = []
+        for image in msg:
+            height = int(image.height)
+            width = int(image.width)
+            encoding = str(image.encoding).lower()
+            if encoding != "rgb8":
+                logger.warning("Drop image frame: unsupported OnSite image encoding %s, expected rgb8", image.encoding)
+                continue
+            arr = np.asarray(image.data, dtype=np.uint8).reshape(-1)
+            expected = height * width * 3
+            if arr.size != expected:
+                logger.warning(
+                    "Drop image frame: size mismatch got=%d expected=%d (w=%d h=%d c=3)",
+                    arr.size,
+                    expected,
+                    width,
+                    height,
+                )
+                continue
+            img = arr.reshape(height, width, 3)
+            images_meta.append(
+                {
+                    "timestamp_sec": float(image.timestamp_sec),
+                    "camera_timestamp": int(image.camera_timestamp),
+                    "sequence_num": int(image.sequence_num),
+                    "measurement_time": float(image.measurement_time),
+                    "height": height,
+                    "width": width,
+                    "encoding": image.encoding,
+                }
+            )
+        self._log_message_debug(
+            "recv",
+            "image_batch",
+            {"image_count": len(images_meta), "images": images_meta},
+            "raw",
+            channel_op="get",
+            channel_elapsed_ms=get_ms,
+        )
+        return img
 
     # ==================== Send Methods ====================
 
@@ -611,7 +679,7 @@ class OnSiteMiddleware:
         msg.reason = ""
         data = msg.SerializeToString()
         length = len(data)
-        ret, put_ms = self._timed_put(self.prepare_channel, MT_ACTOR_PREPARE_RESULT, length, data)
+        ret, put_ms = self._timed_put(self.prepare_channel.put, MT_ACTOR_PREPARE_RESULT, length, data)
         self._log_message_debug(
             "send",
             MT_ACTOR_PREPARE_RESULT,
@@ -644,7 +712,7 @@ class OnSiteMiddleware:
 
         data = msg.SerializeToString()
         length = len(data)
-        ret, put_ms = self._timed_put(self.role_channel, MT_SUBROLE, length, data)
+        ret, put_ms = self._timed_put(self.role_channel.put, MT_SUBROLE, length, data)
         self._log_message_debug(
             "send", MT_SUBROLE, {**self._proto_to_dict(msg), "ret": ret}, "main", channel_op="put", channel_elapsed_ms=put_ms
         )
@@ -676,23 +744,15 @@ class OnSiteMiddleware:
         msg.header.send_ts = int(time.time() * 1000)
         msg.header.seq_no = pub_role_seq
 
-        # Add actor first
-
-        # Add participants
-        for agent_id, state in role_states.items():
-            if agent_id == "actor":
-                role = self._agent_state_to_single_role(
-                    self.actor_id, role_states['actor'], last_received_pub_role, current_timestamp, pub_role_seq
-                )
-            else:
-                role = self._agent_state_to_single_role(
-                    agent_id, state, last_received_pub_role, current_timestamp, pub_role_seq
-                )
+        for role_id, state in role_states.items():
+            role = self._agent_state_to_single_role(
+                role_id, state, last_received_pub_role, current_timestamp, pub_role_seq
+            )
             msg.s_roles.append(role)
 
         data = msg.SerializeToString()
         length = len(data)
-        ret, put_ms = self._timed_put(self.role_channel, MT_PUBROLE, length, data)
+        ret, put_ms = self._timed_put(self.role_channel.put, MT_PUBROLE, length, data)
         self._log_message_debug(
             "send", MT_PUBROLE, {**self._proto_to_dict(msg), "ret": ret}, "main", channel_op="put", channel_elapsed_ms=put_ms
         )
@@ -721,7 +781,7 @@ class OnSiteMiddleware:
 
         data = msg.SerializeToString()
         length = len(data)
-        ret, put_ms = self._timed_put(self.cmd_channel, VEHICLE_FEEDBACK, length, data)
+        ret, put_ms = self._timed_put(self.cmd_channel.put, VEHICLE_FEEDBACK, length, data)
         self._log_message_debug(
             "send",
             VEHICLE_FEEDBACK,
@@ -733,6 +793,47 @@ class OnSiteMiddleware:
 
         if ret != 0:
             logger.error(f"Failed to send VehicleFeedback, ret: {ret}")
+
+    def send_vehicle_control(self, steering, throttle_brake):
+        """
+        Send VehicleControl message to OnSite server.
+
+        Args:
+            steering: Normalized steering in [-1, 1]
+            throttle_brake: Normalized throttle/brake in [-1, 1]
+        """
+        if self.cmd_channel is None:
+            logger.warning("Command channel not available")
+            return
+
+        steering = float(np.clip(float(steering), -1.0, 1.0))
+        throttle_brake = float(np.clip(float(throttle_brake), -1.0, 1.0))
+
+        cmd = VehicleControl()
+        cmd.header.send_ts = int(time.time() * 1000)
+        cmd.header.sim_ts = int(time.time() * 1000)
+        cmd.header.seq_no = self._next_seq(VEHICLE_CONTROL)
+        cmd.steering_control.target_steering_wheel_angle = steering * self.MAX_STEERING_RAD
+
+        if throttle_brake >= 0:
+            cmd.driving_control.target_accelerator_pedal_position = throttle_brake * 100.0
+            cmd.brake_control.target_brake_pedal_position = 0.0
+        else:
+            cmd.driving_control.target_accelerator_pedal_position = 0.0
+            cmd.brake_control.target_brake_pedal_position = -throttle_brake * 100.0
+
+        data = cmd.SerializeToString()
+        ret, put_ms = self._timed_put(self.cmd_channel.put, VEHICLE_CONTROL, len(data), data)
+        self._log_message_debug(
+            "send",
+            VEHICLE_CONTROL,
+            {**self._proto_to_dict(cmd), "ret": ret},
+            "chassis",
+            channel_op="put",
+            channel_elapsed_ms=put_ms,
+        )
+        if ret != 0:
+            logger.error(f"Failed to send VehicleControl, ret: {ret}")
 
     def send_images(self, images, timestamp):
         """
@@ -766,9 +867,7 @@ class OnSiteMiddleware:
             py_images.append(py_img)
             self.image_seq += 1
 
-            t0 = time.perf_counter()
-            ret = self.image_channel.put_image_simple(py_images)
-            put_ms = (time.perf_counter() - t0) * 1000.0
+            ret, put_ms = self._timed_put(self.image_channel.put_image_simple, py_images)
             images_meta = [
                 {
                     "timestamp_sec": float(py_img.timestamp_sec),
@@ -801,7 +900,7 @@ class OnSiteMiddleware:
         actor_state["rlsl"] = None
         if "global_rlsl" in obs and "actor" in obs["global_rlsl"]:
             actor_state["rlsl"] = obs["global_rlsl"]["actor"]
-        role_states["actor"] = actor_state
+        role_states[self.actor_id] = actor_state
 
         if "surrounding" not in obs:
             return role_states
