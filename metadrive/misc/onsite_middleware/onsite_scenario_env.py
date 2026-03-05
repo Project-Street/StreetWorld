@@ -75,8 +75,8 @@ class OnSiteScenarioEnv(ScenarioEnv):
             return
 
         # Convert quaternion and position to transform matrix
-        from metadrive.misc.onsite_middleware.onsite_middleware import OnSiteMiddleware
-        middleware = OnSiteMiddleware.__new__(OnSiteMiddleware)  # Create instance without __init__
+        from metadrive.misc.onsite_middleware.onsite_switch import OnSiteSwitch
+        middleware = OnSiteSwitch.__new__(OnSiteSwitch)  # Create instance without __init__
 
         transform = middleware._quaternion_to_matrix(
             role.box.bottom_center,

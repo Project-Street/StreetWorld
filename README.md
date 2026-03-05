@@ -31,12 +31,14 @@ conda activate st-world
 ### Install StreetWorld
 
 ```bash
+export ONSITE_PATH=/PATH_TO_ONSITE
+
 # Install PyTorch with CUDA support (You may visit https://pytorch.org/get-started/previous-versions/ to choose a PyTorch version compatible with your Python and CUDA environment).
 pip install torch==2.4.1 torchvision==0.19.1 torchaudio==2.4.1 --index-url https://download.pytorch.org/whl/cu121
 
 pip install "git+https://github.com/NVlabs/trajdata.git@a2a54e5"
 
-pip install /PATH_TO/libmulticastnetwork-1.0.2-cp311-cp311-linux_x86_64.whl
+pip install $ONSITE_PATH/libmulticastnetwork-1.0.2-cp311-cp311-linux_x86_64.whl
 
 # Install StreetWorld
 pip install -e . --no-build-isolation --index-url https://pypi.org/simple
@@ -50,40 +52,41 @@ Go to [HugginFace Access Token](https://huggingface.co/settings/tokens) page, an
 
 ## Quick Start
 
-### StreetStudio Integration
+### OnSite Only
 
-Load and replay scenarios from StreetStudio transforms.json:
+1. Prepare OnSite config:
 
 ```bash
-mamba run -n st-world python -m metadrive.examples.drive_with_streetstudio \
-  --transforms /path/to/transforms.json
+# Ensure these fields are correct in onsite/config/common.yaml
+# multicast.config_center_addr
+# multicast.local_ip
+# multicast.net_interface_name
+# multicast.field_id
 ```
 
-## gRPC Mode
-
-### As Server
-
-Run gRPC server for remote RL training:
+2. Launch simulator side (SIMULATOR terminal):
 
 ```bash
-# On server environment
-# pip install ./grpc/[server]
-
-mamba run -n st-world python -m metadrive.examples.server \
-  --transforms /path/to/transforms.json \
-  --render-url 127.0.0.1:50051 \
-  --port 50062
+python metadrive/examples/onsite_simulator_launcher.py \
+  --onsite_dir $ONSITE_PATH \
+  --scene_config_directory configs/nurec
 ```
 
-### As Client (example script)
-
-Connect to gRPC server:
+### Launch Viewer Server
 
 ```bash
-# On client environment
-pip install ./grpc
+python metadrive/examples/onsite_remote_viewer/viewer_server.py \
+  --onsite_dir $ONSITE_PATH \
+  --grpc_host <host ip> \
+  --grpc_port <host port> \
+```
 
-mamba run -n st-world python -m metadrive.examples.client \
-  --port 50062 \
-  --steps 100
+### Launch Viewer Client
+
+```bash
+python metadrive/examples/onsite_remote_viewer/viewer_client.py \
+  --grpc_host <host ip> \
+  --grpc_port <host port> \
+  --width 1280 \
+  --height 720 \
 ```

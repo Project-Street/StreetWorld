@@ -15,7 +15,7 @@ import sys
 import os
 from pathlib import Path
 
-from metadrive.misc.onsite_middleware import OnSiteMiddleware, OnSiteScenarioEnv, TERMINAL_TYPE
+from metadrive.misc.onsite_middleware import OnSiteSwitch, OnSiteScenarioEnv, TERMINAL_TYPE
 from metadrive.manager.agent_manager import AgentState
 from metadrive.misc.nurec_interface.simulator_interface import SimulatorInterface
 from metadrive.onstite_config import ONSITE_DEFAULT_CONFIG
@@ -126,7 +126,7 @@ def get_prepare(middleware, env):
 
 
 
-def main_loop(env : OnSiteScenarioEnv, middleware: OnSiteMiddleware):
+def main_loop(env : OnSiteScenarioEnv, middleware: OnSiteSwitch):
     """
     Main communication loop with OnSite server.
 
@@ -228,7 +228,7 @@ def main():
     # Initialize OnSite middleware
     logger.info("Initializing OnSite middleware...")
     try:
-        middleware = OnSiteMiddleware(
+        middleware = OnSiteSwitch(
             onsite_dir=args.onsite_dir,
             terminal_type=TERMINAL_TYPE.SIMULATOR,
         )

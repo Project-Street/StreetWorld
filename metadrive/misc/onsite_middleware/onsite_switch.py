@@ -43,7 +43,7 @@ class TERMINAL_TYPE(Enum):
     TESTEE = "apollo_testee"
 
 
-class OnSiteMiddleware:
+class OnSiteSwitch:
     """
     OnSite communication middleware for MetaDrive.
 

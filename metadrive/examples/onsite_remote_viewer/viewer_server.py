@@ -17,7 +17,7 @@ try:
 except ImportError as exc:  # pragma: no cover - runtime dependency
     raise ImportError("grpcio is required for viewer_server.py") from exc
 
-from metadrive.misc.onsite_middleware import OnSiteMiddleware, TERMINAL_TYPE
+from metadrive.misc.onsite_middleware import OnSiteSwitch, TERMINAL_TYPE
 from metadrive.misc.onsite_middleware.onsite_proto.main.proto.enums_pb2 import (
     NT_START_TEST,
     NT_ABORT_TEST,
@@ -28,7 +28,7 @@ from metadrive.utils.remote_viewer_proto import remote_viewer_pb2, remote_viewer
 logger = logging.getLogger("onsite_viewer_server")
 
 
-def run_server_loop(middleware: OnSiteMiddleware, action_state, frame_state, state_lock: threading.Lock) -> None:
+def run_server_loop(middleware: OnSiteSwitch, action_state, frame_state, state_lock: threading.Lock) -> None:
     recv_prepare = False
     start_test = False
     session_id = ""
@@ -135,7 +135,7 @@ def main() -> None:
     grpc_server.start()
     logger.info("Viewer gRPC server listening at %s:%s", args.grpc_host, args.grpc_port)
 
-    middleware = OnSiteMiddleware(
+    middleware = OnSiteSwitch(
         onsite_dir=args.onsite_dir,
         recv_none_sleep=args.recv_none_sleep,
         terminal_type=TERMINAL_TYPE.TESTEE,
