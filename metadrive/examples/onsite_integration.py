@@ -28,24 +28,6 @@ from metadrive.misc.onsite_middleware.onsite_proto.main.proto.enums_pb2 import (
     NT_PAUSE_TEST
 )
 
-import socket
-import fcntl
-import struct
-
-
-def get_ip_address(ifname):
-    try:
-        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        return socket.inet_ntoa(
-            fcntl.ioctl(
-                s.fileno(),
-                0x8915,  # SIOCGIFADDR
-                struct.pack('256s', bytes(ifname[:15], "utf-8")))[20:24])
-    except Exception as e:
-        pass
-    finally:
-        s.close()
-
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -184,8 +166,6 @@ def main_loop(env : OnSiteScenarioEnv, middleware: OnSiteMiddleware):
         vehicle_control = middleware.recv_vehicle_control()
         vehicle_feedback = None
         session_info = middleware.recv_session_info()  # Only receive, log
-        if pub_role:
-            env.update_agents_from_pub_role(pub_role)
 
         # Execute simulation step
         action = vehicle_control if vehicle_control else [0.0, 0.0]
@@ -234,12 +214,8 @@ def main():
     parser = argparse.ArgumentParser(description="MetaDrive OnSite Integration")
     parser.add_argument("--scene_config_directory", type=str, required=True,
                         help="Directory containing scene config files")
-    parser.add_argument("--config_center", type=str, default="www.zjvts.cn:52009",
-                        help="OnSite config center address")
-    parser.add_argument("--field_id", type=str, default="unique_fieldid",
-                        help="Unique field ID (must match daemon and simulator)")
-    parser.add_argument("--net_interface", type=str, default="eno2",
-                        help="Network interface name")
+    parser.add_argument("--onsite_dir", type=str, default="onsite",
+                        help="OnSite workspace directory containing config/common.yaml")
     parser.add_argument('--grpc-host', type=str, default='localhost',
                         help='gRPC server host for NuRec renderer')
     parser.add_argument('--grpc-port', type=int, default=9001,
@@ -249,22 +225,15 @@ def main():
     args = parser.parse_args()
     logging.getLogger().setLevel(getattr(logging, args.log_level.upper(), logging.INFO))
 
-    # Auto-detect local IP if not specified
-    args.local_ip = get_ip_address(args.net_interface)
-    logger.info(f"Auto-detected local IP: {args.local_ip}")
-
     # Initialize OnSite middleware
     logger.info("Initializing OnSite middleware...")
     try:
         middleware = OnSiteMiddleware(
-            config_center=args.config_center,
-            field_id=args.field_id,
-            net_interface=args.net_interface,
-            local_ip=args.local_ip,
+            onsite_dir=args.onsite_dir,
         )
         logger.info("OnSite middleware initialized successfully")
-    except Exception as e:
-        logger.error(f"Failed to initialize OnSite middleware: {e}")
+    except Exception:
+        logger.exception("Failed to initialize OnSite middleware")
         sys.exit(1)
 
     # Initialize environment
@@ -280,12 +249,15 @@ def main():
         env_config["scene_config_directory"] = args.scene_config_directory
         env = OnSiteScenarioEnv(model, env_config)
         logger.info("MetaDrive environment initialized successfully")
-    except Exception as e:
-        logger.error(f"Failed to initialize MetaDrive environment: {e}")
+    except Exception:
+        logger.exception("Failed to initialize MetaDrive environment")
         sys.exit(1)
 
     # Run main loop
-    main_loop(env, middleware)
+    try:
+        main_loop(env, middleware)
+    finally:
+        middleware.close()
 
 
 def _save_front_image(image, timestamp_us):

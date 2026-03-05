@@ -12,7 +12,7 @@ message Image {
   uint32 width = 2;
   uint32 height = 3;
   uint32 channels = 4;
-  string format = 5;          // "BGR" or "RGB"
+  string format = 5;          // "RGB"
   int64 timestamp_us = 6;
 }
 

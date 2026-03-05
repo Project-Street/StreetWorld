@@ -9,11 +9,15 @@ import json
 import logging
 import sys
 import time
+import subprocess
 from pathlib import Path
 import numpy as np
+import torch
+import yaml
 from google.protobuf.json_format import MessageToDict
 
 import libMulticastNetwork
+from metadrive.utils.trajectory import matrix_to_quaternion
 
 # Import proto messages and enums
 from metadrive.misc.onsite_middleware.onsite_proto.chassis.proto.chassis_messages_pb2 import VehicleFeedback, VehicleControl
@@ -45,23 +49,28 @@ class OnSiteMiddleware:
 
     # Constants for conversion
     MAX_STEERING_RAD = 1.047  # 60 degrees in radians
+    _ANSI_GREEN = "\033[92m"
+    _ANSI_BLUE = "\033[94m"
     _ANSI_PURPLE = "\033[95m"
     _ANSI_RESET = "\033[0m"
 
-    def __init__(self, config_center, field_id, net_interface, local_ip):
+    def __init__(self, onsite_dir, recv_none_sleep=0.02):
         """
         Initialize OnSite middleware.
 
         Args:
-            config_center: Config center address (e.g., "10.11.17.88:52009")
-            field_id: Unique field ID (must match daemon and simulator)
-            net_interface: Network interface name (e.g., "eno2")
-            local_ip: Local IP address
+            onsite_dir: OnSite workspace directory, containing config/common.yaml and daemon/start.sh
+            recv_none_sleep: Sleep time (seconds) when recv returns None/invalid
         """
-        self.config_center = config_center
-        self.field_id = field_id
-        self.net_interface = net_interface
-        self.local_ip = local_ip
+        self.onsite_dir = Path(onsite_dir).expanduser().resolve()
+        self._daemon_proc = None
+        self.recv_none_sleep = float(recv_none_sleep)
+
+        multicast = self._load_multicast_config(self.onsite_dir)
+        self.config_center = multicast["config_center_addr"]
+        self.field_id = multicast["field_id"]
+        self.net_interface = multicast["net_interface_name"]
+        self.local_ip = multicast["local_ip"]
 
         # Channel references
         self.channels = None
@@ -72,7 +81,7 @@ class OnSiteMiddleware:
         self.cmd_channel = None
         self.session_channel = None
         self.image_channel = None
-        self.actor_id 
+        self.actor_id = None
         # Sequence counters
         self.image_seq = 0
         self._seq_by_type = {}
@@ -80,11 +89,42 @@ class OnSiteMiddleware:
         # Send only this logger to a dedicated file.
         self._init_logger()
 
+        # Start OnSite daemon process.
+        self._start_onsite_daemon()
+
         # Initialize channels
         self.initialize_channels()
 
+    @staticmethod
+    def _load_multicast_config(onsite_dir: Path):
+        cfg_path = onsite_dir / "config" / "common.yaml"
+        if not cfg_path.exists():
+            raise FileNotFoundError(f"OnSite config not found: {cfg_path}")
+        cfg = yaml.safe_load(cfg_path.read_text(encoding="utf-8")) or {}
+        multicast = cfg.get("multicast") or {}
+        required = ("config_center_addr", "local_ip", "net_interface_name", "field_id")
+        missing = [k for k in required if not multicast.get(k)]
+        if missing:
+            raise ValueError(f"Missing multicast config keys in {cfg_path}: {missing}")
+        return multicast
+
+    def _start_onsite_daemon(self):
+        start_script = self.onsite_dir / "daemon" / "start.sh"
+        if not start_script.exists():
+            raise FileNotFoundError(f"OnSite daemon start script not found: {start_script}")
+        self._daemon_proc = subprocess.Popen(
+            ["bash", str(start_script)],
+            cwd=str(start_script.parent),
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        time.sleep(3)
+        logger.info("Started OnSite daemon process pid=%s via %s", self._daemon_proc.pid, start_script)
+
     def _init_logger(self):
-        logger.setLevel(logging.DEBUG)
+        # Follow root logger level (set by entrypoint --log-level).
+        logger.setLevel(logging.NOTSET)
         ts = get_log_timestamp()
         self.log_ts = ts
         # Share timestamp with other modules (e.g., onsite_integration).
@@ -92,7 +132,7 @@ class OnSiteMiddleware:
             import os
             os.environ["ONSITE_LOG_TS"] = ts
         except Exception:
-            pass
+            logger.exception("Failed to set ONSITE_LOG_TS")
         log_dir = Path("logs")
         log_dir.mkdir(parents=True, exist_ok=True)
         log_file = log_dir / f"onsitemiddleware_{ts}.logs"
@@ -108,6 +148,14 @@ class OnSiteMiddleware:
             logger.addHandler(handler)
 
     @classmethod
+    def _color_green(cls, value):
+        return f"{cls._ANSI_GREEN}{value}{cls._ANSI_RESET}"
+
+    @classmethod
+    def _color_blue(cls, value):
+        return f"{cls._ANSI_BLUE}{value}{cls._ANSI_RESET}"
+
+    @classmethod
     def _color_purple(cls, value):
         return f"{cls._ANSI_PURPLE}{value}{cls._ANSI_RESET}"
 
@@ -119,6 +167,16 @@ class OnSiteMiddleware:
             use_integers_for_enums=False,
             including_default_value_fields=True
         )
+
+    @classmethod
+    def _normalize_debug_payload(cls, value):
+        if isinstance(value, (bytes, bytearray, memoryview)):
+            return {"byte_len": len(value)}
+        if isinstance(value, dict):
+            return {k: cls._normalize_debug_payload(v) for k, v in value.items()}
+        if isinstance(value, (list, tuple)):
+            return [cls._normalize_debug_payload(v) for v in value]
+        return value
 
     @staticmethod
     def _format_type_name(value, enum_scope):
@@ -138,7 +196,7 @@ class OnSiteMiddleware:
                 return f"UNKNOWN_CHASSIS_TYPE ({value})"
         return f"UNKNOWN_TYPE ({value})"
 
-    def _log_message_debug(self, direction, message_type, payload, enum_scope):
+    def _log_message_debug(self, direction, message_type, payload, enum_scope, channel_op=None, channel_elapsed_ms=None):
         if not logger.isEnabledFor(logging.DEBUG):
             return
         if hasattr(payload, "DESCRIPTOR"):
@@ -147,17 +205,39 @@ class OnSiteMiddleware:
             payload_dict = payload
         else:
             payload_dict = {"value": payload}
+        payload_dict = self._normalize_debug_payload(payload_dict)
         if isinstance(payload_dict, dict):
             if "expected_type" in payload_dict:
                 payload_dict = dict(payload_dict)
                 payload_dict["expected_type"] = self._format_type_name(payload_dict["expected_type"], enum_scope)
         payload_text = json.dumps(payload_dict, ensure_ascii=False, sort_keys=True, indent=2)
+        channel_key = "channel"
+        channel_value = "-"
+        if channel_op and channel_elapsed_ms is not None:
+            channel_key = f"channel_{channel_op}_ms"
+            channel_value = f"{float(channel_elapsed_ms):.3f}"
         logger.debug(
-            "%s type=%s dict=%s",
+            "%s %s=%s type=%s dict=%s",
             direction,
-            self._color_purple(self._format_type_name(message_type, enum_scope)),
+            channel_key,
+            self._color_blue(channel_value),
+            self._color_green(self._format_type_name(message_type, enum_scope)),
             self._color_purple(payload_text),
         )
+
+    @staticmethod
+    def _timed_get(channel):
+        t0 = time.perf_counter()
+        ret, msg = channel.get()
+        elapsed_ms = (time.perf_counter() - t0) * 1000.0
+        return ret, msg, elapsed_ms
+
+    @staticmethod
+    def _timed_put(channel, msg_type, length, data):
+        t0 = time.perf_counter()
+        ret = channel.put(msg_type, length, data)
+        elapsed_ms = (time.perf_counter() - t0) * 1000.0
+        return ret, elapsed_ms
 
     def _next_seq(self, message_type) -> int:
         seq = int(self._seq_by_type.get(message_type, 0))
@@ -273,7 +353,7 @@ class OnSiteMiddleware:
         # Assign channel references
         self.prepare_channel = self.channel_map['prepare']
         self.notify_channel = self.channel_map['notify']
-        self.role_channel = self.channel_map['pubrole']
+        self.role_channel = self.channel_map['pubrole_encrypt']
         self.cmd_channel = self.channel_map['vehiclecontrol']
         self.session_channel = self.channel_map['sessioninfo']
         self.image_channel = self.channel_map['camera']
@@ -288,6 +368,14 @@ class OnSiteMiddleware:
         """Close all channels and cleanup resources."""
         logger.info("Closing OnSite middleware")
         # Channels are managed by libMulticastNetwork, no explicit cleanup needed
+        if self._daemon_proc is not None:
+            if self._daemon_proc.poll() is None:
+                self._daemon_proc.terminate()
+                try:
+                    self._daemon_proc.wait(timeout=3.0)
+                except subprocess.TimeoutExpired:
+                    self._daemon_proc.kill()
+            self._daemon_proc = None
 
     # ==================== Receive Methods ====================
 
@@ -299,17 +387,19 @@ class OnSiteMiddleware:
             tuple: (session_id, actor_id, brief_data, scene_name) if message received, None otherwise
         """
         if self.prepare_channel is None:
+            time.sleep(self.recv_none_sleep)
             return None
 
-        ret, msg = self.prepare_channel.get()
+        ret, msg, get_ms = self._timed_get(self.prepare_channel)
         if msg is None or ret < 0:
+            time.sleep(self.recv_none_sleep)
             return None
 
         if msg.type() == MT_ACTOR_PREPARE:
             data = libMulticastNetwork.getMessageData(msg)
             prepare_msg = ActorPrepare()
             prepare_msg.ParseFromString(data)
-            self._log_message_debug("recv", MT_ACTOR_PREPARE, prepare_msg, "main")
+            self._log_message_debug("recv", MT_ACTOR_PREPARE, prepare_msg, "main", channel_op="get", channel_elapsed_ms=get_ms)
 
             session_id = prepare_msg.session_id
             actor_id = prepare_msg.actor_id
@@ -327,7 +417,9 @@ class OnSiteMiddleware:
             logger.info(f"Received ActorPrepare: session={session_id}, actor={actor_id}")
             return (session_id, actor_id, brief_data, scene_name)
 
-        self._log_message_debug("recv", msg.type(), {"expected_type": MT_ACTOR_PREPARE}, "main")
+        self._log_message_debug(
+            "recv", msg.type(), {"expected_type": MT_ACTOR_PREPARE}, "main", channel_op="get", channel_elapsed_ms=get_ms
+        )
         return None
 
     def recv_notify(self):
@@ -338,20 +430,24 @@ class OnSiteMiddleware:
             Notify: Notify proto message if received, None otherwise
         """
         if self.notify_channel is None:
+            time.sleep(self.recv_none_sleep)
             return None
 
-        ret, msg = self.notify_channel.get()
+        ret, msg, get_ms = self._timed_get(self.notify_channel)
         if msg is None or ret < 0:
+            time.sleep(self.recv_none_sleep)
             return None
 
         if msg.type() == MT_NOTIFY:
             data = libMulticastNetwork.getMessageData(msg)
             notify = Notify()
             notify.ParseFromString(data)
-            self._log_message_debug("recv", MT_NOTIFY, notify, "main")
+            self._log_message_debug("recv", MT_NOTIFY, notify, "main", channel_op="get", channel_elapsed_ms=get_ms)
             return notify
 
-        self._log_message_debug("recv", msg.type(), {"expected_type": MT_NOTIFY}, "main")
+        self._log_message_debug(
+            "recv", msg.type(), {"expected_type": MT_NOTIFY}, "main", channel_op="get", channel_elapsed_ms=get_ms
+        )
         return None
 
     def recv_all_notifies(self):
@@ -379,20 +475,24 @@ class OnSiteMiddleware:
             PubRole: PubRole proto message if received, None otherwise
         """
         if self.role_channel is None:
+            time.sleep(self.recv_none_sleep)
             return None
 
-        ret, msg = self.role_channel.get()
+        ret, msg, get_ms = self._timed_get(self.role_channel)
         if msg is None or ret < 0:
+            time.sleep(self.recv_none_sleep)
             return None
 
         if msg.type() == MT_PUBROLE:
             data = libMulticastNetwork.getMessageData(msg)
             pub_role = PubRole()
             pub_role.ParseFromString(data)
-            self._log_message_debug("recv", MT_PUBROLE, pub_role, "main")
+            self._log_message_debug("recv", MT_PUBROLE, pub_role, "main", channel_op="get", channel_elapsed_ms=get_ms)
             return pub_role
 
-        self._log_message_debug("recv", msg.type(), {"expected_type": MT_PUBROLE}, "main")
+        self._log_message_debug(
+            "recv", msg.type(), {"expected_type": MT_PUBROLE}, "main", channel_op="get", channel_elapsed_ms=get_ms
+        )
         return None
 
     def recv_vehicle_control(self):
@@ -403,23 +503,29 @@ class OnSiteMiddleware:
             list: [steering, throttle_brake] if message received, None otherwise
         """
         if self.cmd_channel is None:
+            time.sleep(self.recv_none_sleep)
             return None
 
-        ret, msg = self.cmd_channel.get()
+        ret, msg, get_ms = self._timed_get(self.cmd_channel)
         if msg is None or ret < 0:
+            time.sleep(self.recv_none_sleep)
             return None
 
         if msg.type() == VEHICLE_CONTROL:
             data = libMulticastNetwork.getMessageData(msg)
             control = VehicleControl()
             control.ParseFromString(data)
-            self._log_message_debug("recv", VEHICLE_CONTROL, control, "chassis")
+            self._log_message_debug(
+                "recv", VEHICLE_CONTROL, control, "chassis", channel_op="get", channel_elapsed_ms=get_ms
+            )
 
             # Convert to MetaDrive action
             action = self._vehicle_control_to_action(control)
             return action
 
-        self._log_message_debug("recv", msg.type(), {"expected_type": VEHICLE_CONTROL}, "chassis")
+        self._log_message_debug(
+            "recv", msg.type(), {"expected_type": VEHICLE_CONTROL}, "chassis", channel_op="get", channel_elapsed_ms=get_ms
+        )
         return None
 
     def recv_vehicle_feedback(self):
@@ -431,20 +537,26 @@ class OnSiteMiddleware:
             VehicleFeedback: VehicleFeedback proto message if received, None otherwise
         """
         if self.cmd_channel is None:
+            time.sleep(self.recv_none_sleep)
             return None
 
-        ret, msg = self.cmd_channel.get()
+        ret, msg, get_ms = self._timed_get(self.cmd_channel)
         if msg is None or ret < 0:
+            time.sleep(self.recv_none_sleep)
             return None
 
         if msg.type() == VEHICLE_FEEDBACK:
             data = libMulticastNetwork.getMessageData(msg)
             feedback = VehicleFeedback()
             feedback.ParseFromString(data)
-            self._log_message_debug("recv", VEHICLE_FEEDBACK, feedback, "chassis")
+            self._log_message_debug(
+                "recv", VEHICLE_FEEDBACK, feedback, "chassis", channel_op="get", channel_elapsed_ms=get_ms
+            )
             return feedback
 
-        self._log_message_debug("recv", msg.type(), {"expected_type": VEHICLE_FEEDBACK}, "chassis")
+        self._log_message_debug(
+            "recv", msg.type(), {"expected_type": VEHICLE_FEEDBACK}, "chassis", channel_op="get", channel_elapsed_ms=get_ms
+        )
         return None
 
     def recv_session_info(self):
@@ -455,20 +567,26 @@ class OnSiteMiddleware:
             SessionInfo: SessionInfo proto message if received, None otherwise
         """
         if self.session_channel is None:
+            time.sleep(self.recv_none_sleep)
             return None
 
-        ret, msg = self.session_channel.get()
+        ret, msg, get_ms = self._timed_get(self.session_channel)
         if msg is None or ret < 0:
+            time.sleep(self.recv_none_sleep)
             return None
 
         if msg.type() == MT_SESSIONINFO:
             data = libMulticastNetwork.getMessageData(msg)
             session_info = SessionInfo()
             session_info.ParseFromString(data)
-            self._log_message_debug("recv", MT_SESSIONINFO, session_info, "main")
+            self._log_message_debug(
+                "recv", MT_SESSIONINFO, session_info, "main", channel_op="get", channel_elapsed_ms=get_ms
+            )
             return session_info
 
-        self._log_message_debug("recv", msg.type(), {"expected_type": MT_SESSIONINFO}, "main")
+        self._log_message_debug(
+            "recv", msg.type(), {"expected_type": MT_SESSIONINFO}, "main", channel_op="get", channel_elapsed_ms=get_ms
+        )
         return None
 
     # ==================== Send Methods ====================
@@ -493,8 +611,15 @@ class OnSiteMiddleware:
         msg.reason = ""
         data = msg.SerializeToString()
         length = len(data)
-        ret = self.prepare_channel.put(MT_ACTOR_PREPARE_RESULT, length, data)
-        self._log_message_debug("send", MT_ACTOR_PREPARE_RESULT, {**self._proto_to_dict(msg), "ret": ret}, "main")
+        ret, put_ms = self._timed_put(self.prepare_channel, MT_ACTOR_PREPARE_RESULT, length, data)
+        self._log_message_debug(
+            "send",
+            MT_ACTOR_PREPARE_RESULT,
+            {**self._proto_to_dict(msg), "ret": ret},
+            "main",
+            channel_op="put",
+            channel_elapsed_ms=put_ms,
+        )
 
         if ret != 0:
             logger.error(f"Failed to send ActorPrepareResult, ret: {ret}")
@@ -519,8 +644,10 @@ class OnSiteMiddleware:
 
         data = msg.SerializeToString()
         length = len(data)
-        ret = self.role_channel.put(MT_SUBROLE, length, data)
-        self._log_message_debug("send", MT_SUBROLE, {**self._proto_to_dict(msg), "ret": ret}, "main")
+        ret, put_ms = self._timed_put(self.role_channel, MT_SUBROLE, length, data)
+        self._log_message_debug(
+            "send", MT_SUBROLE, {**self._proto_to_dict(msg), "ret": ret}, "main", channel_op="put", channel_elapsed_ms=put_ms
+        )
 
         if ret != 0:
             logger.error(f"Failed to send SubRole, ret: {ret}")
@@ -565,8 +692,10 @@ class OnSiteMiddleware:
 
         data = msg.SerializeToString()
         length = len(data)
-        ret = self.role_channel.put(MT_PUBROLE, length, data)
-        self._log_message_debug("send", MT_PUBROLE, {**self._proto_to_dict(msg), "ret": ret}, "main")
+        ret, put_ms = self._timed_put(self.role_channel, MT_PUBROLE, length, data)
+        self._log_message_debug(
+            "send", MT_PUBROLE, {**self._proto_to_dict(msg), "ret": ret}, "main", channel_op="put", channel_elapsed_ms=put_ms
+        )
 
         if ret != 0:
             logger.error(f"Failed to send PubRole, ret: {ret}")
@@ -592,8 +721,15 @@ class OnSiteMiddleware:
 
         data = msg.SerializeToString()
         length = len(data)
-        ret = self.cmd_channel.put(VEHICLE_FEEDBACK, length, data)
-        self._log_message_debug("send", VEHICLE_FEEDBACK, {**self._proto_to_dict(msg), "ret": ret}, "chassis")
+        ret, put_ms = self._timed_put(self.cmd_channel, VEHICLE_FEEDBACK, length, data)
+        self._log_message_debug(
+            "send",
+            VEHICLE_FEEDBACK,
+            {**self._proto_to_dict(msg), "ret": ret},
+            "chassis",
+            channel_op="put",
+            channel_elapsed_ms=put_ms,
+        )
 
         if ret != 0:
             logger.error(f"Failed to send VehicleFeedback, ret: {ret}")
@@ -603,7 +739,7 @@ class OnSiteMiddleware:
         Send multiple images to OnSite server.
 
         Args:
-            images: List of numpy arrays (H, W, 3) in BGR format
+            images: List of numpy arrays (H, W, 3) in RGB format
             timestamp: Timestamp in seconds
         """
         if self.image_channel is None:
@@ -614,6 +750,9 @@ class OnSiteMiddleware:
             return
 
         for img in images:
+            if img is None or img.ndim != 3 or img.shape[2] != 3:
+                logger.warning(f"Skip invalid image shape: {None if img is None else img.shape}")
+                continue
             py_images = []
             py_img = libMulticastNetwork.PyImage()
             py_img.timestamp_sec = timestamp
@@ -627,7 +766,9 @@ class OnSiteMiddleware:
             py_images.append(py_img)
             self.image_seq += 1
 
+            t0 = time.perf_counter()
             ret = self.image_channel.put_image_simple(py_images)
+            put_ms = (time.perf_counter() - t0) * 1000.0
             images_meta = [
                 {
                     "timestamp_sec": float(py_img.timestamp_sec),
@@ -637,14 +778,18 @@ class OnSiteMiddleware:
                     "height": int(py_img.height),
                     "width": int(py_img.width),
                     "encoding": py_img.encoding,
+                    "byte_len": int(np.asarray(py_img.data).nbytes),
                 }
                 for py_img in py_images
             ]
+            total_byte_len = int(sum(img_meta["byte_len"] for img_meta in images_meta))
             self._log_message_debug(
                 "send",
                 "image_batch",
-                {"image_count": len(py_images), "images": images_meta, "ret": ret},
+                {"image_count": len(py_images), "images": images_meta, "total_byte_len": total_byte_len, "ret": ret},
                 "raw",
+                channel_op="put",
+                channel_elapsed_ms=put_ms,
             )
             if ret != 0:
                 logger.error(f"Failed to send images, ret: {ret}")
@@ -696,59 +841,6 @@ class OnSiteMiddleware:
 
         return [float(steering), float(throttle_brake)]
 
-    def _euler_to_quaternion(self, roll, pitch, yaw):
-        """
-        Convert Euler angles to quaternion.
-
-        Args:
-            roll: Roll angle in radians
-            pitch: Pitch angle in radians
-            yaw: Yaw angle in radians
-
-        Returns:
-            tuple: (x, y, z, w) quaternion
-        """
-        cy = np.cos(yaw * 0.5)
-        sy = np.sin(yaw * 0.5)
-        cp = np.cos(pitch * 0.5)
-        sp = np.sin(pitch * 0.5)
-        cr = np.cos(roll * 0.5)
-        sr = np.sin(roll * 0.5)
-
-        w = cr * cp * cy + sr * sp * sy
-        x = sr * cp * cy - cr * sp * sy
-        y = cr * sp * cy + sr * cp * sy
-        z = cr * cp * sy - sr * sp * cy
-
-        return (x, y, z, w)
-
-    def _quaternion_to_matrix(self, position, quaternion):
-        """
-        Convert quaternion and position to 4x4 transform matrix.
-
-        Args:
-            position: Position proto message with x, y, z
-            quaternion: Quaternion proto message with x, y, z, w
-
-        Returns:
-            np.ndarray: 4x4 transformation matrix
-        """
-        x, y, z, w = quaternion.x, quaternion.y, quaternion.z, quaternion.w
-
-        # Quaternion to rotation matrix
-        R = np.array([
-            [1 - 2*(y*y + z*z), 2*(x*y - w*z), 2*(x*z + w*y)],
-            [2*(x*y + w*z), 1 - 2*(x*x + z*z), 2*(y*z - w*x)],
-            [2*(x*z - w*y), 2*(y*z + w*x), 1 - 2*(x*x + y*y)]
-        ])
-
-        # Construct 4x4 transform matrix
-        T = np.eye(4)
-        T[:3, :3] = R
-        T[:3, 3] = [position.x, position.y, position.z]
-
-        return T
-
     def _agent_state_to_single_role(self, agent_id, state, last_received_pub_role, current_timestamp, seq_no):
         """
         Convert agent state to SingleRole proto message.
@@ -767,7 +859,7 @@ class OnSiteMiddleware:
         role = SingleRole()
         role.id = agent_id
         role.name = agent_id
-        role.f_status = [1] + [0] * 8  # Placeholder for status flags
+        role.f_status.extend([1.0] + [0.0] * 8)  # Placeholder for status flags
         # Preserve type and size from last received PubRole if available
         cached_role = None
         if last_received_pub_role:
@@ -793,11 +885,16 @@ class OnSiteMiddleware:
 
         # Rotation (from heading_theta to quaternion)
         heading = self._to_float(state['heading_theta'])
-        quat = self._euler_to_quaternion(0, 0, heading)
-        role.box.rotation.x = quat[0]
-        role.box.rotation.y = quat[1]
-        role.box.rotation.z = quat[2]
-        role.box.rotation.w = quat[3]
+        cos_h = float(np.cos(heading))
+        sin_h = float(np.sin(heading))
+        rotation = torch.tensor(
+            [[[cos_h, -sin_h, 0.0], [sin_h, cos_h, 0.0], [0.0, 0.0, 1.0]]], dtype=torch.float32
+        )
+        quat_wxyz = matrix_to_quaternion(rotation)[0]
+        role.box.rotation.x = float(quat_wxyz[1])
+        role.box.rotation.y = float(quat_wxyz[2])
+        role.box.rotation.z = float(quat_wxyz[3])
+        role.box.rotation.w = float(quat_wxyz[0])
 
         # Linear velocity
         vel_x, vel_y, vel_z = self._to_vec3(state['velocity'])

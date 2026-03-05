@@ -4,7 +4,7 @@ OnSite Scenario Environment for MetaDrive.
 This environment extends ScenarioEnv to support OnSite integration,
 providing helper methods for state synchronization with OnSite server.
 """
-
+import os
 import logging
 from pathlib import Path
 import torch
@@ -24,6 +24,10 @@ class OnSiteScenarioEnv(ScenarioEnv):
     """
 
     def __init__(self, model, config=None):
+        if not os.path.exists(config["scene_config_directory"]):
+            os.makedirs(config["scene_config_directory"], exist_ok=True)
+            logger.info(f"Created scene config directory at {config['scene_config_directory']}")
+        
         super().__init__(model, config)
         # Cache for last received PubRole (for preserving fields)
         self.last_received_pub_role = None

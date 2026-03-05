@@ -99,7 +99,7 @@ class OnSiteViewer:
             width,
             height,
             0,
-            gl.GL_BGR,
+            gl.GL_RGB,
             gl.GL_UNSIGNED_BYTE,
             img,
         )
@@ -129,6 +129,10 @@ class OnSiteViewer:
 def _decode_frame(frame) -> Optional[np.ndarray]:
     if not frame.data:
         return None
+    if frame.channels == 0:
+        raise ValueError("Image channels cannot be 0")
+    if frame.format.upper() != "RGB":
+        raise ValueError(f"Unsupported image format: {frame.format}, expected RGB")
     img = np.frombuffer(frame.data, dtype=np.uint8)
     expected = int(frame.width * frame.height * frame.channels)
     if img.size != expected:
@@ -136,10 +140,7 @@ def _decode_frame(frame) -> Optional[np.ndarray]:
             f"Image size mismatch: got={img.size} expected={expected} "
             f"(w={frame.width} h={frame.height} c={frame.channels})"
         )
-    img = img.reshape(frame.height, frame.width, frame.channels)
-    if frame.format.upper() == "RGB":
-        img = img[:, :, ::-1]
-    return img
+    return img.reshape(frame.height, frame.width, frame.channels)
 
 
 class OnsiteViewerGrpcClient:

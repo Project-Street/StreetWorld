@@ -224,13 +224,15 @@ class SimulatorInterface:
         pose_dir = trajectory_root / scene_name
         export_one_scene(scene_dir, pose_dir)
 
+        cwd_root = Path.cwd()
         cfg = {
             "scene_name": scene_name,
             "scene_uuid": scene_uuid,
-            "scene_root": os.path.relpath(scene_root, scene_cfg_dir),
-            "pose_data_path": os.path.relpath(pose_dir, scene_cfg_dir),
-            "ego_pose_path": os.path.relpath(pose_dir / "ego_pose.json", scene_cfg_dir),
-            "trajectory_path": os.path.relpath(pose_dir / "trajectory.json", scene_cfg_dir),
+            # Keep generated yaml paths root-relative (e.g. data/...) to avoid fragile ../../ traversal.
+            "scene_root": os.path.relpath(scene_root, cwd_root),
+            "pose_data_path": os.path.relpath(pose_dir, cwd_root),
+            "ego_pose_path": os.path.relpath(pose_dir / "ego_pose.json", cwd_root),
+            "trajectory_path": os.path.relpath(pose_dir / "trajectory.json", cwd_root),
         }
         out_yaml = scene_cfg_dir / f"{scene_name}.yaml"
         out_yaml.write_text(yaml.safe_dump(cfg, sort_keys=False, allow_unicode=False), encoding="utf-8")
@@ -239,7 +241,7 @@ class SimulatorInterface:
         rig = json.loads(Path(cfg["rig_trajectories_path"]).read_text(encoding="utf-8"))
         world_to_nre = np.asarray(parse_world_to_nre(rig), dtype=np.float64)
         sim_world_to_map = compute_sim_world_to_xodr_map(
-            rig=rig,
+            rig_data=rig,
             xodr_path=Path(cfg["map_path"]),
         )
         _, camera_models = parse_camera_params(rig, resolution_scale=self.resolution_scale)
@@ -320,17 +322,11 @@ class SimulatorInterface:
     def _load_cfg(cfg_path: Path) -> Dict[str, Any]:
         data = yaml.safe_load(cfg_path.read_text())
 
-        scene_root = Path(data["scene_root"])
-        if not scene_root.is_absolute():
-            scene_root = (cfg_path.parent / scene_root).resolve()
+        scene_root = (Path.cwd() / Path(data["scene_root"])).resolve()
         scene_dir = scene_root / str(data["scene_uuid"])
 
-        ego_pose_path = Path(data["ego_pose_path"])
-        if not ego_pose_path.is_absolute():
-            ego_pose_path = (cfg_path.parent / ego_pose_path).resolve()
-        trajectory_path = Path(data["trajectory_path"])
-        if not trajectory_path.is_absolute():
-            trajectory_path = (cfg_path.parent / trajectory_path).resolve()
+        ego_pose_path = (Path.cwd() / Path(data["ego_pose_path"])).resolve()
+        trajectory_path = (Path.cwd() / Path(data["trajectory_path"])).resolve()
 
         data["scene_root"] = str(scene_root)
         data["rig_trajectories_path"] = str(scene_dir / "rig_trajectories.json")
