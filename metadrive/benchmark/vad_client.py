@@ -2,6 +2,7 @@ import os
 import sys
 import warnings
 import torch
+import grpc
 
 from mmcv import Config, DictAction
 from mmcv.runner import load_checkpoint, wrap_fp16_model
@@ -17,6 +18,7 @@ import numpy as np
 
 from grpc_obs_adapter import unpack_ad_observation
 from grpc_client import GrpcClient
+from metrics import MetricsRecorder
 
 import sys
 RL_FRAMEWORK_ROOT=Path(__file__).resolve().parents[2]
@@ -350,51 +352,72 @@ def main():
 
     # Initialize FrameRecorder for visualization
     # from drive_with_streetstudio import GaussianFrameRecorder
-    from visualize_utils import GaussianFrameRecorder
+    from visualize_utils import GaussianFrameRecorder, print_step_info
     gaussian_recorder = GaussianFrameRecorder(output_path='./driving_vad.mp4', fps=10)
+    metrics_recorder = MetricsRecorder()
     
     try:
-        # Reset environment
-        print("Resetting environment...")
-        obs, reset_info = client.reset(transforms_json_path=args.transforms)
-        obs_img, obs_info, navigation, surrounding = unpack_ad_observation(obs)
-        client._init_image_stacks(obs_img)
+        episode_index = 0
+        total_reward = 0.0
+        while True:
+            try:
+                # Reset environment
+                print("Resetting environment...")
+                obs, reset_info = client.reset(transforms_json_path=args.transforms)
+            except grpc.RpcError as exc:
+                if exc.code() == grpc.StatusCode.OUT_OF_RANGE:
+                    print("All scenarios exhausted, stopping.")
+                    break
+                raise
 
-        print(f"Environment ready. Cameras: {list(obs_img.keys())}")
-
-        # Run VAD inference for first step
-        print("Running initial VAD inference...")
-        plan_traj = client.run_vad_inference(obs_img, obs_info, reset_info)
-        acc, steer = traj2control(plan_traj, obs_info, horizon=3.0, control_dt=0.1)
-        action = [steer, acc]
-        print(f"Initial action: steer={steer:.4f}, acc={acc:.4f}")
-
-        # Main loop
-        reward_sum = 0.0
-        for step in range(1, args.steps + 1):
-            obs, reward, terminated, truncated, info = client.step(action)
+            episode_index += 1
             obs_img, obs_info, navigation, surrounding = unpack_ad_observation(obs)
-            # Update image stacks
-            client._update_image_stacks(obs_img)
+            client._init_image_stacks(obs_img)
 
-            # gaussian_recorder.update_frame((obs_img, obs_info))
-            
-            reward_sum += reward
+            print(f"Environment ready. Cameras: {list(obs_img.keys())}")
 
-            # Run VAD inference
-            plan_traj = client.run_vad_inference(obs_img, obs_info, info)
-            gaussian_recorder.update_frame((obs_img, obs_info), plan_traj)
+            # Run VAD inference for first step
+            print("Running initial VAD inference...")
+            plan_traj = client.run_vad_inference(obs_img, obs_info, reset_info)
             acc, steer = traj2control(plan_traj, obs_info, horizon=3.0, control_dt=0.1)
             action = [steer, acc]
+            print(f"Initial action: steer={steer:.4f}, acc={acc:.4f}")
 
-            if step % 1 == 0:
-                print(f"Step {step}: reward={reward:.2f}, steer={steer:.4f}, acc={acc:.4f}")
+            # Main loop
+            reward_sum = 0.0
+            last_info = None
+            for step in range(1, args.steps + 1):
+                obs, reward, terminated, truncated, info = client.step(action)
+                last_info = info
+                obs_img, obs_info, navigation, surrounding = unpack_ad_observation(obs)
+                # Update image stacks
+                client._update_image_stacks(obs_img)
+                print_step_info(info)
+                # gaussian_recorder.update_frame((obs_img, obs_info))
+                
+                reward_sum += reward
+                total_reward += reward
+                metrics_recorder.update(info)
 
-            if terminated or truncated:
-                print(f"Episode finished at step {step}")
-                break
+                # Run VAD inference
+                plan_traj = client.run_vad_inference(obs_img, obs_info, info)
+                gaussian_recorder.update_frame((obs_img, obs_info), plan_traj)
+                acc, steer = traj2control(plan_traj, obs_info, horizon=3.0, control_dt=0.1)
+                action = [steer, acc]
 
-        print(f"Total reward: {reward_sum:.2f}")
+                if step % 1 == 0:
+                    print(f"Step {step}: reward={reward:.2f}, steer={steer:.4f}, acc={acc:.4f}")
+
+                if terminated or truncated:
+                    print(f"Episode finished at step {step}")
+                    break
+
+            metrics_recorder.end_episode(last_info)
+            print(f"Episode {episode_index} reward: {reward_sum:.2f}")
+            print(f"Metrics so far: {metrics_recorder.summary()}")
+
+        print(f"Total reward: {total_reward:.2f}")
+        print(f"Final metrics: {metrics_recorder.summary()}")
         gaussian_recorder.save_video()
         
     finally:

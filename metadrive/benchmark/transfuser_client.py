@@ -10,6 +10,7 @@ import argparse
 import json
 import os
 import sys
+import grpc
 from pathlib import Path
 from typing import Dict, List, Tuple, Optional, Any
 
@@ -18,6 +19,7 @@ import numpy as np
 
 from grpc_obs_adapter import unpack_ad_observation
 from grpc_client import GrpcClient
+from metrics import MetricsRecorder
 
 os.environ['no_proxy'] = '127.0.0.1,localhost'
 
@@ -343,53 +345,74 @@ def main():
         lateral=args.lateral,
     )
 
-    from visualize_utils import GaussianFrameRecorder
+    from visualize_utils import GaussianFrameRecorder, print_step_info
     gaussian_recorder = GaussianFrameRecorder(output_path=args.gaussian_video, fps=10)
+    metrics_recorder = MetricsRecorder()
 
     try:
-        obs, reset_info = client.reset(transforms_json_path=args.transforms)
-        obs_img, obs_info, navigation, surrounding = unpack_ad_observation(obs)
-        print(f"Environment ready. Cameras: {list(obs_img.keys())}")
+        episode_index = 0
+        total_reward = 0.0
+        while True:
+            try:
+                obs, reset_info = client.reset(transforms_json_path=args.transforms)
+            except grpc.RpcError as exc:
+                if exc.code() == grpc.StatusCode.OUT_OF_RANGE:
+                    print("All scenarios exhausted, stopping.")
+                    break
+                raise
 
-        steer, throttle, brake, pred_wp = client.run_transfuser_inference(
-            obs_img,
-            obs_info,
-            debug_dir=args.debug_dir,
-            step_idx=0,
-        )
-        gaussian_recorder.update_frame((obs_img, obs_info), _normalize_plan_traj(pred_wp))
-        acc, steer = traj2control(_normalize_plan_traj(pred_wp), obs_info, horizon=2.0, control_dt=0.1)
-        action = [steer, acc]
-
-        print(f"Initial action: steer={steer:.4f}, throttle={action[1]:.4f}, brake={brake:.4f}")
-
-        reward_sum = 0.0
-        for step in range(1, args.steps + 1):
-            obs, reward, terminated, truncated, info = client.step(action)
+            episode_index += 1
             obs_img, obs_info, navigation, surrounding = unpack_ad_observation(obs)
-            print(info.keys())
-            exit(-1)
-            reward_sum += reward
+            print(f"Environment ready. Cameras: {list(obs_img.keys())}")
 
             steer, throttle, brake, pred_wp = client.run_transfuser_inference(
                 obs_img,
                 obs_info,
                 debug_dir=args.debug_dir,
-                step_idx=step,
+                step_idx=0,
             )
-            
             gaussian_recorder.update_frame((obs_img, obs_info), _normalize_plan_traj(pred_wp))
             acc, steer = traj2control(_normalize_plan_traj(pred_wp), obs_info, horizon=2.0, control_dt=0.1)
             action = [steer, acc]
-        
-            if step % 1 == 0:
-                print(f"Step {step}: reward={reward:.2f}, steer={steer:.4f}, throttle={action[1]:.4f}")
 
-            if terminated or truncated:
-                print(f"Episode finished at step {step}")
-                break
+            print(f"Initial action: steer={steer:.4f}, throttle={action[1]:.4f}, brake={brake:.4f}")
 
-        print(f"Total reward: {reward_sum:.2f}")
+            reward_sum = 0.0
+            last_info = None
+            for step in range(1, args.steps + 1):
+                obs, reward, terminated, truncated, info = client.step(action)
+                last_info = info
+                obs_img, obs_info, navigation, surrounding = unpack_ad_observation(obs)
+                
+                print_step_info(info)
+                reward_sum += reward
+                total_reward += reward
+                metrics_recorder.update(info)
+
+                steer, throttle, brake, pred_wp = client.run_transfuser_inference(
+                    obs_img,
+                    obs_info,
+                    debug_dir=args.debug_dir,
+                    step_idx=step,
+                )
+                
+                gaussian_recorder.update_frame((obs_img, obs_info), _normalize_plan_traj(pred_wp))
+                acc, steer = traj2control(_normalize_plan_traj(pred_wp), obs_info, horizon=2.0, control_dt=0.1)
+                action = [steer, acc]
+            
+                if step % 1 == 0:
+                    print(f"Step {step}: reward={reward:.2f}, steer={steer:.4f}, throttle={action[1]:.4f}")
+
+                if terminated or truncated:
+                    print(f"Episode finished at step {step}")
+                    break
+
+            metrics_recorder.end_episode(last_info)
+            print(f"Episode {episode_index} reward: {reward_sum:.2f}")
+            print(f"Metrics so far: {metrics_recorder.summary()}")
+
+        print(f"Total reward: {total_reward:.2f}")
+        print(f"Final metrics: {metrics_recorder.summary()}")
         gaussian_recorder.save_video()
     finally:
         client.close()

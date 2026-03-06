@@ -1,6 +1,7 @@
 import cv2
 import numpy as np
 import math
+from typing import Dict, Tuple
 
 class GaussianFrameRecorder:
     """Records Gaussian rendering frames from multiple cameras in a grid layout."""
@@ -210,3 +211,54 @@ class GaussianFrameRecorder:
 
         writer.release()
         print(f"Gaussian render video saved to: {self.output_path}")
+
+def print_step_info(step_info: Dict) -> None:
+    scene_name = step_info.get("scene_name", "")
+    episode_length = step_info.get("episode_length")
+    current_timestamp = step_info.get("current_timestamp")
+    step_reward = step_info.get("step_reward")
+    episode_reward = step_info.get("episode_reward")
+    progress = step_info.get("progress")
+    progress_ratio = step_info.get("progress_ratio")
+    ego_speed = step_info.get("ego_speed")
+    collision = step_info.get("collision")
+    collision_count = step_info.get("collision_count")
+    stalled = step_info.get("stalled")
+    reason = step_info.get("reason", "")
+    ttc = step_info.get("ttc")
+    heading_error = step_info.get("heading_error")
+    position_deviation = step_info.get("position_deviation")
+
+    header_parts = []
+    if scene_name:
+        header_parts.append(str(scene_name))
+    if episode_length is not None:
+        header_parts.append(f"step={episode_length}")
+    if current_timestamp is not None:
+        header_parts.append(f"t={float(current_timestamp):.2f}")
+    header = " | ".join(header_parts) if header_parts else "step info"
+
+    print("-" * 10)
+    print(header)
+    if step_reward is not None or episode_reward is not None:
+        print(f"reward: step={float(step_reward or 0.0):.3f} total={float(episode_reward or 0.0):.3f}")
+    if progress is not None or progress_ratio is not None:
+        prog_value = float(progress or 0.0)
+        ratio_value = float(progress_ratio or 0.0)
+        print(f"progress: {prog_value:.2f} ({ratio_value * 100.0:.1f}%)")
+    if ego_speed is not None:
+        print(f"ego_speed: {float(ego_speed):.2f} m/s")
+    if ttc is not None:
+        print(f"ttc: {float(ttc):.2f} s")
+    if heading_error is not None or position_deviation is not None:
+        heading_value = float(heading_error or 0.0)
+        position_value = float(position_deviation or 0.0)
+        print(f"tracking: heading_err={heading_value:.3f} pos_dev={position_value:.3f}")
+    if collision is not None or collision_count is not None or stalled is not None:
+        collision_flag = bool(collision) if collision is not None else False
+        collision_count_value = int(collision_count or 0)
+        stalled_flag = bool(stalled) if stalled is not None else False
+        print(f"flags: collision={collision_flag} count={collision_count_value} stalled={stalled_flag}")
+    if reason:
+        print(f"reason: {reason}")
+    print("-" * 10)

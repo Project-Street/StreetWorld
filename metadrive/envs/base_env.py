@@ -133,7 +133,7 @@ class BaseEnv(gym.Env):
         # self.managers[manager_name] = manager
         setattr(self, manager_name, manager)
 
-    def reset(self, seed: Union[None, int] = None):
+    def reset(self, seed: Union[None, int] = None, scene_id: Union[None, int] = None):
         # Update record replay
         self.replay_episode = True if self.config["replay_episode"] is not None else False
         self.record_episode = self.config["record_episode"]
@@ -142,6 +142,7 @@ class BaseEnv(gym.Env):
         Reset the env, scene can be restored and replayed by giving episode_data
         Reset the environment or load an episode from episode data to recover is
         :param seed: The seed to set the env. It is actually the scenario index you intend to choose
+        :param scene_id: The ID of the scene to reset to
         :return: None
         """
         # reset_logger()
@@ -167,7 +168,7 @@ class BaseEnv(gym.Env):
                 self.agent_managers[n].destroy()
                 self.agent_managers.pop(n)
 
-        self.data_manager.reset()
+        self.data_manager.reset(scene_id=scene_id)
 
         scenario_data = self.data_manager.get_current_scenario_data()
         self.step_manager.reset(**scenario_data)

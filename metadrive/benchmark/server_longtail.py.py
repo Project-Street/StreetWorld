@@ -46,7 +46,7 @@ class StreetStudioServicer(service_pb2_grpc.EnvServiceServicer):
     Provides Reset and Step RPCs for remote control.
     """
 
-    def __init__(self, config: dict):
+    def __init__(self, config: dict, sequential_scenes: bool = True):
         """
         Initialize servicer with environment configuration.
 
@@ -54,6 +54,7 @@ class StreetStudioServicer(service_pb2_grpc.EnvServiceServicer):
             config: Environment configuration dict
         """
         self.config = config
+        self.sequential_scenes = sequential_scenes
         self.env: ScenarioEnv = None
         self.model: SimulatorInterface = None
         self._lock = threading.Lock()
@@ -87,10 +88,25 @@ class StreetStudioServicer(service_pb2_grpc.EnvServiceServicer):
             # Create new environment
             if self.env is None:
                 self.env = ScenarioEnv(self.model, self.config)
+                self._num_scenarios = len(self.env.data_manager.metadata)
             # self.env = StreetStudioScenarioEnv(self.config)
 
+            if self._current_scene is not None:
+                self._current_scene = str(int(self._current_scene) + 1)
+
             # Reset environment and get initial observation
-            obs, reset_info = self.env.reset()
+            scene_id = int(self._current_scene) if (self._current_scene is not None and self.sequential_scenes) else None
+            if scene_id is not None and scene_id >= self._num_scenarios:
+                context.set_code(grpc.StatusCode.OUT_OF_RANGE)
+                context.set_details(f"All scenarios exhausted. Total scenarios: {self._num_scenarios}")
+                return service_pb2.ResetResponse(
+                    status=True,
+                    message=f"All scenarios exhausted. Total scenarios: {self._num_scenarios}",
+                    observation=common_pb2.Observation(),
+                    StepInfo=self._dict_to_struct({})
+                )
+            
+            obs, reset_info = self.env.reset(scene_id=scene_id)
 
             scene_name = str(self.env.scene_name) #Path(transforms_path).stem
             self._current_scene = scene_name
@@ -236,7 +252,8 @@ def serve(
     port: int = 50052,
     max_workers: int = 10,
     time_start: float = None,
-    time_end: float = None
+    time_end: float = None,
+    random: bool = False,
 ) -> None:
     """
     Start gRPC server.
@@ -275,7 +292,7 @@ def serve(
         config["time_end_sec"] = time_end
 
     # Create servicer
-    servicer = StreetStudioServicer(config)
+    servicer = StreetStudioServicer(config, sequential_scenes=not random)
 
     # Create gRPC server
     server = grpc.server(
@@ -350,6 +367,11 @@ def main():
         default=None,
         help="End timestamp for scenario replay (default: scenario end time)"
     )
+    parser.add_argument(
+        "--random",
+        action="store_true",
+        help="Whether to serve scenes randomly (default: False, sequential access)"
+    )
     args = parser.parse_args()
 
     # Validate transforms path exists
@@ -365,7 +387,8 @@ def main():
         port=args.port,
         max_workers=args.max_workers,
         time_start=args.time_start,
-        time_end=args.time_end
+        time_end=args.time_end,
+        random=args.random
     )
 
     return 0

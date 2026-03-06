@@ -218,9 +218,9 @@ class ScenarioEnv(BaseEnv):
         step_info["cost"] = cost
         return cost, step_info
 
-    def reset(self, seed: Union[None, int] = None):
+    def reset(self, seed: Union[None, int] = None, scene_id: Union[None, int] = None):
         self._reset_reward_trackers()
-        return super().reset(seed=seed)
+        return super().reset(seed=seed, scene_id=scene_id)
 
     def _reset_reward_trackers(self):
         self._last_progress_value = None
