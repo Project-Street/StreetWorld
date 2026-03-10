@@ -236,7 +236,11 @@ class SharpVideoSimulatorInterface:
         Ws = camera_rig_config.get('Ws', None)
 
         LOGGER.info("Loading camera parameters from %s", camera_rig_path)
-        cameras_data = np.load(camera_rig_path)
+        if camera_rig_path.endswith('.json'):
+            with open(camera_rig_path, 'r') as f:
+                cameras_data = json.load(f)
+        else:
+            cameras_data = np.load(camera_rig_path)
         
         if "intrinsics" not in cameras_data or "extrinsics" not in cameras_data:
             raise ValueError("cameras.npz must contain 'intrinsics' and 'extrinsics' arrays")

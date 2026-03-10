@@ -144,19 +144,19 @@ class AgentManager(BaseManager):
                 self.controller.crash_check()
                 
                 if self.controller.crash_human:
-                    self.clear_all_objects()
+                    # self.clear_all_objects()
                     self.state = AgentState.CRASH_HUMAN
                     return
                 if self.controller.crash_vehicle:
-                    self.clear_all_objects()
+                    # self.clear_all_objects()
                     self.state = AgentState.CRASH_VEHICLE
                     return
                 if self.controller.crash_object:
-                    self.clear_all_objects()
+                    # self.clear_all_objects()
                     self.state = AgentState.CRASH_OBJECT
                     return
                 if self.controller.crash_world:
-                    self.clear_all_objects()
+                    # self.clear_all_objects()
                     self.state = AgentState.CRASH_WORLD
                     return
 

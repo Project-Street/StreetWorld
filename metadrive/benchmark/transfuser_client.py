@@ -372,7 +372,7 @@ def main():
                 step_idx=0,
             )
             gaussian_recorder.update_frame((obs_img, obs_info), _normalize_plan_traj(pred_wp))
-            acc, steer = traj2control(_normalize_plan_traj(pred_wp), obs_info, horizon=2.0, control_dt=0.1)
+            acc, steer = traj2control(_normalize_plan_traj(pred_wp), obs_info, horizon=2.0, control_dt=0.5)
             action = [steer, acc]
 
             print(f"Initial action: steer={steer:.4f}, throttle={action[1]:.4f}, brake={brake:.4f}")
@@ -397,7 +397,7 @@ def main():
                 )
                 
                 gaussian_recorder.update_frame((obs_img, obs_info), _normalize_plan_traj(pred_wp))
-                acc, steer = traj2control(_normalize_plan_traj(pred_wp), obs_info, horizon=2.0, control_dt=0.1)
+                acc, steer = traj2control(_normalize_plan_traj(pred_wp), obs_info, horizon=2.0, control_dt=0.5)
                 action = [steer, acc]
             
                 if step % 1 == 0:

@@ -78,7 +78,16 @@ def main():
         submission = end_to_end_driving_submission_pb2.E2EDChallengeSubmission(
             predictions=shard_predictions
         )
-        shard_path = output_root / f"part{shard_idx}"
+        submission.authors[:] = ['jrguo']  # Please modify accordingly.
+        submission.affiliation = 'Zhejiang University'  # Please modify accordingly.
+        submission.account_name = 'jrguo888@gmail.com'  # Please modify accordingly.
+        submission.unique_method_name = 'UniAD-RL'  # Please modify accordingly.
+        submission.method_link = 'none'  # Please modify accordingly.
+        submission.description = ''  # Please modify accordingly.
+        submission.uses_public_model_pretraining = True # Please modify accordingly.
+        submission.public_model_names.extend(['uniad']) # Please modify accordingly.
+        submission.num_model_parameters = "200k" # Please modify accordingly.
+        shard_path = output_root / f"mysubmission.binproto-{shard_idx:05d}-of-{args.num_shards:05d}"
         with shard_path.open("wb") as fp:
             fp.write(submission.SerializeToString())
         print(f"Wrote shard {shard_path} ({end - start} predictions)")

@@ -254,6 +254,13 @@ def main():
 
             # Run UniAD inference for first step
             print("Running initial UniAD inference...")
+            dt = 0.1
+            linear_velocity = np.asarray(obs_info["linear_velocity"], dtype=np.float32)
+            prev_pos = np.asarray(obs_info["ego_pos"], dtype=np.float32) - linear_velocity * dt
+            # prev_angle = float(obs_info["angular_velocity"]) * dt
+            client.uniad.module.prev_frame_info["prev_pos"] = prev_pos
+            # client.uniad.module.prev_frame_info["prev_angle"] = prev_angle
+            print(client.uniad.module.prev_frame_info['prev_pos'], obs_info["ego_pos"])
             plan_traj = client.run_uniad_inference(obs_img, obs_info, reset_info)
             acc, steer = traj2control(plan_traj, obs_info)
             action = [steer, acc]

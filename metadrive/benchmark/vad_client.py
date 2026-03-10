@@ -193,7 +193,7 @@ class VADClient(GrpcClient):
         # self.cameras = {'camera_0', 'camera_1', 'camera_2', 'camera_6', 'camera_5', 'camera_7'}
 
         # self.cameras = {'camera_0', 'camera_1', 'camera_2', 'camera_3', 'camera_4', 'camera_5'}
-        self.cameras = {'camera_2', 'camera_0', 'camera_1', 'camera_5', 'camera_4', 'camera_3'}
+        self.cameras = {'camera_0', 'camera_1', 'camera_2', 'camera_3', 'camera_4', 'camera_5'}
         # self.cameras = {'FRONT', 'FRONT_LEFT', 'FRONT_RIGHT', 'BACK', 'BACK_LEFT', 'BACK_RIGHT'}
 
         # Record current scene name
@@ -241,11 +241,13 @@ class VADClient(GrpcClient):
 
     def _prepare_vad_input(self, obs_img: Dict, obs_info: Dict, step_info: Dict) -> Dict:
         """Convert observation to VAD input format."""
-        from rl_framework.uniad.dataparser import parse_raw
+        # from rl_framework.uniad.dataparser import parse_raw
+        from rl_framework.vad.dataparser import parse_vad_obs, get_vad_img_norm_cfg
         print(obs_img.keys())
         obs_info['relative_timestamp'] = step_info['relative_timestamp']
         obs_info['scene_token'] = step_info['scene_name']
         raw_data = parse_raw(obs_img, obs_info, self.cameras, self.img_norm_cfg, [int(1600*0.8), int(900*0.8)])
+        # raw_data = parse_vad_obs(obs_img, obs_info, self.cameras, get_vad_img_norm_cfg())
         # Store raw images for reference
         self._raw_images = raw_data.get('raw_imgs', {})
         # Remove raw_imgs from data to pass to model
@@ -266,7 +268,7 @@ class VADClient(GrpcClient):
                 self.image_stacks[cam_name][-1] = frame[0]
 
 
-def traj2control(plan_traj: np.ndarray, obs_info: Dict, horizon, control_dt) -> Tuple[float, float]:
+def traj2control(plan_traj: np.ndarray, obs_info: Dict, horizon=3.0, control_dt=0.1) -> Tuple[float, float]:
     """
     Convert planned trajectory to control actions.
 
@@ -379,7 +381,7 @@ def main():
             # Run VAD inference for first step
             print("Running initial VAD inference...")
             plan_traj = client.run_vad_inference(obs_img, obs_info, reset_info)
-            acc, steer = traj2control(plan_traj, obs_info, horizon=3.0, control_dt=0.1)
+            acc, steer = traj2control(plan_traj, obs_info)
             action = [steer, acc]
             print(f"Initial action: steer={steer:.4f}, acc={acc:.4f}")
 
@@ -402,7 +404,7 @@ def main():
                 # Run VAD inference
                 plan_traj = client.run_vad_inference(obs_img, obs_info, info)
                 gaussian_recorder.update_frame((obs_img, obs_info), plan_traj)
-                acc, steer = traj2control(plan_traj, obs_info, horizon=3.0, control_dt=0.1)
+                acc, steer = traj2control(plan_traj, obs_info)
                 action = [steer, acc]
 
                 if step % 1 == 0:

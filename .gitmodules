@@ -13,3 +13,6 @@
 [submodule "DiffusionDrive"]
 	path = DiffusionDrive
 	url = https://github.com/hustvl/DiffusionDrive.git
+[submodule "navsim"]
+	path = navsim
+	url = https://github.com/autonomousvision/navsim.git
