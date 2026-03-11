@@ -156,7 +156,8 @@ def traj2control(plan_traj: np.ndarray, obs_info: Dict) -> Tuple[float, float]:
     Returns:
         (steer, accel) tuple
     """
-    from rl_framework.common.trajectory import traj2control as _traj2control
+    # from rl_framework.common.trajectory import traj2control as _traj2control
+    from rl_framework.uniad.traj_parser import traj2control as _traj2control
     return _traj2control(plan_traj, obs_info)
 
 def print_info(obs_info):
@@ -240,7 +241,10 @@ def main():
             try:
                 # Reset environment
                 print("Resetting environment...")
-                obs, reset_info = client.reset(transforms_json_path=args.transforms)
+                if episode_index == 0:
+                    obs, reset_info = client.reset(transforms_json_path="full_reset,sequential")
+                else:
+                    obs, reset_info = client.reset(transforms_json_path=args.transforms)
             except grpc.RpcError as exc:
                 if exc.code() == grpc.StatusCode.OUT_OF_RANGE:
                     print("All scenarios exhausted, stopping.")
@@ -260,7 +264,6 @@ def main():
             # prev_angle = float(obs_info["angular_velocity"]) * dt
             client.uniad.module.prev_frame_info["prev_pos"] = prev_pos
             # client.uniad.module.prev_frame_info["prev_angle"] = prev_angle
-            print(client.uniad.module.prev_frame_info['prev_pos'], obs_info["ego_pos"])
             plan_traj = client.run_uniad_inference(obs_img, obs_info, reset_info)
             acc, steer = traj2control(plan_traj, obs_info)
             action = [steer, acc]
@@ -280,7 +283,7 @@ def main():
                 print_step_info(info)
                 # Run UniAD inference
                 plan_traj = client.run_uniad_inference(obs_img, obs_info, info)
-                gaussian_recorder.update_frame((obs_img, obs_info), plan_traj)
+                # gaussian_recorder.update_frame((obs_img, obs_info), plan_traj)
                 acc, steer = traj2control(plan_traj, obs_info)
                 action = [steer, acc]
 
@@ -297,7 +300,7 @@ def main():
 
         print(f"Total reward: {total_reward:.2f}")
         print(f"Final metrics: {metrics_recorder.summary()}")
-        gaussian_recorder.save_video()
+        # gaussian_recorder.save_video()
         
     finally:
         client.close()

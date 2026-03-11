@@ -18,8 +18,7 @@ class NavigationObservation(BaseObservation, Randomizable):
         self.early_signal_distance = float(config.get("early_signal_distance", 10.0))  # meters
         # New radius-based threshold using triangle inradius (meters). Smaller -> sharper turn.
         # You may tune this based on map scale; ~20m is a moderate default.
-        self.turn_inradius_threshold = float(config.get("turn_radius_threshold", 40.0))
-
+        self.turn_inradius_threshold = float(config.get("turn_radius_threshold", 15.0))
         self.controller = None
         self.trajdata_map = None
         self.init_state = None

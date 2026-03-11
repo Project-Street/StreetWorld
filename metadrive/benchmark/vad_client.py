@@ -234,16 +234,16 @@ class VADClient(GrpcClient):
                 **raw_data
             )
             # 0: right, 1: left, 2: straight
-            print(results[0]['pts_bbox']['ego_fut_preds'])
+            # print(results[0]['pts_bbox']['ego_fut_preds'])
             plan_traj = results[0]['pts_bbox']['ego_fut_preds'][0, raw_data['command'][0][0]] # [6 (ts), 2]
             plan_traj = plan_traj.detach().cpu().numpy()
         return plan_traj
 
     def _prepare_vad_input(self, obs_img: Dict, obs_info: Dict, step_info: Dict) -> Dict:
         """Convert observation to VAD input format."""
-        # from rl_framework.uniad.dataparser import parse_raw
+        from rl_framework.uniad.dataparser import parse_raw
         from rl_framework.vad.dataparser import parse_vad_obs, get_vad_img_norm_cfg
-        print(obs_img.keys())
+        # print(obs_img.keys())
         obs_info['relative_timestamp'] = step_info['relative_timestamp']
         obs_info['scene_token'] = step_info['scene_name']
         raw_data = parse_raw(obs_img, obs_info, self.cameras, self.img_norm_cfg, [int(1600*0.8), int(900*0.8)])
@@ -279,8 +279,8 @@ def traj2control(plan_traj: np.ndarray, obs_info: Dict, horizon=3.0, control_dt=
     Returns:
         (steer, accel) tuple
     """
-    # from rl_framework.uniad.traj_parser import traj2control as _traj2control
-    from rl_framework.common.trajectory import traj2control as _traj2control
+    from rl_framework.uniad.traj_parser import traj2control as _traj2control
+    # from rl_framework.common.trajectory import traj2control as _traj2control
     # return _traj2control(plan_traj, obs_info, horizon, control_dt)
     return _traj2control(plan_traj, obs_info)
 
@@ -340,8 +340,8 @@ def main():
     # with open(args.vad_config, 'r') as f:
     #     vad_config = json.load(f)
     vad_config = {
-        'config_path': "/nas2/home/jrguo/CarCrash/submodules/StreetWorld/VAD/projects/configs/VAD/VAD_base_e2e.py",
-        'checkpoint_path': "/nas2/home/jrguo/CarCrash/submodules/StreetWorld/VAD/ckpts/VAD_base.pth",
+        'config_path': str(Path(__file__).resolve().parents[2] / "VAD/projects/configs/VAD/VAD_base_e2e.py"),
+        'checkpoint_path': str(Path(__file__).resolve().parents[2] / "VAD/ckpts/VAD_base.pth"),
         'device': 'cuda:0'
     }
 
@@ -365,7 +365,10 @@ def main():
             try:
                 # Reset environment
                 print("Resetting environment...")
-                obs, reset_info = client.reset(transforms_json_path=args.transforms)
+                if episode_index == 0:
+                    obs, reset_info = client.reset(transforms_json_path="full_reset,sequential")
+                else:
+                    obs, reset_info = client.reset(transforms_json_path=args.transforms)
             except grpc.RpcError as exc:
                 if exc.code() == grpc.StatusCode.OUT_OF_RANGE:
                     print("All scenarios exhausted, stopping.")
@@ -403,7 +406,7 @@ def main():
 
                 # Run VAD inference
                 plan_traj = client.run_vad_inference(obs_img, obs_info, info)
-                gaussian_recorder.update_frame((obs_img, obs_info), plan_traj)
+                # gaussian_recorder.update_frame((obs_img, obs_info), plan_traj)
                 acc, steer = traj2control(plan_traj, obs_info)
                 action = [steer, acc]
 
@@ -420,7 +423,7 @@ def main():
 
         print(f"Total reward: {total_reward:.2f}")
         print(f"Final metrics: {metrics_recorder.summary()}")
-        gaussian_recorder.save_video()
+        # gaussian_recorder.save_video()
         
     finally:
         client.close()

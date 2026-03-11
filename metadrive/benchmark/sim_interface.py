@@ -298,7 +298,11 @@ class SharpVideoSimulatorInterface:
     def _load_ego_pose(self, c2w_path):
         """Load ego poses from a given path."""
         LOGGER.info("Loading ego poses from %s", c2w_path)
-        c2w_data = np.load(c2w_path, allow_pickle=True).item()
+        if c2w_path.endswith('.json'):
+            with open(c2w_path, 'r') as f:
+                c2w_data = json.load(f)
+        else:
+            c2w_data = np.load(c2w_path, allow_pickle=True).item()
         
         num_frames = len(c2w_data)
         timestamp_interval = 100_000 # 100_000 microseconds interval

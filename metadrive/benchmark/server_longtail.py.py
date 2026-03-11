@@ -72,9 +72,15 @@ class StreetStudioServicer(service_pb2_grpc.EnvServiceServicer):
             ResetResponse with initial observation and reset info.
         """
         with self._lock:
+            full_reset = "full_reset" in request.transforms_json_path
+            sequential = "sequential" in request.transforms_json_path
+            if full_reset:
+                self._current_scene = None
+                self.sequential_scenes = sequential
+                
             # Update config with request parameters only if provided
             if request.transforms_json_path:
-                self.config["transforms_json_path"] = request.transforms_json_path
+                self.config["transforms_json_path"] = ""
             if request.render_server_url:
                 self.config["render_server_url"] = request.render_server_url
 

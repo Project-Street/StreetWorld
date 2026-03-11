@@ -354,7 +354,10 @@ def main():
         total_reward = 0.0
         while True:
             try:
-                obs, reset_info = client.reset(transforms_json_path=args.transforms)
+                if episode_index == 0:
+                    obs, reset_info = client.reset(transforms_json_path="full_reset,sequential")
+                else:
+                    obs, reset_info = client.reset(transforms_json_path=args.transforms)
             except grpc.RpcError as exc:
                 if exc.code() == grpc.StatusCode.OUT_OF_RANGE:
                     print("All scenarios exhausted, stopping.")
@@ -396,7 +399,7 @@ def main():
                     step_idx=step,
                 )
                 
-                gaussian_recorder.update_frame((obs_img, obs_info), _normalize_plan_traj(pred_wp))
+                # gaussian_recorder.update_frame((obs_img, obs_info), _normalize_plan_traj(pred_wp))
                 acc, steer = traj2control(_normalize_plan_traj(pred_wp), obs_info, horizon=2.0, control_dt=0.5)
                 action = [steer, acc]
             
@@ -413,7 +416,7 @@ def main():
 
         print(f"Total reward: {total_reward:.2f}")
         print(f"Final metrics: {metrics_recorder.summary()}")
-        gaussian_recorder.save_video()
+        # gaussian_recorder.save_video()
     finally:
         client.close()
     return 0

@@ -100,8 +100,11 @@ def _pad_image(image: np.ndarray, left: int = 0, right: int = 0, top: int = 0, b
 
 
 def _command_one_hot(command: int) -> np.ndarray:
+    # Ours: right, left, straight
+    # NAVSIM: left, straight, right
+    command_mapping = {0:2, 1:0, 2:1, 3:3}
     out = np.zeros(4, dtype=np.float32)
-    idx = int(command)
+    idx = int(command_mapping[command])
     if idx < 0 or idx > 2:
         idx = 3
     out[idx] = 1.0
@@ -301,7 +304,7 @@ def main():
     parser.add_argument("--debug-dir", type=str, default="")
     parser.add_argument("--gaussian-video", type=str, default="./driving_diffusiondrive.mp4")
     parser.add_argument("--horizon", type=float, default=4.0)
-    parser.add_argument("--control-dt", type=float, default=0.5)
+    parser.add_argument("--control-dt", type=float, default=0.1)
     args = parser.parse_args()
 
     cameras = [c.strip() for c in args.cameras.split(",") if c.strip()]
@@ -330,7 +333,10 @@ def main():
         total_reward = 0.0
         while True:
             try:
-                obs, _reset_info = client.reset(transforms_json_path=args.transforms)
+                if episode_index == 0:
+                    obs, reset_info = client.reset(transforms_json_path="full_reset,sequential")
+                else:
+                    obs, reset_info = client.reset(transforms_json_path=args.transforms)
             except grpc.RpcError as exc:
                 if exc.code() == grpc.StatusCode.OUT_OF_RANGE:
                     print("All scenarios exhausted, stopping.")
@@ -353,7 +359,7 @@ def main():
             action = [steer, acc]
 
             print(f"Initial action: steer={steer:.4f}, accel={acc:.4f}")
-
+                
             reward_sum = 0.0
             last_info = None
             for step in range(1, args.steps + 1):
@@ -373,7 +379,7 @@ def main():
                     step_idx=step,
                 )
                 plan_traj_lidar = _normalize_plan_traj(plan_traj)
-                gaussian_recorder.update_frame((obs_img, obs_info), plan_traj_lidar)
+                # gaussian_recorder.update_frame((obs_img, obs_info), plan_traj_lidar)
                 acc, steer = traj2control(plan_traj_lidar, obs_info, horizon=args.horizon, control_dt=args.control_dt)
                 action = [steer, acc]
 
@@ -390,7 +396,7 @@ def main():
 
         print(f"Total reward: {total_reward:.2f}")
         print(f"Final metrics: {metrics_recorder.summary()}")
-        gaussian_recorder.save_video()
+        # gaussian_recorder.save_video()
     finally:
         client.close()
     return 0
