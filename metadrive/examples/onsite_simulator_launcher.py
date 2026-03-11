@@ -125,8 +125,13 @@ def get_prepare(middleware, env):
     return result
 
 
+def _extract_image_sizes_from_actor_config(env_config):
+    cameras = env_config["actor_config"]["observer_config"]["gaussian"]["cameras"]
+    return {name: (cam["H"], cam["W"]) for name, cam in cameras.items()}
 
-def main_loop(env : OnSiteScenarioEnv, middleware: OnSiteSwitch):
+
+
+def main_loop(env : OnSiteScenarioEnv, middleware: OnSiteSwitch, save_debug_image=False):
     """
     Main communication loop with OnSite server.
 
@@ -142,8 +147,13 @@ def main_loop(env : OnSiteScenarioEnv, middleware: OnSiteSwitch):
     global recv_prepare, start_test
 
     logger.info("Starting main loop")
+    last_loop_time = time.perf_counter()
 
     while True:
+        now = time.perf_counter()
+        loop_ms = (now - last_loop_time) * 1000.0
+        last_loop_time = now
+        logger.debug(f"=> => => => Loop => => => => ({loop_ms:.3f} ms)")
         # Phase 1: Process Notify messages (at beginning of each iteration)
         process_notify(middleware, env)
 
@@ -190,12 +200,12 @@ def main_loop(env : OnSiteScenarioEnv, middleware: OnSiteSwitch):
         # 3. Send images
         if 'gaussian' in obs:
             timestamp_sec = current_timestamp / 1e6
-            images_to_send = []
+            images_to_send = {}
             for camera_name, images in obs['gaussian'].items():
                 if len(images) > 0:
                     # Get the latest image
-                    images_to_send.append(images[-1])
-                    if logger.isEnabledFor(logging.DEBUG) and "head_front" in camera_name.lower():
+                    images_to_send[camera_name] = images[-1]
+                    if save_debug_image and "head_front" in camera_name.lower():
                         _save_front_image(images[-1], current_timestamp)
             if images_to_send:
                 middleware.send_images(images_to_send, timestamp_sec)
@@ -220,46 +230,39 @@ def main():
                         help='gRPC server host for NuRec renderer')
     parser.add_argument('--grpc-port', type=int, default=9001,
                         help='gRPC server port for NuRec renderer')
+    parser.add_argument('--save-debug-image', action='store_true',
+                        help='Save debug images regardless of log level')
     parser.add_argument('-l', '--log-level', type=str, default='INFO',
                         help='Logging level, e.g. DEBUG/INFO/WARNING/ERROR')
     args = parser.parse_args()
     logging.getLogger().setLevel(getattr(logging, args.log_level.upper(), logging.INFO))
 
-    # Initialize OnSite middleware
-    logger.info("Initializing OnSite middleware...")
-    try:
-        middleware = OnSiteSwitch(
-            onsite_dir=args.onsite_dir,
-            terminal_type=TERMINAL_TYPE.SIMULATOR,
-        )
-        middleware.start_onsite_daemon()
-        logger.info("OnSite middleware initialized successfully")
-    except Exception:
-        logger.exception("Failed to initialize OnSite middleware")
-        sys.exit(1)
-
     # Initialize environment
     logger.info("Initializing MetaDrive environment...")
-    try:
-        # Create model and environment
-        model = SimulatorInterface(
-            grpc_host=args.grpc_host,
-            grpc_port=args.grpc_port,
-            camera_model_type="pinhole",
-        )
-        env_config = ONSITE_DEFAULT_CONFIG
-        env_config["scene_config_directory"] = args.scene_config_directory
-        env = OnSiteScenarioEnv(model, env_config)
-        logger.info("MetaDrive environment initialized successfully")
-    except Exception:
-        logger.exception("Failed to initialize MetaDrive environment")
-        sys.exit(1)
+    model = SimulatorInterface(
+        grpc_host=args.grpc_host,
+        grpc_port=args.grpc_port,
+        camera_model_type="pinhole",
+    )
+    env_config = ONSITE_DEFAULT_CONFIG
+    env_config["scene_config_directory"] = args.scene_config_directory
+    env = OnSiteScenarioEnv(model, env_config)
+    logger.info("MetaDrive environment initialized successfully")
+
+    # Initialize OnSite middleware
+    logger.info("Initializing OnSite middleware...")
+    image_sizes = _extract_image_sizes_from_actor_config(env_config)
+    middleware = OnSiteSwitch(
+        onsite_dir=args.onsite_dir,
+        terminal_type=TERMINAL_TYPE.SIMULATOR,
+        image_sizes=image_sizes,
+    )
+    middleware.start_onsite_daemon()
+    logger.info("OnSite middleware initialized successfully")
 
     # Run main loop
-    try:
-        main_loop(env, middleware)
-    finally:
-        middleware.close()
+    main_loop(env, middleware, save_debug_image=args.save_debug_image)
+    middleware.close()
 
 
 def _save_front_image(image, timestamp_us):

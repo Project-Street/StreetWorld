@@ -67,8 +67,11 @@ class NurecGrpcClient:
         request = render_pb2.RenderRequest(camera=render_pb2.CameraParams(**camera_kwargs))
         return self._stub.Render(request, timeout=self._timeout_s)
 
-    def set_traffic_pose(self, object_id: str, pose_4x4: list[float]) -> render_pb2.TrafficPoseResponse:
-        request = render_pb2.TrafficPoseRequest(object_id=str(object_id), pose_4x4=pose_4x4)
+    def set_traffic_pose(self, tracks_id: list[str], poses_4x4: list[float]) -> render_pb2.TrafficPoseResponse:
+        request = render_pb2.TrafficPoseRequest(
+            tracks_id=[str(track_id) for track_id in tracks_id],
+            poses_4x4=poses_4x4,
+        )
         return self._stub.SetTrafficPose(request, timeout=self._timeout_s)
 
     def load_model(self, ckpt_path: str) -> render_pb2.LoadModelResponse:

@@ -7,6 +7,8 @@ Client actively connects to remote gRPC server, sends Action, and receives Image
 import argparse
 import logging
 import platform
+import time
+from pathlib import Path
 from typing import Optional
 
 import numpy as np
@@ -20,9 +22,11 @@ import glfw
 import OpenGL.GL as gl
 
 from metadrive.viewer.manual_controller import KeyboardController
+from metadrive.utils.logger import get_log_timestamp
 from metadrive.utils.remote_viewer_proto import remote_viewer_pb2, remote_viewer_pb2_grpc
 
 logger = logging.getLogger("onsite_viewer_client")
+_IMAGE_RECEIVED_DIR = None
 
 
 class OnSiteViewer:
@@ -41,22 +45,30 @@ class OnSiteViewer:
             raise RuntimeError("Could not initialize OpenGL context")
 
         if platform.system() == "Darwin":
+            self.glsl_version = "#version 150"
             glfw.window_hint(glfw.CONTEXT_VERSION_MAJOR, 3)
             glfw.window_hint(glfw.CONTEXT_VERSION_MINOR, 2)
-            glfw.window_hint(glfw.OPENGL_PROFILE, glfw.OPENGL_CORE_PROFILE)
+            glfw.window_hint(glfw.OPENGL_PROFILE, glfw.OPENGL_CORE_PROFILE)  # // 3.2+ only
             glfw.window_hint(glfw.OPENGL_FORWARD_COMPAT, 1)
-            glfw.window_hint(glfw.COCOA_RETINA_FRAMEBUFFER, 0)
+            glfw.window_hint(glfw.COCOA_RETINA_FRAMEBUFFER, 0)  # disable osx scaling
         else:
+            # GL 3.0 + GLSL 130
+            self.glsl_version = "#version 130" # TODO: why? why not 330?
             glfw.window_hint(glfw.CONTEXT_VERSION_MAJOR, 3)
             glfw.window_hint(glfw.CONTEXT_VERSION_MINOR, 0)
+            # glfw.window_hint(glfw.OPENGL_PROFILE, glfw.OPENGL_CORE_PROFILE) # // 3.2+ only
+            # glfw.window_hint(glfw.OPENGL_FORWARD_COMPAT, GL_TRUE)
 
         window = glfw.create_window(self.width, self.height, self.window_title, None, None)
         if not window:
             glfw.terminate()
             raise RuntimeError("Could not initialize window")
 
+
+        # Setting up the window
         glfw.make_context_current(window)
-        glfw.swap_interval(1)
+        glfw.swap_interval(False)  # disable vsync
+        glfw.set_input_mode(window, glfw.CURSOR, glfw.CURSOR_DISABLED)
         self.window = window
 
     def _init_opengl(self) -> None:
@@ -66,8 +78,10 @@ class OnSiteViewer:
     def _init_texture(self) -> None:
         self.texture_id = gl.glGenTextures(1)
         gl.glBindTexture(gl.GL_TEXTURE_2D, self.texture_id)
-        gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MIN_FILTER, gl.GL_LINEAR)
-        gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MAG_FILTER, gl.GL_LINEAR)
+        gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MIN_FILTER, gl.GL_NEAREST)
+        gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MAG_FILTER, gl.GL_NEAREST)
+        # RGB image rows are 3-byte aligned; force unpack alignment to 1 to avoid stripe artifacts.
+        gl.glPixelStorei(gl.GL_UNPACK_ALIGNMENT, 1)
         gl.glBindTexture(gl.GL_TEXTURE_2D, 0)
 
     def is_running(self) -> bool:
@@ -88,8 +102,17 @@ class OnSiteViewer:
     def _draw_image(self, img: np.ndarray) -> None:
         if img.dtype != np.uint8:
             img = img.astype(np.uint8)
+        if not img.flags["C_CONTIGUOUS"]:
+            img = np.ascontiguousarray(img)
 
         height, width = img.shape[:2]
+        fb_w, fb_h = glfw.get_framebuffer_size(self.window)
+        if fb_w <= 0 or fb_h <= 0:
+            return
+
+        # Draw image at native pixel size (no full-screen stretch), centered in window.
+        half_w_ndc = float(width) / float(fb_w)
+        half_h_ndc = float(height) / float(fb_h)
 
         gl.glBindTexture(gl.GL_TEXTURE_2D, self.texture_id)
         gl.glTexImage2D(
@@ -107,13 +130,13 @@ class OnSiteViewer:
         gl.glEnable(gl.GL_TEXTURE_2D)
         gl.glBegin(gl.GL_QUADS)
         gl.glTexCoord2f(0, 1)
-        gl.glVertex2f(-1, -1)
+        gl.glVertex2f(-half_w_ndc, -half_h_ndc)
         gl.glTexCoord2f(1, 1)
-        gl.glVertex2f(1, -1)
+        gl.glVertex2f(half_w_ndc, -half_h_ndc)
         gl.glTexCoord2f(1, 0)
-        gl.glVertex2f(1, 1)
+        gl.glVertex2f(half_w_ndc, half_h_ndc)
         gl.glTexCoord2f(0, 0)
-        gl.glVertex2f(-1, 1)
+        gl.glVertex2f(-half_w_ndc, half_h_ndc)
         gl.glEnd()
         gl.glDisable(gl.GL_TEXTURE_2D)
 
@@ -191,16 +214,36 @@ class OnsiteViewerGrpcClient:
             self._stub = None
 
 
+def _save_received_image(image: np.ndarray) -> None:
+    global _IMAGE_RECEIVED_DIR
+    if _IMAGE_RECEIVED_DIR is None:
+        base_ts = get_log_timestamp()
+        _IMAGE_RECEIVED_DIR = Path("logs") / f"image_received_{base_ts}"
+        _IMAGE_RECEIVED_DIR.mkdir(parents=True, exist_ok=True)
+    out_path = _IMAGE_RECEIVED_DIR / f"{int(time.time() * 1e6)}.png"
+    try:
+        import imageio.v2 as imageio
+        imageio.imwrite(out_path, image)
+    except Exception:
+        try:
+            from PIL import Image
+            Image.fromarray(image).save(out_path)
+        except Exception as exc:
+            logger.debug("Failed to save received image: %s", exc)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="OnSite remote viewer client")
     parser.add_argument("--grpc_host", type=str, default="127.0.0.1", help="viewer server host")
     parser.add_argument("--grpc_port", type=int, default=50051, help="viewer server port")
     parser.add_argument("--width", type=int, default=1280)
     parser.add_argument("--height", type=int, default=720)
+    parser.add_argument("--save-debug-image", action="store_true",
+                        help="Save debug images regardless of log level")
     parser.add_argument("--log_level", type=str, default="INFO")
     args = parser.parse_args()
 
-    logging.basicConfig(level=getattr(logging, args.log_level.upper(), logging.INFO))
+    logging.basicConfig(level=getattr(logging, args.log_level.upper(), logging.INFO), force=True)
 
     max_bytes = 2048 * 2048 * 3
     logger.info("Using gRPC max message bytes: %d", max_bytes)
@@ -223,6 +266,8 @@ def main() -> None:
                 logger.warning("Image decode error: %s", exc)
                 continue
             if img is not None:
+                if args.save_debug_image:
+                    _save_received_image(img)
                 last_image = img
     except KeyboardInterrupt:
         logger.info("Interrupted by user")

@@ -41,23 +41,23 @@ BASE_DEFAULT_CONFIG = dict(
                     'head_front': {
                         'offset': [1.65, 0, 1.3], # in ego frame (+x front)
                         'hpr': [0, 0, 0], # orientation
-                        'H': 110,
-                        'W': 190,
-                        'focal': 400, # in pixel
+                        'H': 900,
+                        'W': 1600,
+                        'focal': 2500, # in pixel
                     },
                     'left_front': {
                         'offset': [1.45, 0.8, 1.3], # in ego frame (+x front)
                         'hpr': [60, 0, 0], # orientation
-                        'H': 110,
-                        'W': 190,
-                        'focal': 400, # in pixel
+                        'H': 900,
+                        'W': 1600,
+                        'focal': 2500, # in pixel
                     },
                     'right_front': {
                         'offset': [1.45, -0.8, 1.3], # in ego frame (+x front)
                         'hpr': [60, 0, 0], # orientation
-                        'H': 110,
-                        'W': 190,
-                        'focal': 400, # in pixel
+                        'H': 900,
+                        'W': 1600,
+                        'focal': 2500, # in pixel
                     }
                 }
             ),

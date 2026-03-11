@@ -54,7 +54,10 @@ class OnSiteScenarioEnv(ScenarioEnv):
 
             obj_pose = mgr.get_pose()
             self._surrounding_pre_collection[name] = mgr.get_base_state(obj_pose)
-            new_object_poses[name] = torch.from_numpy(obj_pose)
+            
+            if name != "actor":
+                new_object_poses[name] = torch.from_numpy(obj_pose)
+
         self.model.update_scene(self.step_manager.current_timestamp, new_object_poses)
 
     def update_agent_from_pub_role_single(self, agent_name, role):

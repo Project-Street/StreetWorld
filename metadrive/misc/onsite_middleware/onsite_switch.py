@@ -10,9 +10,12 @@ import logging
 import sys
 import time
 import subprocess
+import ctypes as C
 from enum import Enum
 from pathlib import Path
+import cv2
 import numpy as np
+import PyNvVideoCodec as nvc
 import torch
 import yaml
 from google.protobuf.json_format import MessageToDict
@@ -60,7 +63,14 @@ class OnSiteSwitch:
     _ANSI_PURPLE = "\033[95m"
     _ANSI_RESET = "\033[0m"
 
-    def __init__(self, onsite_dir, recv_none_sleep=0.02, terminal_type=TERMINAL_TYPE.SIMULATOR):
+    def __init__(
+        self,
+        onsite_dir,
+        recv_none_sleep=0.02,
+        terminal_type=TERMINAL_TYPE.SIMULATOR,
+        image_sizes=None,
+        n_warm_up=10,
+    ):
         """
         Initialize OnSite middleware.
 
@@ -68,6 +78,8 @@ class OnSiteSwitch:
             onsite_dir: OnSite workspace directory, containing config/common.yaml and daemon/start.sh
             recv_none_sleep: Sleep time (seconds) when recv returns None/invalid
             terminal_type: OnSite terminal type enum for channel client_name
+            image_sizes: Dict of camera_name -> (H, W) image sizes for warm-up
+            n_warm_up: Number of random warm-up image batches to send (timestamp=-1)
         """
         self.onsite_dir = Path(onsite_dir).expanduser().resolve()
         self._daemon_proc = None
@@ -85,22 +97,23 @@ class OnSiteSwitch:
         # Channel references
         self.channels = None
         self.channel_map = {}
-        self.prepare_channel = None
-        self.notify_channel = None
-        self.role_channel = None
-        self.cmd_channel = None
-        self.session_channel = None
-        self.image_channel = None
         self.actor_id = None
         # Sequence counters
         self.image_seq = 0
         self._seq_by_type = {}
+        self._camera_encoders = {}
+        self._camera_decoders = {}
+        self._image_sizes = image_sizes or {}
+        self._n_warm_up = max(0, int(n_warm_up))
 
         # Send only this logger to a dedicated file.
         self._init_logger()
 
         # Initialize channels
+
         self.initialize_channels()
+        if self.terminal_type == TERMINAL_TYPE.SIMULATOR:
+            self._setup_camera_encoders_and_warmup()
 
     @staticmethod
     def _load_multicast_config(onsite_dir: Path):
@@ -249,6 +262,35 @@ class OnSiteSwitch:
         elapsed_ms = (time.perf_counter() - t0) * 1000.0
         return ret, elapsed_ms
 
+    def _setup_camera_encoders_and_warmup(self):
+        if not self._image_sizes:
+            return
+        enc_config = {
+            "preset": "P3",
+            "tuning_info": "high_quality",
+            "rc": "vbr",
+            "fps": 10,
+            "bitrate": 5000000,
+            "maxbitrate": 5000000,
+            "codec": "h264",
+        }
+        for name, (height, width) in self._image_sizes.items():
+            self._camera_encoders[name] = nvc.CreateEncoder(width, height, "NV12", True, **enc_config)
+        if self._n_warm_up <= 0:
+            return
+        rng = np.random.default_rng()
+        logger.info(
+            "Warming up image encoder with %d batches, sizes=%s",
+            self._n_warm_up,
+            self._image_sizes,
+        )
+        for _ in range(self._n_warm_up):
+            warm_images = {
+                name: rng.integers(0, 256, size=(height, width, 3), dtype=np.uint8)
+                for name, (height, width) in self._image_sizes.items()
+            }
+            self.send_images(warm_images, timestamp=-1)
+
     def _next_seq(self, message_type) -> int:
         seq = int(self._seq_by_type.get(message_type, 0))
         self._seq_by_type[message_type] = seq + 1
@@ -350,27 +392,23 @@ class OnSiteSwitch:
         )
 
         self.channels = libMulticastNetwork.ChannelPtrVector()
-        ret = libMulticastNetwork.create_channels(param, self.channels)
+        try:
+            ret = libMulticastNetwork.create_channels(param, self.channels)
 
-        if ret:
-            raise RuntimeError(f"Failed to create channels, ret: {ret}")
+            if ret:
+                raise RuntimeError(f"ret is not zero, {ret}.")
+        except Exception as e:
+            raise RuntimeError(f"Exception while creating channels: {e}") from e
 
-        # Build channel map
-        for c in self.channels:
+        # Build channel map.
+        # NOTE: Avoid iterating ChannelPtrVector directly. Some pybind11 bindings
+        # throw pybind11::stop_iteration without translating to Python, which
+        # aborts the process. Index-based access is safer here.
+        count = len(self.channels)
+        for i in range(count):
+            c = self.channels[i]
             logger.info(f"Created channel: {c.name()}, id: {c.id()}")
             self.channel_map[c.name()] = c
-
-        # Assign channel references
-        self.prepare_channel = self.channel_map['prepare']
-        self.notify_channel = self.channel_map['notify']
-        self.role_channel = self.channel_map['pubrole_encrypt']
-        self.cmd_channel = self.channel_map['vehiclecontrol']
-        self.session_channel = self.channel_map['sessioninfo']
-        self.image_channel = self.channel_map['camera']
-
-        # Initialize image decoder
-        if not libMulticastNetwork.InitImageDecoder():
-            raise RuntimeError("Failed to initialize image decoder")
 
         logger.info("OnSite middleware initialized successfully")
 
@@ -396,11 +434,7 @@ class OnSiteSwitch:
         Returns:
             tuple: (session_id, actor_id, brief_data, scene_name) if message received, None otherwise
         """
-        if self.prepare_channel is None:
-            time.sleep(self.recv_none_sleep)
-            return None
-
-        (ret, msg), get_ms = self._timed_get(self.prepare_channel.get)
+        (ret, msg), get_ms = self._timed_get(self.channel_map["prepare"].get)
         if msg is None or ret < 0:
             time.sleep(self.recv_none_sleep)
             return None
@@ -439,11 +473,7 @@ class OnSiteSwitch:
         Returns:
             Notify: Notify proto message if received, None otherwise
         """
-        if self.notify_channel is None:
-            time.sleep(self.recv_none_sleep)
-            return None
-
-        (ret, msg), get_ms = self._timed_get(self.notify_channel.get)
+        (ret, msg), get_ms = self._timed_get(self.channel_map["notify"].get)
         if msg is None or ret < 0:
             time.sleep(self.recv_none_sleep)
             return None
@@ -484,11 +514,7 @@ class OnSiteSwitch:
         Returns:
             PubRole: PubRole proto message if received, None otherwise
         """
-        if self.role_channel is None:
-            time.sleep(self.recv_none_sleep)
-            return None
-
-        (ret, msg), get_ms = self._timed_get(self.role_channel.get)
+        (ret, msg), get_ms = self._timed_get(self.channel_map["pubrole_encrypt"].get)
         if msg is None or ret < 0:
             time.sleep(self.recv_none_sleep)
             return None
@@ -512,11 +538,8 @@ class OnSiteSwitch:
         Returns:
             list: [steering, throttle_brake] if message received, None otherwise
         """
-        if self.cmd_channel is None:
-            time.sleep(self.recv_none_sleep)
-            return None
 
-        (ret, msg), get_ms = self._timed_get(self.cmd_channel.get)
+        (ret, msg), get_ms = self._timed_get(self.channel_map["vehiclecontrol"].get)
         if msg is None or ret < 0:
             time.sleep(self.recv_none_sleep)
             return None
@@ -546,11 +569,8 @@ class OnSiteSwitch:
         Returns:
             VehicleFeedback: VehicleFeedback proto message if received, None otherwise
         """
-        if self.cmd_channel is None:
-            time.sleep(self.recv_none_sleep)
-            return None
 
-        (ret, msg), get_ms = self._timed_get(self.cmd_channel.get)
+        (ret, msg), get_ms = self._timed_get(self.channel_map["vehiclecontrol"].get)
         if msg is None or ret < 0:
             time.sleep(self.recv_none_sleep)
             return None
@@ -576,11 +596,8 @@ class OnSiteSwitch:
         Returns:
             SessionInfo: SessionInfo proto message if received, None otherwise
         """
-        if self.session_channel is None:
-            time.sleep(self.recv_none_sleep)
-            return None
 
-        (ret, msg), get_ms = self._timed_get(self.session_channel.get)
+        (ret, msg), get_ms = self._timed_get(self.channel_map["sessioninfo"].get)
         if msg is None or ret < 0:
             time.sleep(self.recv_none_sleep)
             return None
@@ -599,63 +616,100 @@ class OnSiteSwitch:
         )
         return None
 
-    def recv_image_rgb(self):
+    def recv_image(self):
         """
-        Receive latest RGB image from OnSite camera channel.
+        Receive image batch from OnSite camera channel and decode to RGB.
 
         Returns:
-            np.ndarray: Latest image in (H, W, 3) RGB uint8, or None if unavailable
+            list: list[dict], each item contains:
+                - rgb: np.ndarray with shape (H, W, 3) in RGB uint8
+                - camera_timestamp: int
         """
-        if self.image_channel is None:
+        images, get_ms = self._timed_get(self.channel_map["camera"].get_image_simple)
+        if images is None or len(images) == 0:
             time.sleep(self.recv_none_sleep)
             return None
 
-        msg, get_ms = self._timed_get(self.image_channel.get_image_simple)
-        if len(msg) == 0:
-            time.sleep(self.recv_none_sleep)
-            return None
-
-        img = None
-        images_meta = []
-        for image in msg:
-            height = int(image.height)
-            width = int(image.width)
-            encoding = str(image.encoding).lower()
-            if encoding != "rgb8":
-                logger.warning("Drop image frame: unsupported OnSite image encoding %s, expected rgb8", image.encoding)
-                continue
-            arr = np.asarray(image.data, dtype=np.uint8).reshape(-1)
-            expected = height * width * 3
-            if arr.size != expected:
-                logger.warning(
-                    "Drop image frame: size mismatch got=%d expected=%d (w=%d h=%d c=3)",
-                    arr.size,
-                    expected,
-                    width,
-                    height,
+        decoded_images = []
+        for i, image in enumerate(images):
+            raw_timestamp_sec = float(image.timestamp_sec)
+            raw_measurement_time = float(image.measurement_time)
+            raw_camera_timestamp = int(image.camera_timestamp)
+            suspicious_camera_timestamp = raw_camera_timestamp > (2**63 - 1)
+            suspicious_negative_time = raw_timestamp_sec < 0 or raw_measurement_time < 0
+            if suspicious_camera_timestamp or suspicious_negative_time:
+                wrapped_signed_camera_timestamp = (
+                    raw_camera_timestamp - (2**64) if suspicious_camera_timestamp else raw_camera_timestamp
                 )
+                logger.warning(
+                    "Suspicious incoming image timing: index=%d "
+                    "timestamp_sec=%r measurement_time=%r camera_timestamp=%r "
+                    "camera_timestamp_as_signed=%r sequence_num=%r encoding=%r size=%dx%d",
+                    i,
+                    raw_timestamp_sec,
+                    raw_measurement_time,
+                    raw_camera_timestamp,
+                    wrapped_signed_camera_timestamp,
+                    int(image.sequence_num),
+                    str(image.encoding),
+                    int(image.width),
+                    int(image.height),
+                )
+            if image.measurement_time == -1:
+                logger.debug("Drop warm-up image: index=%d measurement_time=%s", i, image.measurement_time)
                 continue
-            img = arr.reshape(height, width, 3)
-            images_meta.append(
-                {
-                    "timestamp_sec": float(image.timestamp_sec),
-                    "camera_timestamp": int(image.camera_timestamp),
-                    "sequence_num": int(image.sequence_num),
-                    "measurement_time": float(image.measurement_time),
-                    "height": height,
-                    "width": width,
-                    "encoding": image.encoding,
-                }
-            )
+            if image.data is None or len(image.data) == 0:
+                logger.warning("Drop empty image payload: index=%d", i)
+                continue
+            # if str(image.encoding).lower() != "h264":
+            #     raise ValueError(f"Unsupported image encoding: {image.encoding}, expected h264")
+            packet = nvc.PacketData()
+            packet.bsl = len(image.data)
+            packet.bsl_data = image.data.__array_interface__["data"][0]
+
+            decoder = self._camera_decoders.get(i)
+            if decoder is None:
+                decoder = nvc.CreateDecoder(
+                    gpuid=0,
+                    codec=nvc.cudaVideoCodec.H264,
+                    usedevicememory=False,
+                )
+                self._camera_decoders[i] = decoder
+            raw_frames = decoder.Decode(packet)
+            if len(raw_frames) == 0:
+                logger.warning("Failed to decode image packet, empty raw frames: index=%d", i)
+                continue
+            for raw_frame in raw_frames:
+                luma_base_addr = raw_frame.GetPtrToPlane(0)
+                frame_data = np.ctypeslib.as_array(
+                    C.cast(luma_base_addr, C.POINTER(C.c_uint8)),
+                    shape=(raw_frame.framesize(),),
+                )
+                frame_nv12 = frame_data.reshape(int(image.height * 1.5), int(image.width))
+                frame_rgb = cv2.cvtColor(frame_nv12, cv2.COLOR_YUV2RGB_NV12)
+                decoded_images.append(
+                    {
+                        "rgb": frame_rgb,
+                        "camera_timestamp": int(image.camera_timestamp),
+                    }
+                )
+
+        if len(decoded_images) == 0:
+            time.sleep(self.recv_none_sleep)
+            return None
+
         self._log_message_debug(
             "recv",
             "image_batch",
-            {"image_count": len(images_meta), "images": images_meta},
+            {
+                "image_count": len(images),
+                "decoded_count": len(decoded_images),
+            },
             "raw",
             channel_op="get",
             channel_elapsed_ms=get_ms,
         )
-        return img
+        return decoded_images
 
     # ==================== Send Methods ====================
 
@@ -668,10 +722,6 @@ class OnSiteSwitch:
             actor_id: Actor ID
             result: Preparation result (default: True)
         """
-        if self.prepare_channel is None:
-            logger.warning("Prepare channel not available")
-            return
-
         msg = ActorPrepareResult()
         msg.session_id = session_id
         msg.actor_id = actor_id
@@ -679,7 +729,7 @@ class OnSiteSwitch:
         msg.reason = ""
         data = msg.SerializeToString()
         length = len(data)
-        ret, put_ms = self._timed_put(self.prepare_channel.put, MT_ACTOR_PREPARE_RESULT, length, data)
+        ret, put_ms = self._timed_put(self.channel_map["prepare"].put, MT_ACTOR_PREPARE_RESULT, length, data)
         self._log_message_debug(
             "send",
             MT_ACTOR_PREPARE_RESULT,
@@ -702,17 +752,13 @@ class OnSiteSwitch:
         Args:
             session_id: Current session ID
         """
-        if self.role_channel is None:
-            logger.warning("Role channel not available")
-            return
-
         msg = SubRole()
         msg.session_id = session_id
         # Other fields (role_types, role_ids, role_AOIs) are left empty
 
         data = msg.SerializeToString()
         length = len(data)
-        ret, put_ms = self._timed_put(self.role_channel.put, MT_SUBROLE, length, data)
+        ret, put_ms = self._timed_put(self.channel_map["pubrole_encrypt"].put, MT_SUBROLE, length, data)
         self._log_message_debug(
             "send", MT_SUBROLE, {**self._proto_to_dict(msg), "ret": ret}, "main", channel_op="put", channel_elapsed_ms=put_ms
         )
@@ -731,10 +777,6 @@ class OnSiteSwitch:
             last_received_pub_role: Last received PubRole message (for preserving fields)
             current_timestamp: Current simulation timestamp in microseconds
         """
-        if self.role_channel is None:
-            logger.warning("Role channel not available")
-            return
-
         role_states = self._extract_role_states_from_obs(obs)
 
         msg = PubRole()
@@ -752,10 +794,10 @@ class OnSiteSwitch:
 
         data = msg.SerializeToString()
         length = len(data)
-        ret, put_ms = self._timed_put(self.role_channel.put, MT_PUBROLE, length, data)
-        self._log_message_debug(
-            "send", MT_PUBROLE, {**self._proto_to_dict(msg), "ret": ret}, "main", channel_op="put", channel_elapsed_ms=put_ms
-        )
+        ret, put_ms = self._timed_put(self.channel_map["pubrole_encrypt"].put, MT_PUBROLE, length, data)
+        # self._log_message_debug(
+        #     "send", MT_PUBROLE, {**self._proto_to_dict(msg), "ret": ret}, "main", channel_op="put", channel_elapsed_ms=put_ms
+        # )
 
         if ret != 0:
             logger.error(f"Failed to send PubRole, ret: {ret}")
@@ -769,19 +811,12 @@ class OnSiteSwitch:
             current_timestamp: Current simulation timestamp in microseconds
             last_received_feedback: Last received VehicleFeedback (for preserving fields)
         """
-        if self.cmd_channel is None:
-            logger.warning("Command channel not available")
-            return
-
-        if "states" not in obs:
-            logger.warning("Observation missing states, skip VehicleFeedback.")
-            return
         vehicle_state = obs["states"]
         msg = self._vehicle_state_to_feedback(vehicle_state, current_timestamp, last_received_feedback)
 
         data = msg.SerializeToString()
         length = len(data)
-        ret, put_ms = self._timed_put(self.cmd_channel.put, VEHICLE_FEEDBACK, length, data)
+        ret, put_ms = self._timed_put(self.channel_map["vehiclecontrol"].put, VEHICLE_FEEDBACK, length, data)
         self._log_message_debug(
             "send",
             VEHICLE_FEEDBACK,
@@ -802,9 +837,6 @@ class OnSiteSwitch:
             steering: Normalized steering in [-1, 1]
             throttle_brake: Normalized throttle/brake in [-1, 1]
         """
-        if self.cmd_channel is None:
-            logger.warning("Command channel not available")
-            return
 
         steering = float(np.clip(float(steering), -1.0, 1.0))
         throttle_brake = float(np.clip(float(throttle_brake), -1.0, 1.0))
@@ -823,7 +855,7 @@ class OnSiteSwitch:
             cmd.brake_control.target_brake_pedal_position = -throttle_brake * 100.0
 
         data = cmd.SerializeToString()
-        ret, put_ms = self._timed_put(self.cmd_channel.put, VEHICLE_CONTROL, len(data), data)
+        ret, put_ms = self._timed_put(self.channel_map["vehiclecontrol"].put, VEHICLE_CONTROL, len(data), data)
         self._log_message_debug(
             "send",
             VEHICLE_CONTROL,
@@ -840,58 +872,78 @@ class OnSiteSwitch:
         Send multiple images to OnSite server.
 
         Args:
-            images: List of numpy arrays (H, W, 3) in RGB format
+            images: Dict of camera_name -> numpy array (H, W, 3) in RGB format
             timestamp: Timestamp in seconds
         """
-        if self.image_channel is None:
-            logger.warning("Image channel not available")
-            return
-
         if not images:
-            return
+            raise ValueError("images must be a non-empty dict")
 
-        for img in images:
-            if img is None or img.ndim != 3 or img.shape[2] != 3:
-                logger.warning(f"Skip invalid image shape: {None if img is None else img.shape}")
-                continue
-            py_images = []
+        py_images = []
+        for camera_name, img in images.items():
+            height, width = img.shape[:2]
+            encoder = self._camera_encoders[camera_name]
+
+            img_bgr = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+
+            img_i420 = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2YUV_I420)
+            y = img_i420[:height, :]
+            u = img_i420[height:height + height // 4, :].reshape(-1)
+            v = img_i420[height + height // 4:, :].reshape(-1)
+            uv = np.empty((u.size + v.size,), dtype=u.dtype)
+            uv[0::2] = u
+            uv[1::2] = v
+            img_nv12 = np.concatenate([y.ravel(), uv])
+            bitstream = encoder.Encode(img_nv12)
+            if bitstream is None or len(bitstream) == 0:
+                logger.warning(
+                    "Encoder returned empty bitstream, sending empty payload (height=%d, width=%d)",
+                    height,
+                    width,
+                )
+                payload = np.frombuffer(b"", dtype=np.uint8)
+            else:
+                payload = np.frombuffer(bitstream, dtype=np.uint8)
+
             py_img = libMulticastNetwork.PyImage()
-            py_img.timestamp_sec = timestamp
-            py_img.camera_timestamp = int(timestamp * 1e6)
+            py_img.timestamp_sec = float(timestamp)
+            if timestamp < 0:
+                py_img.camera_timestamp = 0
+            else:
+                py_img.camera_timestamp = int(timestamp * 1e6)
+            py_img.measurement_time = float(timestamp)
             py_img.sequence_num = self.image_seq
-            py_img.measurement_time = timestamp
-            py_img.height = img.shape[0]
-            py_img.width = img.shape[1]
-            py_img.encoding = "rgb8"
-            py_img.data = img.ravel()
+            py_img.height = height
+            py_img.width = width
+            py_img.encoding = "h264"
+            py_img.data = payload
             py_images.append(py_img)
             self.image_seq += 1
 
-            ret, put_ms = self._timed_put(self.image_channel.put_image_simple, py_images)
-            images_meta = [
-                {
-                    "timestamp_sec": float(py_img.timestamp_sec),
-                    "camera_timestamp": int(py_img.camera_timestamp),
-                    "sequence_num": int(py_img.sequence_num),
-                    "measurement_time": float(py_img.measurement_time),
-                    "height": int(py_img.height),
-                    "width": int(py_img.width),
-                    "encoding": py_img.encoding,
-                    "byte_len": int(np.asarray(py_img.data).nbytes),
-                }
-                for py_img in py_images
-            ]
-            total_byte_len = int(sum(img_meta["byte_len"] for img_meta in images_meta))
-            self._log_message_debug(
-                "send",
-                "image_batch",
-                {"image_count": len(py_images), "images": images_meta, "total_byte_len": total_byte_len, "ret": ret},
-                "raw",
-                channel_op="put",
-                channel_elapsed_ms=put_ms,
-            )
-            if ret != 0:
-                logger.error(f"Failed to send images, ret: {ret}")
+        ret, put_ms = self._timed_put(self.channel_map["camera"].put_image_simple, py_images)
+        images_meta = [
+            {
+                "timestamp_sec": py_img.timestamp_sec,
+                "camera_timestamp": py_img.camera_timestamp,
+                "sequence_num": py_img.sequence_num,
+                "measurement_time": py_img.measurement_time,
+                "height": py_img.height,
+                "width": py_img.width,
+                "encoding": py_img.encoding,
+                "byte_len": np.asarray(py_img.data).nbytes,
+            }
+            for py_img in py_images
+        ]
+        total_byte_len = sum(img_meta["byte_len"] for img_meta in images_meta)
+        self._log_message_debug(
+            "send",
+            "image_batch",
+            {"image_count": len(py_images), "images": images_meta, "total_byte_len": total_byte_len, "ret": ret},
+            "raw",
+            channel_op="put",
+            channel_elapsed_ms=put_ms,
+        )
+        if ret != 0:
+            logger.error(f"Failed to send images, ret: {ret}")
 
     def _extract_role_states_from_obs(self, obs):
         role_states = {}

@@ -11,6 +11,7 @@ import logging
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 
 try:
     import grpc
@@ -24,17 +25,51 @@ from metadrive.misc.onsite_middleware.onsite_proto.main.proto.enums_pb2 import (
     NT_FINISH_TEST,
 )
 from metadrive.utils.remote_viewer_proto import remote_viewer_pb2, remote_viewer_pb2_grpc
+from metadrive.utils.logger import get_log_timestamp
 
 logger = logging.getLogger("onsite_viewer_server")
+_IMAGE_RECEIVED_DIR = None
 
 
-def run_server_loop(middleware: OnSiteSwitch, action_state, frame_state, state_lock: threading.Lock) -> None:
+def _recv_first_image_rgb(middleware: OnSiteSwitch):
+    images = middleware.recv_image()
+    if not images:
+        return None
+    return images[0]
+
+
+def _save_received_image(image) -> None:
+    global _IMAGE_RECEIVED_DIR
+    if _IMAGE_RECEIVED_DIR is None:
+        base_ts = get_log_timestamp()
+        _IMAGE_RECEIVED_DIR = Path("logs") / f"image_received_{base_ts}"
+        _IMAGE_RECEIVED_DIR.mkdir(parents=True, exist_ok=True)
+    out_path = _IMAGE_RECEIVED_DIR / f"{int(time.time() * 1e6)}.png"
+    try:
+        import imageio.v2 as imageio
+        imageio.imwrite(out_path, image)
+    except Exception:
+        try:
+            from PIL import Image
+            Image.fromarray(image).save(out_path)
+        except Exception as exc:
+            logger.debug("Failed to save received image: %s", exc)
+
+
+def run_server_loop(middleware: OnSiteSwitch, action_state, frame_state, state_lock: threading.Lock,
+                    save_debug_image: bool = False) -> None:
     recv_prepare = False
     start_test = False
     session_id = ""
     actor_id = ""
+    last_loop_time = time.perf_counter()
 
     while True:
+        now = time.perf_counter()
+        loop_ms = (now - last_loop_time) * 1000.0
+        last_loop_time = now
+        logger.debug("=> => => => Loop => => => => (%.3f ms)", loop_ms)
+
         notify = middleware.recv_notify()
         if notify is not None:
             if notify.type in (NT_ABORT_TEST, NT_FINISH_TEST):
@@ -53,25 +88,58 @@ def run_server_loop(middleware: OnSiteSwitch, action_state, frame_state, state_l
                 session_id, actor_id, _, _ = result
                 recv_prepare = True
             time.sleep(0.05)
-            continue
 
         if recv_prepare and not start_test:
             middleware.send_actor_prepare_result(session_id=session_id, actor_id=actor_id, result=True)
             time.sleep(0.2)
-            continue
 
-        img = middleware.recv_image_rgb()
-        if img is None:
+        frame = _recv_first_image_rgb(middleware)
+        if frame is None or not recv_prepare or not start_test:
             continue
+        
+        img = frame["rgb"]
+        raw_timestamp = frame.get("camera_timestamp")
+        timestamp_us = int(raw_timestamp)
+        if save_debug_image:
+            _save_received_image(img)
 
-        image_msg = remote_viewer_pb2.Image(
-            data=img.tobytes(),
-            width=img.shape[1],
-            height=img.shape[0],
-            channels=img.shape[2],
-            format="RGB",
-            timestamp_us=int(time.time() * 1e6),
-        )
+        try:
+            image_msg = remote_viewer_pb2.Image(
+                data=img.tobytes(),
+                width=img.shape[1],
+                height=img.shape[0],
+                channels=img.shape[2],
+                format="RGB",
+                timestamp_us=timestamp_us,
+            )
+        except ValueError:
+            img_shape = getattr(img, "shape", None)
+            img_dtype = getattr(img, "dtype", None)
+            try:
+                img_min = float(img.min()) if img is not None else None
+                img_max = float(img.max()) if img is not None else None
+            except Exception:
+                img_min = None
+                img_max = None
+            try:
+                img_nbytes = int(img.nbytes) if img is not None else None
+            except Exception:
+                img_nbytes = None
+            logger.exception(
+                "Failed to build Image message: raw_timestamp=%r (type=%s), "
+                "timestamp_us=%r, img_shape=%r, img_dtype=%r, img_min=%r, img_max=%r, "
+                "img_nbytes=%r, frame_keys=%r",
+                raw_timestamp,
+                type(raw_timestamp),
+                timestamp_us,
+                img_shape,
+                img_dtype,
+                img_min,
+                img_max,
+                img_nbytes,
+                list(frame.keys()) if isinstance(frame, dict) else None,
+            )
+            continue
 
         with state_lock:
             frame_state["image"] = image_msg
@@ -110,6 +178,8 @@ def main() -> None:
     parser.add_argument("--grpc_host", type=str, default="0.0.0.0", help="viewer server bind host")
     parser.add_argument("--grpc_port", type=int, default=50051, help="viewer server bind port")
     parser.add_argument("--recv_none_sleep", type=float, default=0.02, help="sleep seconds when recv returns empty")
+    parser.add_argument("--save-debug-image", action="store_true",
+                        help="Save debug images regardless of log level")
     parser.add_argument("--log_level", type=str, default="INFO")
     args = parser.parse_args()
 
@@ -142,7 +212,7 @@ def main() -> None:
     )
 
     try:
-        run_server_loop(middleware, action_state, frame_state, state_lock)
+        run_server_loop(middleware, action_state, frame_state, state_lock, save_debug_image=args.save_debug_image)
     except KeyboardInterrupt:
         logger.info("Interrupted by user")
     finally:

@@ -259,12 +259,22 @@ class SimulatorInterface:
         self._cached_ts = int(timestamp)
         if self._scene_model is None:
             raise RuntimeError("Scene model is not initialized. load_model() must be called before update_scene().")
+        tracks_id: list[str] = []
+        poses_4x4: list[float] = []
         for object_id, pose in object_poses.items():
             pose_np = np.array(pose, dtype=np.float64)
+            if pose_np.shape != (4, 4):
+                raise ValueError(f"Object {object_id} pose must have shape (4, 4), got {pose_np.shape}")
+            if not np.isfinite(pose_np).all():
+                raise ValueError(f"Object {object_id} pose contains non-finite values")
             # Exported trajectories are map coordinates; convert back to sim world here.
             pose_np = self._scene_model["map_to_sim_world"] @ pose_np
-            pose_flat = pose_np.reshape(-1).tolist()
-            self._grpc.set_traffic_pose(object_id=str(object_id), pose_4x4=pose_flat)
+            pose_np = self._scene_model["world_to_nre"] @ pose_np
+            tracks_id.append(str(object_id))
+            poses_4x4.extend(pose_np.reshape(-1).tolist())
+        response = self._grpc.set_traffic_pose(tracks_id=tracks_id, poses_4x4=poses_4x4)
+        if not response.success:
+            raise RuntimeError(f"SetTrafficPose failed: {response.error_message}")
 
     def render(self, K: Any, H: int, W: int, extrinsics: Any) -> np.ndarray:
         if self._cached_ts is None:
@@ -306,6 +316,8 @@ class SimulatorInterface:
             ftheta_params=ftheta_params,
             time_s=float(self._cached_ts) / 1_000_000.0,
         )
+        if not response.success:
+            raise RuntimeError(f"Render failed: {response.error_message}")
         rgb = np.frombuffer(response.rgb_image.rgb_data, dtype=np.uint8)
         rgb = rgb.reshape((response.rgb_image.height, response.rgb_image.width, 3))
         return rgb

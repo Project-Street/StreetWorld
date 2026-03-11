@@ -23,7 +23,6 @@ def _load_json(path: Path | str) -> Dict[str, Any]:
     with path.open("r", encoding="utf-8") as f:
         return json.load(f)
 
-
 def _quat_xyzw_to_matrix(qx: float, qy: float, qz: float, qw: float) -> np.ndarray:
     quat = torch.tensor([qw, qx, qy, qz], dtype=torch.float32)
     rot = build_rotation(quat).numpy()
@@ -236,7 +235,7 @@ def parse_tracking_data_for_export(
     poses_list = tracks_data["tracks_poses"]
     sizes = cuboid_data["cuboids_dims"]
     tracking: Dict[str, Dict[str, Any]] = {}
-    for idx, track_id in enumerate(track_ids):
+    for idx, track_id in enumerate(track_ids): 
         obj_id = str(track_id)
         size = sizes[idx]
         raw_obj_type = str(labels[idx])

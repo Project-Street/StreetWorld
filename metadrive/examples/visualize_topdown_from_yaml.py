@@ -29,6 +29,11 @@ except ModuleNotFoundError as e:
         "matplotlib is required for visualization. Install it with: pip install matplotlib"
     ) from e
 
+try:
+    import cv2
+except ModuleNotFoundError:
+    cv2 = None
+
 
 def pose_xy(pose_4x4: list[list[float]]) -> np.ndarray:
     pose = np.asarray(pose_4x4, dtype=np.float64)
@@ -126,6 +131,102 @@ def load_poses_from_yaml(
     return scene_name, ego_poses, ego_timestamps, tracking_data, map_path
 
 
+def _collect_video_timestamps(
+    ego_timestamps: list[int],
+    tracking_data: dict[str, dict],
+) -> list[int]:
+    all_timestamps = set(ego_timestamps)
+    for obj in tracking_data.values():
+        all_timestamps.update(obj["poses"].keys())
+    return sorted(all_timestamps)
+
+
+def _draw_current_positions(
+    ax,
+    ego_poses: dict[int, list[list[float]]],
+    ego_timestamps: list[int],
+    traffic_items: list[tuple[str, dict]],
+    timestamp_us: int,
+):
+    ego_ts = nearest_ts(ego_timestamps, timestamp_us)
+    ego_now = pose_xy(ego_poses[ego_ts])
+    ego_artist = ax.scatter(ego_now[0], ego_now[1], s=80, c="red", marker="o", label=None, zorder=4)
+
+    traffic_xy = []
+    for _, obj in traffic_items:
+        poses = obj["poses"]
+        ts_list = sorted(poses.keys())
+        if not ts_list:
+            continue
+        cur_ts = nearest_ts(ts_list, timestamp_us)
+        traffic_xy.append(pose_xy(poses[cur_ts]))
+
+    traffic_artist = None
+    if traffic_xy:
+        traffic_xy = np.asarray(traffic_xy, dtype=np.float64)
+        traffic_artist = ax.scatter(
+            traffic_xy[:, 0],
+            traffic_xy[:, 1],
+            s=10,
+            c="black",
+            alpha=0.45,
+            zorder=3,
+        )
+    return ego_artist, traffic_artist, ego_ts
+
+
+def _save_motion_video(
+    scene_name: str,
+    fig,
+    ax,
+    ego_poses: dict[int, list[list[float]]],
+    ego_timestamps: list[int],
+    traffic_items: list[tuple[str, dict]],
+    video_timestamps: list[int],
+    out_path: Path,
+    fps: float,
+) -> None:
+    if cv2 is None:
+        raise ModuleNotFoundError("opencv-python is required for video export. Install it with: pip install opencv-python")
+    if not video_timestamps:
+        raise ValueError("No timestamps available for video export")
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.canvas.draw()
+    width, height = fig.canvas.get_width_height()
+    writer = cv2.VideoWriter(
+        str(out_path),
+        cv2.VideoWriter_fourcc(*"mp4v"),
+        float(fps),
+        (int(width), int(height)),
+    )
+    if not writer.isOpened():
+        raise RuntimeError(f"Failed to open video writer: {out_path}")
+
+    title_artist = ax.set_title("")
+    try:
+        for timestamp_us in video_timestamps:
+            ego_artist, traffic_artist, ego_ts = _draw_current_positions(
+                ax=ax,
+                ego_poses=ego_poses,
+                ego_timestamps=ego_timestamps,
+                traffic_items=traffic_items,
+                timestamp_us=timestamp_us,
+            )
+            title_artist.set_text(f"Top-Down Motion: {scene_name} @ {timestamp_us} us (ego={ego_ts})")
+
+            fig.canvas.draw()
+            frame = np.frombuffer(fig.canvas.buffer_rgba(), dtype=np.uint8).reshape(height, width, 4)
+            writer.write(cv2.cvtColor(frame[:, :, :3], cv2.COLOR_RGB2BGR))
+
+            ego_artist.remove()
+            if traffic_artist is not None:
+                traffic_artist.remove()
+    finally:
+        writer.release()
+        title_artist.set_text(f"Top-Down Trajectories: {scene_name}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Read scene yaml like SimulatorInterface and visualize ego/traffic top-down trajectories"
@@ -133,6 +234,8 @@ def main() -> None:
     parser.add_argument("yaml_path", type=str, help="Path to scene yaml")
     parser.add_argument("--timestamp", type=int, default=None, help="Optional timestamp(us) to highlight current positions")
     parser.add_argument("--save", type=str, default=None, help="Save figure path. If omitted, show window")
+    parser.add_argument("--save-video", type=str, default=None, help="Optional mp4 path for top-down motion video")
+    parser.add_argument("--video-fps", type=float, default=50.0, help="FPS for exported top-down motion video")
     parser.add_argument("--max-traffic", type=int, default=None, help="Optional max number of traffic agents to draw")
     parser.add_argument("--map-step", type=float, default=1.0, help="Sampling step(m) for map reference lines")
     args = parser.parse_args()
@@ -181,6 +284,21 @@ def main() -> None:
     ax.set_aspect("equal", adjustable="box")
     ax.grid(True, alpha=0.3)
     ax.legend(loc="best")
+
+    if args.save_video:
+        video_timestamps = _collect_video_timestamps(ego_timestamps, tracking_data)
+        _save_motion_video(
+            scene_name=scene_name,
+            fig=fig,
+            ax=ax,
+            ego_poses=ego_poses,
+            ego_timestamps=ego_timestamps,
+            traffic_items=traffic_items,
+            video_timestamps=video_timestamps,
+            out_path=Path(args.save_video),
+            fps=args.video_fps,
+        )
+        print(f"Saved motion video to: {args.save_video}")
 
     if args.save:
         out_path = Path(args.save)
