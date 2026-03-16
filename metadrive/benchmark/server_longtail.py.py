@@ -59,6 +59,7 @@ class StreetStudioServicer(service_pb2_grpc.EnvServiceServicer):
         self.model: SimulatorInterface = None
         self._lock = threading.Lock()
         self._current_scene = None
+        self._current_scene_id = None
 
     def Reset(self, request: service_pb2.ResetRequest, context) -> service_pb2.ResetResponse:
         """
@@ -76,6 +77,7 @@ class StreetStudioServicer(service_pb2_grpc.EnvServiceServicer):
             sequential = "sequential" in request.transforms_json_path
             if full_reset:
                 self._current_scene = None
+                self._current_scene_id = None
                 self.sequential_scenes = sequential
                 
             # Update config with request parameters only if provided
@@ -97,11 +99,15 @@ class StreetStudioServicer(service_pb2_grpc.EnvServiceServicer):
                 self._num_scenarios = len(self.env.data_manager.metadata)
             # self.env = StreetStudioScenarioEnv(self.config)
 
-            if self._current_scene is not None:
-                self._current_scene = str(int(self._current_scene) + 1)
+            if self._current_scene is not None and self.sequential_scenes:
+                # Sequential access & not first access
+                self._current_scene_id = self._current_scene_id + 1
+            elif self.sequential_scenes:
+                # Sequential access & first access
+                self._current_scene_id = 0
 
             # Reset environment and get initial observation
-            scene_id = int(self._current_scene) if (self._current_scene is not None and self.sequential_scenes) else None
+            scene_id = int(self._current_scene_id) if (self._current_scene_id is not None) else None
             if scene_id is not None and scene_id >= self._num_scenarios:
                 context.set_code(grpc.StatusCode.OUT_OF_RANGE)
                 context.set_details(f"All scenarios exhausted. Total scenarios: {self._num_scenarios}")
@@ -260,6 +266,7 @@ def serve(
     time_start: float = None,
     time_end: float = None,
     random: bool = False,
+    replay: bool = False,
 ) -> None:
     """
     Start gRPC server.
@@ -291,6 +298,11 @@ def serve(
         # },
     }
 
+    if replay:
+        config["actor_config"] = {
+            "policy": ReplayPolicy,
+        }
+        
     # Add time range constraints if provided
     if time_start is not None:
         config["time_start_sec"] = time_start
@@ -378,6 +390,11 @@ def main():
         action="store_true",
         help="Whether to serve scenes randomly (default: False, sequential access)"
     )
+    parser.add_argument(
+        "--replay",
+        action="store_true",
+        help="Whether to replay gt"
+    )
     args = parser.parse_args()
 
     # Validate transforms path exists
@@ -394,7 +411,8 @@ def main():
         max_workers=args.max_workers,
         time_start=args.time_start,
         time_end=args.time_end,
-        random=args.random
+        random=args.random,
+        replay=args.replay,
     )
 
     return 0

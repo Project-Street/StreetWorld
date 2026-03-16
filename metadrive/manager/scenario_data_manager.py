@@ -179,11 +179,19 @@ class ScenarioDataManager(BaseManager):
         ego_poses = current_metadata['ego_poses']
         # average_ego_height =  np.mean([pose[2][3] for pose in ego_poses.values()])
         start_ts = current_metadata['timestamp_range'][0]
-        start_ego_height = ego_poses[start_ts][2][3]
-        ground_height = start_ego_height - config_dict["controller"].DEFAULT_HEIGHT / 2 + 0.1
+        start_ego_pose = ego_poses[start_ts]
+        ego_pos = np.array([start_ego_pose[0][3], start_ego_pose[1][3], start_ego_pose[2][3]], dtype=float)
+        up_dir = np.array([start_ego_pose[0][2], start_ego_pose[1][2], start_ego_pose[2][2]], dtype=float)
+        up_norm = np.linalg.norm(up_dir)
+        if up_norm > 0:
+            up_dir = (up_dir / up_norm).tolist()
+        else:
+            up_dir = [0, 0, 1]
+        offset = config_dict["controller"].DEFAULT_HEIGHT / 2 - 0.1
+        ground_constant = float(np.dot(up_dir, ego_pos) - offset)
         current_metadata['ground_plane'] = {
-            'normal': [0, 0, 1],
-            'constant': ground_height
+            'normal': up_dir,
+            'constant': ground_constant
         }
 
     def get_current_scenario_data(self):

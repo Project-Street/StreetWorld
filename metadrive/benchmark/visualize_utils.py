@@ -55,7 +55,7 @@ class GaussianFrameRecorder:
                 cam_params = obs_info.get('cam_params', {}).get('camera_0', {})
                 l2c = cam_params.get('l2c', None)
                 k_mat = cam_params.get('K', None)
-                z_pos = float(obs_info.get('ego_pos', [0, 0, 0])[2])
+                z_pos = -4.0 #float(obs_info.get('ego_pos', [0, 0, 0])[2])
                 frame_with_traj = latest_frame.copy()
                 frame_with_traj = self._draw_plan_traj(frame_with_traj, plan_traj, z_pos, l2c, k_mat)
                 frame_data[cam_name] = frame_with_traj

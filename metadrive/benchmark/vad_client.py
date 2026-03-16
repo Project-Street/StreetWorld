@@ -16,6 +16,9 @@ from typing import Dict, Tuple
 
 import numpy as np
 
+from torch.nn.utils import parametrize
+from torch.nn.utils.parametrize import is_parametrized
+
 from grpc_obs_adapter import unpack_ad_observation
 from grpc_client import GrpcClient
 from metrics import MetricsRecorder
@@ -29,7 +32,77 @@ os.environ['no_proxy'] = '127.0.0.1,localhost'
 from logging import getLogger
 LOGGER = getLogger(__name__)
 
-def create_vad(vad_config: dict):
+def _resolve_attention_module(attn, decoder_name: str, layer_idx: int, attn_idx: int):
+    if hasattr(attn, "in_proj_weight"):
+        return attn
+    nested = getattr(attn, "attn", None)
+    if nested is not None and hasattr(nested, "in_proj_weight"):
+        return nested
+    raise ValueError(
+        f"Unsupported attention wrapper at {decoder_name}.layers[{layer_idx}].attentions[{attn_idx}]"
+    )
+
+
+def _register_lora_on_attention(attn, rank: int, alpha: float, dropout: float):
+    from rl_framework.common.policy_network import LoRAParametrization
+
+    if is_parametrized(attn, "in_proj_weight"):
+        return 0
+    embed_dim = attn.embed_dim
+    slice_map = {
+        "q": (0, embed_dim),
+        "k": (embed_dim, 2 * embed_dim),
+        "v": (2 * embed_dim, 3 * embed_dim),
+    }
+    enabled_slices = (slice_map["q"], slice_map["v"])
+
+    attn.in_proj_weight.requires_grad = False
+    if hasattr(attn, "in_proj_bias") and attn.in_proj_bias is not None:
+        attn.in_proj_bias.requires_grad = False
+    attn.out_proj.weight.requires_grad = False
+    if attn.out_proj.bias is not None:
+        attn.out_proj.bias.requires_grad = False
+
+    in_lora = LoRAParametrization(
+        attn.in_proj_weight.shape[1],
+        attn.in_proj_weight.shape[0],
+        rank=rank,
+        alpha=alpha,
+        dropout=dropout,
+        enabled_slices=enabled_slices,
+    ).to(attn.in_proj_weight.device)
+    parametrize.register_parametrization(attn, "in_proj_weight", in_lora)
+    mask = in_lora.row_mask.view(-1)
+    assert mask[embed_dim: 2 * embed_dim].abs().sum() == 0, "LoRA mask must not modify K projection"
+    return 1
+
+
+def _inject_vad_lora(model, rank: int = 8, alpha: float = 8.0, dropout: float = 0.0) -> int:
+    model_impl = model.module if hasattr(model, "module") else model
+    if not hasattr(model_impl, "pts_bbox_head"):
+        raise ValueError("VAD model must have pts_bbox_head")
+    head = model_impl.pts_bbox_head
+    total = 0
+    for decoder_name, decoder in (
+        ("ego_agent_decoder", getattr(head, "ego_agent_decoder", None)),
+        ("ego_map_decoder", getattr(head, "ego_map_decoder", None)),
+    ):
+        if decoder is None:
+            raise ValueError(f"pts_bbox_head missing {decoder_name}")
+        layers = getattr(decoder, "layers", None)
+        if layers is None:
+            raise ValueError(f"{decoder_name} has no `layers` attribute")
+        for layer_idx, layer in enumerate(layers):
+            attentions = getattr(layer, "attentions", None)
+            if attentions is None:
+                raise ValueError(f"{decoder_name}.layers[{layer_idx}] has no `attentions`")
+            for attn_idx, attn in enumerate(attentions):
+                core_attn = _resolve_attention_module(attn, decoder_name, layer_idx, attn_idx)
+                total += _register_lora_on_attention(core_attn, rank=rank, alpha=alpha, dropout=dropout)
+    return total
+
+
+def create_vad(vad_config: dict, add_lora: bool = False):
 
     current_dir = os.path.dirname(os.path.abspath(__file__))  # StreetWorld/rl_framework/rl_modules/
     uniad_ft = os.path.dirname(os.path.dirname(current_dir)) # StreetWorld/
@@ -128,6 +201,10 @@ def create_vad(vad_config: dict):
             wrap_fp16_model(model)
             LOGGER.info("FP16 enabled")
 
+        if add_lora:
+            injected = _inject_vad_lora(model)
+            LOGGER.info(f"LoRA enabled for VAD decoders (modules injected: {injected})")
+
         checkpoint = load_checkpoint(model, checkpoint_path_abs, map_location='cpu')
         LOGGER.info("Checkpoint loaded successfully")
 
@@ -201,7 +278,7 @@ class VADClient(GrpcClient):
 
     def _create_vad(self, config: dict):
         """Create VAD model from config."""
-        return create_vad(config)
+        return create_vad(config, add_lora=bool(config.get("add_lora", False)))
 
     def run_vad_inference(self, obs_img: Dict, obs_info: Dict, step_info: Dict) -> np.ndarray:
         """
@@ -332,6 +409,17 @@ def main():
         default=1000,
         help="Number of steps to run (default: 1000)"
     )
+    parser.add_argument(
+        "--add-lora",
+        action="store_true",
+        help="Inject LoRA parametrizations into VAD decoders",
+    )
+    parser.add_argument(
+        "--checkpoint",
+        type=str,
+        default=str(Path(__file__).resolve().parents[2] / "VAD/ckpts/VAD_base.pth"),
+        help="Path to VAD checkpoint (default: VAD/ckpts/VAD_base.pth)",
+    )
 
     args = parser.parse_args()
 
@@ -341,8 +429,9 @@ def main():
     #     vad_config = json.load(f)
     vad_config = {
         'config_path': str(Path(__file__).resolve().parents[2] / "VAD/projects/configs/VAD/VAD_base_e2e.py"),
-        'checkpoint_path': str(Path(__file__).resolve().parents[2] / "VAD/ckpts/VAD_base.pth"),
-        'device': 'cuda:0'
+        'checkpoint_path': str(args.checkpoint),
+        'device': 'cuda:0',
+        'add_lora': bool(args.add_lora),
     }
 
     # Create client

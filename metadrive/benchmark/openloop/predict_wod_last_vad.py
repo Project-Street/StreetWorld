@@ -10,6 +10,8 @@ import numpy as np
 import torch
 from PIL import Image
 from tqdm import tqdm
+from torch.nn.utils import parametrize
+from torch.nn.utils.parametrize import is_parametrized
 
 from mmcv import Config  # type: ignore[import-not-found]
 from mmcv.cnn import fuse_conv_bn  # type: ignore[import-not-found]
@@ -60,7 +62,77 @@ def default_vad_config() -> dict:
     }
 
 
-def create_vad(vad_config: dict):
+def _resolve_attention_module(attn, decoder_name: str, layer_idx: int, attn_idx: int):
+    if hasattr(attn, "in_proj_weight"):
+        return attn
+    nested = getattr(attn, "attn", None)
+    if nested is not None and hasattr(nested, "in_proj_weight"):
+        return nested
+    raise ValueError(
+        f"Unsupported attention wrapper at {decoder_name}.layers[{layer_idx}].attentions[{attn_idx}]"
+    )
+
+
+def _register_lora_on_attention(attn, rank: int, alpha: float, dropout: float) -> int:
+    from rl_framework.common.policy_network import LoRAParametrization
+
+    if is_parametrized(attn, "in_proj_weight"):
+        return 0
+    embed_dim = attn.embed_dim
+    slice_map = {
+        "q": (0, embed_dim),
+        "k": (embed_dim, 2 * embed_dim),
+        "v": (2 * embed_dim, 3 * embed_dim),
+    }
+    enabled_slices = (slice_map["q"], slice_map["v"])
+
+    attn.in_proj_weight.requires_grad = False
+    if hasattr(attn, "in_proj_bias") and attn.in_proj_bias is not None:
+        attn.in_proj_bias.requires_grad = False
+    attn.out_proj.weight.requires_grad = False
+    if attn.out_proj.bias is not None:
+        attn.out_proj.bias.requires_grad = False
+
+    in_lora = LoRAParametrization(
+        attn.in_proj_weight.shape[1],
+        attn.in_proj_weight.shape[0],
+        rank=rank,
+        alpha=alpha,
+        dropout=dropout,
+        enabled_slices=enabled_slices,
+    ).to(attn.in_proj_weight.device)
+    parametrize.register_parametrization(attn, "in_proj_weight", in_lora)
+    mask = in_lora.row_mask.view(-1)
+    assert mask[embed_dim: 2 * embed_dim].abs().sum() == 0, "LoRA mask must not modify K projection"
+    return 1
+
+
+def _inject_vad_lora(model, rank: int = 8, alpha: float = 8.0, dropout: float = 0.0) -> int:
+    model_impl = model.module if hasattr(model, "module") else model
+    if not hasattr(model_impl, "pts_bbox_head"):
+        raise ValueError("VAD model must have pts_bbox_head")
+    head = model_impl.pts_bbox_head
+    total = 0
+    for decoder_name, decoder in (
+        ("ego_agent_decoder", getattr(head, "ego_agent_decoder", None)),
+        ("ego_map_decoder", getattr(head, "ego_map_decoder", None)),
+    ):
+        if decoder is None:
+            raise ValueError(f"pts_bbox_head missing {decoder_name}")
+        layers = getattr(decoder, "layers", None)
+        if layers is None:
+            raise ValueError(f"{decoder_name} has no `layers` attribute")
+        for layer_idx, layer in enumerate(layers):
+            attentions = getattr(layer, "attentions", None)
+            if attentions is None:
+                raise ValueError(f"{decoder_name}.layers[{layer_idx}] has no `attentions`")
+            for attn_idx, attn in enumerate(attentions):
+                core_attn = _resolve_attention_module(attn, decoder_name, layer_idx, attn_idx)
+                total += _register_lora_on_attention(core_attn, rank=rank, alpha=alpha, dropout=dropout)
+    return total
+
+
+def create_vad(vad_config: dict, add_lora: bool = False):
     current_dir = os.path.dirname(os.path.abspath(__file__))
     uniad_ft = os.path.dirname(os.path.dirname(os.path.dirname(current_dir)))
     vad_root = os.path.join(uniad_ft, "VAD")
@@ -133,6 +205,10 @@ def create_vad(vad_config: dict):
 
         checkpoint = load_checkpoint(model, checkpoint_path_abs, map_location="cpu")
         model = fuse_conv_bn(model)
+
+        if add_lora:
+            injected = _inject_vad_lora(model)
+            LOGGER.info("LoRA enabled for VAD decoders (modules injected: %s)", injected)
 
         if "CLASSES" in checkpoint.get("meta", {}):
             model.CLASSES = checkpoint["meta"]["CLASSES"]
@@ -335,6 +411,11 @@ def main():
         default=str(REPO_ROOT / "submodules" / "ml-sharp" / "nuscenes_camera_info.npz"),
         help="Path to NuScenes camera params npz",
     )
+    parser.add_argument(
+        "--add-lora",
+        action="store_true",
+        help="Inject LoRA parametrizations into VAD decoders",
+    )
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(message)s")
@@ -353,7 +434,7 @@ def main():
     vad_config["device"] = args.device
 
     LOGGER.info("Loading VAD model...")
-    model = create_vad(vad_config)
+    model = create_vad(vad_config, add_lora=bool(args.add_lora))
     model.eval()
 
     input_dir = Path(args.input_dir)

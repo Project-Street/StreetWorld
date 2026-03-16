@@ -243,6 +243,7 @@ class GaussianObservation(BaseObservation):
                 'cx': float(cx),
                 'cy': float(cy),
                 'ego2camera': ego2cam.numpy().astype(np.float32),
+                'c2w': extrinsics_c2w.numpy().astype(np.float32),
                 'K': K.astype(np.float32)
             }
 

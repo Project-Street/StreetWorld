@@ -16,6 +16,7 @@ import grpc
 import numpy as np
 import cv2
 import torch
+from scipy.spatial.transform import Rotation as SCR
 
 from grpc_obs_adapter import unpack_ad_observation
 from grpc_client import GrpcClient
@@ -122,7 +123,7 @@ def _normalize_plan_traj(plan_traj: np.ndarray) -> Optional[np.ndarray]:
     converted = np.zeros_like(traj, dtype=np.float32)
     converted[:, 0] = -traj[:, 1]
     converted[:, 1] = traj[:, 0]
-    print(converted)
+    # print(converted)
     return converted[:, :2]
 
 
@@ -252,8 +253,11 @@ class DiffusionDriveClient(GrpcClient):
         else:
             lidar_pc = np.zeros((6, 0), dtype=np.float32)
 
-        velocity = np.asarray(obs_info.get("linear_velocity", [0.0, 0.0, 0.0]), dtype=np.float32)
-        acceleration = np.asarray(obs_info.get("linear_acceleration", [0.0, 0.0, 0.0]), dtype=np.float32)
+        R_world_ego = SCR.from_euler('XYZ', np.asarray(obs_info['ego_rot'], dtype=np.float32)).as_matrix().astype(np.float32)
+        velocity = R_world_ego.T @ np.asarray(obs_info.get("linear_velocity", [0.0, 0.0, 0.0]), dtype=np.float32)
+        acceleration = R_world_ego.T @ np.asarray(obs_info.get("linear_acceleration", [0.0, 0.0, 0.0]), dtype=np.float32)
+        print(f"Velocity: {velocity}, Accel: {acceleration}")
+        acceleration[0], acceleration[1] = 0.0, 0.0
         command = _command_one_hot(int(obs_info.get("command", 2)))
         print(f"Driving command: {command}")
         ego_status = EgoStatus(
@@ -293,14 +297,14 @@ def main():
     parser.add_argument("--port", type=int, default=50052)
     parser.add_argument("--transforms", type=str, default="")
     parser.add_argument("--steps", type=int, default=1000)
-    parser.add_argument("--checkpoint", type=str, required=True)
+    parser.add_argument("--checkpoint", type=str, default=str(Path(__file__).resolve().parents[2] / "DiffusionDrive/diffusiondrive_navsim_88p1_PDMS"))
     parser.add_argument("--device", type=str, default="cuda:0")
     parser.add_argument("--cameras", type=str, default="camera_2,camera_0,camera_1")
     parser.add_argument("--depth-cameras", type=str, default="camera_2,camera_0,camera_1,camera_3,camera_4,camera_5")
     parser.add_argument("--depth-stride", type=int, default=16)
     parser.add_argument("--depth-max-m", type=float, default=1000.0)
     parser.add_argument("--backbone-path", type=str, default="")
-    parser.add_argument("--plan-anchor-path", type=str, default="")
+    parser.add_argument("--plan-anchor-path", type=str, default=str(Path(__file__).resolve().parents[2] / "DiffusionDrive/kmeans_navsim_traj_20.npy"))
     parser.add_argument("--debug-dir", type=str, default="")
     parser.add_argument("--gaussian-video", type=str, default="./driving_diffusiondrive.mp4")
     parser.add_argument("--horizon", type=float, default=4.0)

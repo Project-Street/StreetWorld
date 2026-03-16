@@ -255,6 +255,11 @@ def main():
         default=str(REPO_ROOT / "submodules" / "ml-sharp" / "nuscenes_camera_info.npz"),
         help="Path to NuScenes camera params npz",
     )
+    parser.add_argument(
+        "--add-lora",
+        action="store_true",
+        help="Inject LoRA parametrizations into UniAD planning head",
+    )
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(message)s")
@@ -273,7 +278,7 @@ def main():
     uniad_config["device"] = args.device
 
     LOGGER.info("Loading UniAD model...")
-    model = create_uniad(uniad_config)
+    model = create_uniad(uniad_config, add_lora=bool(args.add_lora))
     model.eval()
 
     input_dir = Path(args.input_dir)

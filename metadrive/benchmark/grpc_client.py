@@ -43,7 +43,7 @@ class GrpcClient:
 
         obs = self._deserialize_observation(response.observation)
         reset_info = self._struct_to_builtin(response.StepInfo)
-        reset_info['scene_name'] = int(reset_info['scene_name'])
+        reset_info['scene_name'] = str(reset_info['scene_name'])
         return obs, reset_info
 
     def step(self, action: List[float]) -> Tuple[Any, float, bool, bool, Dict[str, Any]]:
@@ -55,7 +55,7 @@ class GrpcClient:
 
         obs = self._deserialize_observation(response.observation)
         step_info = self._struct_to_builtin(response.StepInfo)
-        step_info['scene_name'] = int(step_info['scene_name'])
+        step_info['scene_name'] = str(step_info['scene_name'])
         return (
             obs,
             float(response.reward),

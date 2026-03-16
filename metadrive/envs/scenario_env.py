@@ -255,7 +255,7 @@ class ScenarioEnv(BaseEnv):
             AgentState.CRASH_HUMAN,
             AgentState.CRASH_OBJECT,
             AgentState.CRASH_WORLD,
-            AgentState.OUT_OF_ROAD,
+            # AgentState.OUT_OF_ROAD,
         }
         collision = state in collision_states
         step_info["collision"] = int(collision)
