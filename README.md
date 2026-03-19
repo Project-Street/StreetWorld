@@ -33,6 +33,10 @@ conda activate st-world
 ```bash
 export ONSITE_PATH=/PATH_TO_ONSITE
 
+# Viewer client only (minimal dependencies for onsite_remote_viewer/viewer_client.py)
+pip install -e ".[viewer]" --no-build-isolation --index-url https://pypi.org/simple
+
+# Full simulator stack
 # Install PyTorch with CUDA support (You may visit https://pytorch.org/get-started/previous-versions/ to choose a PyTorch version compatible with your Python and CUDA environment).
 pip install torch==2.4.1 torchvision==0.19.1 torchaudio==2.4.1 --index-url https://download.pytorch.org/whl/cu121
 
@@ -41,7 +45,7 @@ pip install "git+https://github.com/NVlabs/trajdata.git@a2a54e5"
 pip install $ONSITE_PATH/libmulticastnetwork-1.0.2-cp311-cp311-linux_x86_64.whl
 
 # Install StreetWorld
-pip install -e . --no-build-isolation --index-url https://pypi.org/simple
+pip install -e ".[simulator]" --no-build-isolation --index-url https://pypi.org/simple
 ```
 
 ### Get Access to NuRec Model

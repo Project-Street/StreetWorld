@@ -5,6 +5,7 @@ Client actively connects to remote gRPC server, sends Action, and receives Image
 """
 
 import argparse
+import ctypes
 import logging
 import platform
 import time
@@ -27,6 +28,115 @@ from metadrive.utils.remote_viewer_proto import remote_viewer_pb2, remote_viewer
 
 logger = logging.getLogger("onsite_viewer_client")
 _IMAGE_RECEIVED_DIR = None
+
+
+class _FrameRenderer:
+    def __init__(self, glsl_version: str) -> None:
+        self._program = self._create_program(glsl_version)
+        self._texture_uniform = gl.glGetUniformLocation(self._program, "frame_texture")
+        self._position_location = gl.glGetAttribLocation(self._program, "position")
+        self._texcoord_location = gl.glGetAttribLocation(self._program, "texcoord")
+        self._vao = gl.glGenVertexArrays(1)
+        self._vbo = gl.glGenBuffers(1)
+
+    def _create_program(self, glsl_version: str) -> int:
+        vertex_src = f"""
+{glsl_version}
+in vec2 position;
+in vec2 texcoord;
+out vec2 frag_texcoord;
+void main() {{
+    frag_texcoord = texcoord;
+    gl_Position = vec4(position, 0.0, 1.0);
+}}
+"""
+        fragment_src = f"""
+{glsl_version}
+uniform sampler2D frame_texture;
+in vec2 frag_texcoord;
+out vec4 color;
+void main() {{
+    color = texture(frame_texture, frag_texcoord);
+}}
+"""
+        vertex_shader = self._compile_shader(vertex_src, gl.GL_VERTEX_SHADER)
+        fragment_shader = self._compile_shader(fragment_src, gl.GL_FRAGMENT_SHADER)
+        program = gl.glCreateProgram()
+        gl.glAttachShader(program, vertex_shader)
+        gl.glAttachShader(program, fragment_shader)
+        gl.glLinkProgram(program)
+        if not gl.glGetProgramiv(program, gl.GL_LINK_STATUS):
+            error = gl.glGetProgramInfoLog(program).decode("utf-8")
+            gl.glDeleteProgram(program)
+            gl.glDeleteShader(vertex_shader)
+            gl.glDeleteShader(fragment_shader)
+            raise RuntimeError(f"Failed to link OpenGL program: {error}")
+        gl.glDetachShader(program, vertex_shader)
+        gl.glDetachShader(program, fragment_shader)
+        gl.glDeleteShader(vertex_shader)
+        gl.glDeleteShader(fragment_shader)
+        return program
+
+    def _compile_shader(self, source: str, shader_type: int) -> int:
+        shader = gl.glCreateShader(shader_type)
+        gl.glShaderSource(shader, source)
+        gl.glCompileShader(shader)
+        if not gl.glGetShaderiv(shader, gl.GL_COMPILE_STATUS):
+            error = gl.glGetShaderInfoLog(shader).decode("utf-8")
+            gl.glDeleteShader(shader)
+            raise RuntimeError(f"Failed to compile OpenGL shader: {error}")
+        return shader
+
+    def draw(self, texture_id: int, image_width: int, image_height: int, framebuffer_width: int, framebuffer_height: int) -> None:
+        half_w_ndc = float(image_width) / float(framebuffer_width)
+        half_h_ndc = float(image_height) / float(framebuffer_height)
+        vertices = np.array(
+            [
+                -half_w_ndc, -half_h_ndc, 0.0, 1.0,
+                half_w_ndc, -half_h_ndc, 1.0, 1.0,
+                half_w_ndc, half_h_ndc, 1.0, 0.0,
+                -half_w_ndc, -half_h_ndc, 0.0, 1.0,
+                half_w_ndc, half_h_ndc, 1.0, 0.0,
+                -half_w_ndc, half_h_ndc, 0.0, 0.0,
+            ],
+            dtype=np.float32,
+        )
+
+        gl.glUseProgram(self._program)
+        gl.glBindVertexArray(self._vao)
+        gl.glBindBuffer(gl.GL_ARRAY_BUFFER, self._vbo)
+        gl.glBufferData(gl.GL_ARRAY_BUFFER, vertices.nbytes, vertices, gl.GL_DYNAMIC_DRAW)
+
+        stride = 4 * vertices.itemsize
+        gl.glEnableVertexAttribArray(self._position_location)
+        gl.glVertexAttribPointer(self._position_location, 2, gl.GL_FLOAT, False, stride, ctypes.c_void_p(0))
+        gl.glEnableVertexAttribArray(self._texcoord_location)
+        gl.glVertexAttribPointer(
+            self._texcoord_location,
+            2,
+            gl.GL_FLOAT,
+            False,
+            stride,
+            ctypes.c_void_p(2 * vertices.itemsize),
+        )
+
+        gl.glActiveTexture(gl.GL_TEXTURE0)
+        gl.glBindTexture(gl.GL_TEXTURE_2D, texture_id)
+        gl.glUniform1i(self._texture_uniform, 0)
+        gl.glDrawArrays(gl.GL_TRIANGLES, 0, 6)
+
+        gl.glBindTexture(gl.GL_TEXTURE_2D, 0)
+        gl.glBindBuffer(gl.GL_ARRAY_BUFFER, 0)
+        gl.glBindVertexArray(0)
+        gl.glUseProgram(0)
+
+    def shutdown(self) -> None:
+        if getattr(self, "_vbo", 0):
+            gl.glDeleteBuffers(1, [self._vbo])
+        if getattr(self, "_vao", 0):
+            gl.glDeleteVertexArrays(1, [self._vao])
+        if getattr(self, "_program", 0):
+            gl.glDeleteProgram(self._program)
 
 
 def _format_rpc_error(exc: grpc.RpcError) -> str:
@@ -90,12 +200,15 @@ class OnSiteViewer:
     def _init_opengl(self) -> None:
         gl.glViewport(0, 0, self.width, self.height)
         gl.glClearColor(0.1, 0.1, 0.1, 1.0)
+        self._frame_renderer = _FrameRenderer(self.glsl_version)
 
     def _init_texture(self) -> None:
         self.texture_id = gl.glGenTextures(1)
         gl.glBindTexture(gl.GL_TEXTURE_2D, self.texture_id)
         gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MIN_FILTER, gl.GL_NEAREST)
         gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MAG_FILTER, gl.GL_NEAREST)
+        gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_S, gl.GL_CLAMP_TO_EDGE)
+        gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_T, gl.GL_CLAMP_TO_EDGE)
         # RGB image rows are 3-byte aligned; force unpack alignment to 1 to avoid stripe artifacts.
         gl.glPixelStorei(gl.GL_UNPACK_ALIGNMENT, 1)
         gl.glBindTexture(gl.GL_TEXTURE_2D, 0)
@@ -104,6 +217,9 @@ class OnSiteViewer:
         return not glfw.window_should_close(self.window)
 
     def render(self, img: Optional[np.ndarray]) -> None:
+        fb_w, fb_h = glfw.get_framebuffer_size(self.window)
+        if fb_w > 0 and fb_h > 0:
+            gl.glViewport(0, 0, fb_w, fb_h)
         gl.glClear(gl.GL_COLOR_BUFFER_BIT)
         glfw.poll_events()
 
@@ -126,10 +242,6 @@ class OnSiteViewer:
         if fb_w <= 0 or fb_h <= 0:
             return
 
-        # Draw image at native pixel size (no full-screen stretch), centered in window.
-        half_w_ndc = float(width) / float(fb_w)
-        half_h_ndc = float(height) / float(fb_h)
-
         gl.glBindTexture(gl.GL_TEXTURE_2D, self.texture_id)
         gl.glTexImage2D(
             gl.GL_TEXTURE_2D,
@@ -142,23 +254,12 @@ class OnSiteViewer:
             gl.GL_UNSIGNED_BYTE,
             img,
         )
-
-        gl.glEnable(gl.GL_TEXTURE_2D)
-        gl.glBegin(gl.GL_QUADS)
-        gl.glTexCoord2f(0, 1)
-        gl.glVertex2f(-half_w_ndc, -half_h_ndc)
-        gl.glTexCoord2f(1, 1)
-        gl.glVertex2f(half_w_ndc, -half_h_ndc)
-        gl.glTexCoord2f(1, 0)
-        gl.glVertex2f(half_w_ndc, half_h_ndc)
-        gl.glTexCoord2f(0, 0)
-        gl.glVertex2f(-half_w_ndc, half_h_ndc)
-        gl.glEnd()
-        gl.glDisable(gl.GL_TEXTURE_2D)
-
         gl.glBindTexture(gl.GL_TEXTURE_2D, 0)
+        self._frame_renderer.draw(self.texture_id, width, height, fb_w, fb_h)
 
     def shutdown(self) -> None:
+        if hasattr(self, "_frame_renderer"):
+            self._frame_renderer.shutdown()
         if self.texture_id:
             gl.glDeleteTextures(1, [self.texture_id])
         glfw.destroy_window(self.window)

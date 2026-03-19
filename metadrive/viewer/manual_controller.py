@@ -1,9 +1,8 @@
 import math
+import sys
 
 import numpy as np
 import glfw
-
-from metadrive.utils import is_win, is_mac
 
 
 def get_controller(controller_name, window=None):
@@ -140,7 +139,7 @@ class SteeringWheelController(Controller):
         except ImportError:
             print("Pygame is required for steering wheel control")
             return
-        assert not is_win(), "Steering Wheel is supported in linux and mac only"
+        assert sys.platform != "win32", "Steering Wheel is supported in linux and mac only"
         assert pygame.joystick.get_count() > 0, "Please connect Steering Wheel or use keyboard input"
         print("Successfully Connect your Steering Wheel!")
 
@@ -229,7 +228,7 @@ class XboxController(Controller):
         except ImportError:
             print("Pygame is required for Xbox controller")
             return
-        assert not is_win(), "Joystick is supported in linux and mac only"
+        assert sys.platform != "win32", "Joystick is supported in linux and mac only"
         assert pygame.joystick.get_count() > 0, "Please connect joystick or use keyboard input"
         print("Successfully Connect your Joystick!")
 
