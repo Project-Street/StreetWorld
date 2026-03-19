@@ -22,7 +22,7 @@ include-package-data = true
 [project.optional-dependencies]
 viewer = [
     "glfw==2.8.0",
-    "grpcio==1.50.0",
+    "grpcio==1.78.0",
     "protobuf==4.25.8",
     "PyOpenGL==3.1.9",
     "pillow>=10,<12",

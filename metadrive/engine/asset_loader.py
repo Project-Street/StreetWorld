@@ -133,7 +133,7 @@ def randomize_cover():
     background_folder_name = "background"
     files = os.listdir(AssetLoader.asset_path.joinpath(background_folder_name))
     files = [f for f in files if f.startswith("logo") and f.endswith("png")]
-    from metadrive.utils import get_np_random
+    from metadrive.utils.random_utils import get_np_random
     selected = get_np_random().choice(files)
     selected_file = AssetLoader.file_path("{}/{}".format(background_folder_name, selected))
     return selected_file

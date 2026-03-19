@@ -21,8 +21,9 @@ from metadrive.obs.observation_base import BaseObservation
 from metadrive.obs.gaussian_obs import GaussianObservation
 from metadrive.obs.observation_base import DummyObservation
 # from metadrive.obs.state_obs import LidarStateObservation
-from metadrive.utils import merge_dicts, get_np_random, concat_step_infos
 from metadrive.utils.logger import get_logger, reset_logger
+from metadrive.utils.random_utils import get_np_random
+from metadrive.utils.utils import merge_dicts, concat_step_infos
 from metadrive.engine.core.physics_world import PhysicsWorld
 from metadrive.engine.step_counter import StepCounter
 from metadrive.engine.core.collision_callback import collision_callback

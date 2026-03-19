@@ -5,7 +5,7 @@ import numpy as np
 from panda3d.core import GeomVertexData, Geom, GeomVertexArrayFormat, GeomVertexFormat, \
     GeomVertexWriter, GeomNode, Triangulator, GeomTriangles, NodePath
 
-from metadrive.utils import norm
+from metadrive.utils.math import norm
 
 
 def get_names(o_vdata):
