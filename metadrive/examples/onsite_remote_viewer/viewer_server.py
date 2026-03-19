@@ -10,6 +10,7 @@ import argparse
 import logging
 import threading
 import time
+import traceback
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -29,6 +30,10 @@ from metadrive.utils.logger import get_log_timestamp
 
 logger = logging.getLogger("onsite_viewer_server")
 _IMAGE_RECEIVED_DIR = None
+
+
+def _format_traceback(prefix: str) -> str:
+    return f"{prefix}\n{traceback.format_exc()}".rstrip()
 
 
 def _recv_first_image_rgb(middleware: OnSiteSwitch):
@@ -146,7 +151,7 @@ def run_server_loop(middleware: OnSiteSwitch, action_state, frame_state, state_l
             steering = float(action_state["steering"])
             throttle_brake = float(action_state["throttle_brake"])
 
-        middleware.send_vehicle_control(steering, throttle_brake)
+        middleware.send_vehicle_control(0, 0.5)
 
 
 class OnsiteViewerGrpcServicer(remote_viewer_pb2_grpc.OnsiteViewerServiceServicer):
@@ -156,20 +161,42 @@ class OnsiteViewerGrpcServicer(remote_viewer_pb2_grpc.OnsiteViewerServiceService
         self._state_lock = state_lock
 
     def SendAction(self, request, context):
-        with self._state_lock:
-            self._action_state["steering"] = float(request.steering)
-            self._action_state["throttle_brake"] = float(request.throttle_brake)
-            image = self._frame_state["image"]
-            if image is None:
-                return remote_viewer_pb2.Image()
-            return remote_viewer_pb2.Image(
-                data=image.data,
-                width=image.width,
-                height=image.height,
-                channels=image.channels,
-                format=image.format,
-                timestamp_us=image.timestamp_us,
+        try:
+            with self._state_lock:
+                self._action_state["steering"] = float(request.steering)
+                self._action_state["throttle_brake"] = float(request.throttle_brake)
+                image = self._frame_state["image"]
+            logger.debug(
+                "SendAction request received: steering=%.6f throttle_brake=%.6f has_image=%s",
+                self._action_state["steering"],
+                self._action_state["throttle_brake"],
+                image is not None,
             )
+        except Exception:
+            error_text = _format_traceback("viewer_server SendAction failed")
+            logger.error("%s", error_text)
+            context.abort(grpc.StatusCode.INTERNAL, error_text)
+
+        if image is None:
+            logger.debug("SendAction returning empty Image because no frame is available yet")
+            return remote_viewer_pb2.Image()
+        logger.debug(
+            "SendAction returning frame: width=%d height=%d channels=%d format=%s timestamp_us=%d bytes=%d",
+            image.width,
+            image.height,
+            image.channels,
+            image.format,
+            image.timestamp_us,
+            len(image.data),
+        )
+        return remote_viewer_pb2.Image(
+            data=image.data,
+            width=image.width,
+            height=image.height,
+            channels=image.channels,
+            format=image.format,
+            timestamp_us=image.timestamp_us,
+        )
 
 
 def main() -> None:

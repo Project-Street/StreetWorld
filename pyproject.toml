@@ -42,7 +42,8 @@ dependencies = [
     "grpcio==1.50.0",
     "grpcio-tools==1.50.0",
     "protobuf==4.25.8",
-    "huggingface-hub==0.31.4"
+    "huggingface-hub==0.31.4",
+    "pynvvideocodec==2.1.0"
 
 ]
 

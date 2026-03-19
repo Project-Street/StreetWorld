@@ -159,7 +159,10 @@ def main_loop(env : OnSiteScenarioEnv, middleware: OnSiteSwitch, save_debug_imag
 
         # Phase 2: Wait for ActorPrepare
         if not recv_prepare:
-            get_prepare(middleware, env)
+            result = get_prepare(middleware, env)
+            if result is not None:
+                _, _, _, scene_name = result
+                middleware.configure_rlsl_map(env.config["scene_config_directory"], scene_name)
             time.sleep(0.1)
             continue
 
@@ -179,7 +182,7 @@ def main_loop(env : OnSiteScenarioEnv, middleware: OnSiteSwitch, save_debug_imag
 
         # Execute simulation step
         action = vehicle_control if vehicle_control else [0.0, 0.0]
-        obs, reward, terminated, truncated, info = env.step(action)
+        obs, reward, terminated, truncated, info = env.step([0, 0.4])
 
         # Use relative timestamp from step_info as send timestamp.
         current_timestamp = info["relative_timestamp"]
@@ -189,7 +192,8 @@ def main_loop(env : OnSiteScenarioEnv, middleware: OnSiteSwitch, save_debug_imag
             middleware.send_pub_role(
                 obs,
                 env.last_received_pub_role,
-                current_timestamp
+                current_timestamp,
+                session_id
             )
             middleware.send_vehicle_feedback(
                 obs,

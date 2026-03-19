@@ -18,6 +18,7 @@ from metadrive.misc.nurec_interface.grpc_client import NurecGrpcClient
 from metadrive.misc.nurec_interface.nurec_parser import (
     compute_sim_world_to_xodr_map,
     export_one_scene,
+    generate_corrected_xodr,
     parse_camera_params,
     parse_world_to_nre,
 )
@@ -220,6 +221,7 @@ class SimulatorInterface:
         with zipfile.ZipFile(local_usdz, "r") as zf:
             zf.extractall(scene_dir)
         local_usdz.unlink()
+        generate_corrected_xodr(scene_dir)
 
         pose_dir = trajectory_root / scene_name
         export_one_scene(scene_dir, pose_dir)

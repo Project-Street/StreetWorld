@@ -13,6 +13,7 @@ import subprocess
 import ctypes as C
 from enum import Enum
 from pathlib import Path
+from typing import Optional
 import cv2
 import numpy as np
 import PyNvVideoCodec as nvc
@@ -62,6 +63,7 @@ class OnSiteSwitch:
     _ANSI_BLUE = "\033[94m"
     _ANSI_PURPLE = "\033[95m"
     _ANSI_RESET = "\033[0m"
+    _PUBROLE_ENCRYPT_KEY = (57, 13, 101, 66, 98, 99, 17, 92, 111, 151)
 
     def __init__(
         self,
@@ -105,6 +107,9 @@ class OnSiteSwitch:
         self._camera_decoders = {}
         self._image_sizes = image_sizes or {}
         self._n_warm_up = max(0, int(n_warm_up))
+        self._vts_map_module = None
+        self._rlsl_map = None
+        self._rlsl_scene_name = None
 
         # Send only this logger to a dedicated file.
         self._init_logger()
@@ -254,6 +259,17 @@ class OnSiteSwitch:
         result = get_fn(*args)
         elapsed_ms = (time.perf_counter() - t0) * 1000.0
         return result, elapsed_ms
+
+    @classmethod
+    def _pubrole_encrypt(cls, data: bytes) -> bytes:
+        if not data:
+            return data
+        encrypted = bytearray(data)
+        key = cls._PUBROLE_ENCRYPT_KEY
+        key_len = len(key)
+        for i in range(len(encrypted)):
+            encrypted[i] ^= key[i % key_len]
+        return bytes(encrypted)
 
     @staticmethod
     def _timed_put(send_fn, *args):
@@ -465,6 +481,78 @@ class OnSiteSwitch:
             "recv", msg.type(), {"expected_type": MT_ACTOR_PREPARE}, "main", channel_op="get", channel_elapsed_ms=get_ms
         )
         return None
+
+    def configure_rlsl_map(self, scene_config_directory, scene_name):
+        """
+        Configure RLSL map source from scene config.
+
+        Args:
+            scene_config_directory: Directory that contains scene yaml configs.
+            scene_name: Scene name, yaml file is "<scene_name>.yaml".
+        """
+
+        if self._rlsl_map is not None and self._rlsl_scene_name == scene_name:
+            return
+
+        cfg_dir = Path(scene_config_directory).expanduser()
+        cfg_path = cfg_dir / f"{scene_name}.yaml"
+
+        data = yaml.safe_load(cfg_path.read_text(encoding="utf-8")) or {}
+        scene_root = data.get("scene_root")
+        scene_uuid = data.get("scene_uuid")
+
+        scene_root_path = Path(scene_root)
+        if not scene_root_path.is_absolute():
+            scene_root_path = (Path.cwd() / scene_root_path).resolve()
+
+        xodr_path = scene_root_path / str(scene_uuid) / "corrected_map.xodr"
+        if not xodr_path.exists():
+            logger.warning("RLSL xodr not found: %s", xodr_path)
+            self._rlsl_map = None
+            self._rlsl_scene_name = None
+            return
+
+        if self._vts_map_module is None:
+            try:
+                import vts_map  # pylint: disable=import-outside-toplevel
+                self._vts_map_module = vts_map
+            except Exception as e:
+                logger.warning("Cannot import vts_map, disable RLSL map lookup: %s", e)
+                self._rlsl_map = None
+                self._rlsl_scene_name = None
+                return
+
+        try:
+            m = self._vts_map_module.Map()
+            handle = 0
+            m.load(str(xodr_path), handle)
+            self._rlsl_map = m
+            self._rlsl_scene_name = scene_name
+            logger.info("Configured RLSL xodr map for scene=%s from %s", scene_name, xodr_path)
+        except Exception as e:
+            logger.warning("Failed to load RLSL xodr map from %s: %s", xodr_path, e)
+            self._rlsl_map = None
+            self._rlsl_scene_name = None
+
+    def _build_rlsl_from_position(self, position) -> Optional[dict]:
+        if self._rlsl_map is None or self._vts_map_module is None:
+            return None
+
+        try:
+            px, py, pz = self._to_vec3(position)
+            xyz = self._vts_map_module.XYZ(px, py, pz)
+            slz = self._vts_map_module.SLZ()
+            self._rlsl_map.find_slz_global(xyz, slz)
+            return {
+                "road_id": str(slz.lane_id.road_id),
+                "lane_id": int(slz.lane_id.local_id),
+                "s": float(slz.s),
+                "l": float(slz.l),
+                "z": float(slz.z),
+            }
+        except Exception:
+            logger.debug("Failed to build RLSL from position=%s", position, exc_info=True)
+            return None
 
     def recv_notify(self):
         """
@@ -768,24 +856,26 @@ class OnSiteSwitch:
         else:
             logger.info(f"Sent SubRole: session={session_id}")
 
-    def send_pub_role(self, obs, last_received_pub_role, current_timestamp):
+    def send_pub_role(self, obs, last_received_pub_role, current_timestamp, session_id=""):
         """
         Send PubRole message to OnSite server from env observation.
 
         Args:
-            obs: Actor observation dict (must contain `states`, `surrounding`, optional `global_rlsl`)
+            obs: Actor observation dict (must contain `states`, `surrounding`)
             last_received_pub_role: Last received PubRole message (for preserving fields)
             current_timestamp: Current simulation timestamp in microseconds
+            session_id: Current session ID
         """
         role_states = self._extract_role_states_from_obs(obs)
 
         msg = PubRole()
+        msg.session_id = str(session_id)
         ts_us = int(current_timestamp)
         pub_role_seq = self._next_seq(MT_PUBROLE)
         msg.header.sim_ts = ts_us // 1000
         msg.header.send_ts = int(time.time() * 1000)
         msg.header.seq_no = pub_role_seq
-
+    
         for role_id, state in role_states.items():
             role = self._agent_state_to_single_role(
                 role_id, state, last_received_pub_role, current_timestamp, pub_role_seq
@@ -793,11 +883,12 @@ class OnSiteSwitch:
             msg.s_roles.append(role)
 
         data = msg.SerializeToString()
+        data = self._pubrole_encrypt(data)
         length = len(data)
         ret, put_ms = self._timed_put(self.channel_map["pubrole_encrypt"].put, MT_PUBROLE, length, data)
-        # self._log_message_debug(
-        #     "send", MT_PUBROLE, {**self._proto_to_dict(msg), "ret": ret}, "main", channel_op="put", channel_elapsed_ms=put_ms
-        # )
+        self._log_message_debug(
+            "send", MT_PUBROLE, {**self._proto_to_dict(msg), "ret": ret}, "main", channel_op="put", channel_elapsed_ms=put_ms
+        )
 
         if ret != 0:
             logger.error(f"Failed to send PubRole, ret: {ret}")
@@ -949,21 +1040,16 @@ class OnSiteSwitch:
         role_states = {}
 
         actor_state = dict(obs["states"])
-        actor_state["rlsl"] = None
-        if "global_rlsl" in obs and "actor" in obs["global_rlsl"]:
-            actor_state["rlsl"] = obs["global_rlsl"]["actor"]
+        actor_state["rlsl"] = self._build_rlsl_from_position(actor_state.get("position"))
         role_states[self.actor_id] = actor_state
 
         if "surrounding" not in obs:
             return role_states
 
         surrounding = obs["surrounding"]
-        has_global_rlsl = "global_rlsl" in obs
         for role_id, s in surrounding.items():
             state = dict(s)
-            state["rlsl"] = None
-            if has_global_rlsl and role_id in obs["global_rlsl"]:
-                state["rlsl"] = obs["global_rlsl"][role_id]
+            state["rlsl"] = self._build_rlsl_from_position(state.get("position"))
             role_states[role_id] = state
 
         return role_states
@@ -1011,6 +1097,7 @@ class OnSiteSwitch:
         role.id = agent_id
         role.name = agent_id
         role.f_status.extend([1.0] + [0.0] * 8)  # Placeholder for status flags
+        role.s_status.append(str(agent_id))
         # Preserve type and size from last received PubRole if available
         cached_role = None
         if last_received_pub_role:

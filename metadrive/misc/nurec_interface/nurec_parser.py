@@ -4,6 +4,7 @@ import copy
 import json
 import logging
 import os
+import re
 from pathlib import Path
 from collections import defaultdict
 from typing import Any, Dict, List, Optional, Tuple
@@ -14,6 +15,27 @@ import torch
 from metadrive.utils.trajectory import build_rotation
 
 logger = logging.getLogger(__name__)
+
+_XODR_HEADER_TAG_RE = re.compile(r"<header\b[^>]*>", re.IGNORECASE | re.DOTALL)
+_XODR_ATTR_RE = re.compile(r'([A-Za-z_][A-Za-z0-9_]*)="([^"]*)"')
+_XODR_JS_DATE_RE = re.compile(
+    r"^[A-Za-z]{3}\s+([A-Za-z]{3})\s+(\d{1,2})\s+(\d{4})\s+(\d{2}:\d{2}:\d{2})\s+GMT[+-]\d{4}(?:\s+\(.*\))?$"
+)
+_XODR_MONTH_MAP = {
+    "Jan": 1,
+    "Feb": 2,
+    "Mar": 3,
+    "Apr": 4,
+    "May": 5,
+    "Jun": 6,
+    "Jul": 7,
+    "Aug": 8,
+    "Sep": 9,
+    "Oct": 10,
+    "Nov": 11,
+    "Dec": 12,
+}
+_XODR_ZERO_SCI = "0.0000000000000000e+00"
 
 
 def _load_json(path: Path | str) -> Dict[str, Any]:
@@ -218,6 +240,67 @@ def compute_sim_world_to_xodr_map(rig_data: Dict[str, Any], xodr_path: Path) -> 
     xodr_xml = xodr_path.read_text(encoding="utf-8")
     t_world_base = np.asarray(rig_data["T_world_base"], dtype=np.float64)
     return np.asarray(get_t_rig_enu_from_ecef(t_world_base, xodr_xml), dtype=np.float64)
+
+
+def _to_xodr_iso_datetime(value: str) -> str:
+    value = value.strip()
+    if re.match(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$", value):
+        return value
+    match = _XODR_JS_DATE_RE.match(value)
+    if not match:
+        return value
+    month_text, day_text, year_text, hms = match.groups()
+    month = _XODR_MONTH_MAP.get(month_text)
+    if month is None:
+        return value
+    return f"{int(year_text):04d}-{month:02d}-{int(day_text):02d}T{hms}"
+
+
+def generate_corrected_xodr(scene_dir: Path) -> Path:
+    src = scene_dir / "map.xodr"
+    dst = scene_dir / "corrected_map.xodr"
+    if not src.exists():
+        raise FileNotFoundError(f"map.xodr not found: {src}")
+
+    text = src.read_text(encoding="utf-8")
+    match = _XODR_HEADER_TAG_RE.search(text)
+    if not match:
+        raise ValueError(f"No <header> tag found in xodr: {src}")
+
+    attrs = dict(_XODR_ATTR_RE.findall(match.group(0)))
+    if not attrs:
+        raise ValueError(f"No header attributes found in xodr: {src}")
+
+    attrs["date"] = _to_xodr_iso_datetime(attrs.get("date", ""))
+    attrs["north"] = _XODR_ZERO_SCI
+    attrs["south"] = _XODR_ZERO_SCI
+    attrs["east"] = _XODR_ZERO_SCI
+    attrs["west"] = _XODR_ZERO_SCI
+
+    ordered_keys = [
+        "revMajor",
+        "revMinor",
+        "name",
+        "version",
+        "date",
+        "vendor",
+        "north",
+        "south",
+        "east",
+        "west",
+    ]
+    parts = []
+    for key in ordered_keys:
+        if key in attrs:
+            parts.append(f'{key}="{attrs[key]}"')
+    for key, value in attrs.items():
+        if key not in ordered_keys:
+            parts.append(f'{key}="{value}"')
+    new_header = "<header " + " ".join(parts) + ">"
+    corrected_text = text[:match.start()] + new_header + text[match.end():]
+    dst.write_text(corrected_text, encoding="utf-8")
+    logger.info("Generated corrected xodr: %s", dst)
+    return dst
 
 
 def parse_tracking_data_for_export(

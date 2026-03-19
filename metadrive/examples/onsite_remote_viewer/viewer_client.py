@@ -29,6 +29,22 @@ logger = logging.getLogger("onsite_viewer_client")
 _IMAGE_RECEIVED_DIR = None
 
 
+def _format_rpc_error(exc: grpc.RpcError) -> str:
+    parts = [f"code={exc.code().name}"]
+
+    details = exc.details()
+    if details:
+        parts.append(f"details=\n{details}")
+
+    debug_error_string = getattr(exc, "debug_error_string", None)
+    if callable(debug_error_string):
+        debug_text = debug_error_string()
+        if debug_text:
+            parts.append(f"debug_error_string={debug_text}")
+
+    return "\n".join(parts)
+
+
 class OnSiteViewer:
     def __init__(self, height: int = 720, width: int = 1280) -> None:
         self.height = height
@@ -179,6 +195,7 @@ class OnsiteViewerGrpcClient:
     def _connect(self) -> bool:
         if self._stub is not None:
             return True
+        logger.debug("Creating gRPC channel to %s with options=%s", self._target, self._options)
         channel = grpc.insecure_channel(self._target, options=self._options)
         try:
             grpc.channel_ready_future(channel).result(timeout=1.0)
@@ -194,16 +211,33 @@ class OnsiteViewerGrpcClient:
     def send_action(self, steering: float, throttle_brake: float) -> Optional[remote_viewer_pb2.Image]:
         if not self._connect():
             return None
+        logger.debug(
+            "Sending action to %s: steering=%.6f throttle_brake=%.6f",
+            self._target,
+            float(steering),
+            float(throttle_brake),
+        )
         try:
-            return self._stub.SendAction(
+            frame = self._stub.SendAction(
                 remote_viewer_pb2.Action(
                     steering=float(steering),
                     throttle_brake=float(throttle_brake),
                 ),
                 timeout=1.0,
             )
+            logger.debug(
+                "Received frame from %s: width=%d height=%d channels=%d format=%s timestamp_us=%d bytes=%d",
+                self._target,
+                frame.width,
+                frame.height,
+                frame.channels,
+                frame.format,
+                frame.timestamp_us,
+                len(frame.data),
+            )
+            return frame
         except grpc.RpcError as exc:
-            logger.warning("SendAction RPC error: %s; retrying...", exc)
+            logger.error("SendAction RPC error:\n%s", _format_rpc_error(exc))
             self.close()
             return None
 
