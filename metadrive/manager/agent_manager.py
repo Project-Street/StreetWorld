@@ -118,6 +118,9 @@ class AgentManager(BaseManager):
         But other policies like ReplayPolicy should be called in after_step, as they already know the final state and
         exempt the requirement for rolling out the dynamic system to get it.
         """
+        if hasattr(self.policy, 'static') and self.policy.static:
+            return
+
         if self.state == AgentState.ALIVE:
             if isinstance(self.policy, EnvInputPolicy):
                 action = self.policy.act(action)

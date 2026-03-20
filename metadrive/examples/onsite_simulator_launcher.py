@@ -163,7 +163,7 @@ def main_loop(env : OnSiteScenarioEnv, middleware: OnSiteSwitch, save_debug_imag
             if result is not None:
                 _, _, _, scene_name = result
                 middleware.configure_rlsl_map(env.config["scene_config_directory"], scene_name)
-            time.sleep(0.1)
+            time.sleep(0.5)
             continue
 
         # Phase 3: Send ActorPrepareResult and SubRole
@@ -171,7 +171,7 @@ def main_loop(env : OnSiteScenarioEnv, middleware: OnSiteSwitch, save_debug_imag
             middleware.send_actor_prepare_result(session_id, actor_id, result=True)
             # Send SubRole (only session_id required)
             middleware.send_sub_role(session_id)
-            time.sleep(1)
+            time.sleep(0.5)
             continue
 
         # Phase 4: Main simulation loop
@@ -182,7 +182,7 @@ def main_loop(env : OnSiteScenarioEnv, middleware: OnSiteSwitch, save_debug_imag
 
         # Execute simulation step
         action = vehicle_control if vehicle_control else [0.0, 0.0]
-        obs, reward, terminated, truncated, info = env.step([0, 0.4])
+        obs, reward, terminated, truncated, info = env.step(action)
 
         # Use relative timestamp from step_info as send timestamp.
         current_timestamp = info["relative_timestamp"]
@@ -213,9 +213,6 @@ def main_loop(env : OnSiteScenarioEnv, middleware: OnSiteSwitch, save_debug_imag
                         _save_front_image(images[-1], current_timestamp)
             if images_to_send:
                 middleware.send_images(images_to_send, timestamp_sec)
-
-        # Small delay to avoid busy loop
-        time.sleep(0.01)
 
 
 def main():

@@ -284,7 +284,7 @@ def _decode_frame(frame) -> Optional[np.ndarray]:
 
 
 class OnsiteViewerGrpcClient:
-    def __init__(self, host: str, port: int, max_message_bytes: int) -> None:
+    def __init__(self, host: str, port: int, max_message_bytes: int, timeout_s: float = 5.0) -> None:
         self._target = f"{host}:{port}"
         self._options = [
             ("grpc.max_send_message_length", max_message_bytes),
@@ -292,6 +292,7 @@ class OnsiteViewerGrpcClient:
         ]
         self._channel = None
         self._stub = None
+        self._timeout_s = float(timeout_s)
 
     def _connect(self) -> bool:
         if self._stub is not None:
@@ -299,7 +300,7 @@ class OnsiteViewerGrpcClient:
         logger.debug("Creating gRPC channel to %s with options=%s", self._target, self._options)
         channel = grpc.insecure_channel(self._target, options=self._options)
         try:
-            grpc.channel_ready_future(channel).result(timeout=1.0)
+            grpc.channel_ready_future(channel).result(timeout=self._timeout_s)
         except grpc.FutureTimeoutError:
             logger.warning("gRPC server %s not reachable, retrying...", self._target)
             channel.close()
@@ -324,7 +325,7 @@ class OnsiteViewerGrpcClient:
                     steering=float(steering),
                     throttle_brake=float(throttle_brake),
                 ),
-                timeout=1.0,
+                timeout=self._timeout_s,
             )
             logger.debug(
                 "Received frame from %s: width=%d height=%d channels=%d format=%s timestamp_us=%d bytes=%d",
@@ -375,6 +376,8 @@ def main() -> None:
     parser.add_argument("--height", type=int, default=720)
     parser.add_argument("--save-debug-image", action="store_true",
                         help="Save debug images regardless of log level")
+    parser.add_argument("--timeout", type=float, default=5.0,
+                        help="gRPC timeout seconds for connect and SendAction")
     parser.add_argument("--log_level", type=str, default="INFO")
     args = parser.parse_args()
 
@@ -385,7 +388,7 @@ def main() -> None:
 
     viewer = OnSiteViewer(height=args.height, width=args.width)
     controller = KeyboardController(viewer.window)
-    grpc_client = OnsiteViewerGrpcClient(args.grpc_host, args.grpc_port, max_bytes)
+    grpc_client = OnsiteViewerGrpcClient(args.grpc_host, args.grpc_port, max_bytes, timeout_s=args.timeout)
     last_image = None
 
     try:

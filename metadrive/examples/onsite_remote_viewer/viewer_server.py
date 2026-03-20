@@ -92,12 +92,12 @@ def run_server_loop(middleware: OnSiteSwitch, action_state, frame_state, state_l
             if result is not None:
                 session_id, actor_id, _, _ = result
                 recv_prepare = True
-            time.sleep(0.05)
+            time.sleep(0.5)
 
         if recv_prepare and not start_test:
             middleware.send_actor_prepare_result(session_id=session_id, actor_id=actor_id, result=True)
-            time.sleep(0.2)
-
+            time.sleep(0.5)
+        
         frame = _recv_first_image_rgb(middleware)
         if frame is None or not recv_prepare or not start_test:
             continue
@@ -108,8 +108,8 @@ def run_server_loop(middleware: OnSiteSwitch, action_state, frame_state, state_l
         if save_debug_image:
             _save_received_image(img)
 
-        try:
-            image_msg = remote_viewer_pb2.Image(
+        with state_lock:
+            frame_state["image"] = remote_viewer_pb2.Image(
                 data=img.tobytes(),
                 width=img.shape[1],
                 height=img.shape[0],
@@ -117,41 +117,12 @@ def run_server_loop(middleware: OnSiteSwitch, action_state, frame_state, state_l
                 format="RGB",
                 timestamp_us=timestamp_us,
             )
-        except ValueError:
-            img_shape = getattr(img, "shape", None)
-            img_dtype = getattr(img, "dtype", None)
-            try:
-                img_min = float(img.min()) if img is not None else None
-                img_max = float(img.max()) if img is not None else None
-            except Exception:
-                img_min = None
-                img_max = None
-            try:
-                img_nbytes = int(img.nbytes) if img is not None else None
-            except Exception:
-                img_nbytes = None
-            logger.exception(
-                "Failed to build Image message: raw_timestamp=%r (type=%s), "
-                "timestamp_us=%r, img_shape=%r, img_dtype=%r, img_min=%r, img_max=%r, "
-                "img_nbytes=%r, frame_keys=%r",
-                raw_timestamp,
-                type(raw_timestamp),
-                timestamp_us,
-                img_shape,
-                img_dtype,
-                img_min,
-                img_max,
-                img_nbytes,
-                list(frame.keys()) if isinstance(frame, dict) else None,
-            )
-            continue
-
-        with state_lock:
-            frame_state["image"] = image_msg
             steering = float(action_state["steering"])
             throttle_brake = float(action_state["throttle_brake"])
+            action_state["steering"] = 0.0
+            action_state["throttle_brake"] = 0.0
 
-        middleware.send_vehicle_control(0, 0.5)
+        middleware.send_vehicle_control(steering, throttle_brake)
 
 
 class OnsiteViewerGrpcServicer(remote_viewer_pb2_grpc.OnsiteViewerServiceServicer):
@@ -161,24 +132,13 @@ class OnsiteViewerGrpcServicer(remote_viewer_pb2_grpc.OnsiteViewerServiceService
         self._state_lock = state_lock
 
     def SendAction(self, request, context):
-        try:
-            with self._state_lock:
-                self._action_state["steering"] = float(request.steering)
-                self._action_state["throttle_brake"] = float(request.throttle_brake)
-                image = self._frame_state["image"]
-            logger.debug(
-                "SendAction request received: steering=%.6f throttle_brake=%.6f has_image=%s",
-                self._action_state["steering"],
-                self._action_state["throttle_brake"],
-                image is not None,
-            )
-        except Exception:
-            error_text = _format_traceback("viewer_server SendAction failed")
-            logger.error("%s", error_text)
-            context.abort(grpc.StatusCode.INTERNAL, error_text)
+        with self._state_lock:
+            self._action_state["steering"] = float(request.steering)
+            self._action_state["throttle_brake"] = float(request.throttle_brake)
+            image = self._frame_state["image"]
+            self._frame_state["image"] = None
 
         if image is None:
-            logger.debug("SendAction returning empty Image because no frame is available yet")
             return remote_viewer_pb2.Image()
         logger.debug(
             "SendAction returning frame: width=%d height=%d channels=%d format=%s timestamp_us=%d bytes=%d",

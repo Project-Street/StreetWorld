@@ -108,7 +108,7 @@ class SimulatorInterface:
             _simple_nurec_log_path,
         )
 
-        deadline = time.time() + 5.0
+        deadline = time.time() + 30.0
         while time.time() < deadline:
             if self._is_port_listening(self._grpc_host, self._grpc_port):
                 return
@@ -181,10 +181,7 @@ class SimulatorInterface:
         if not token:
             raise RuntimeError("Missing HF_TOKEN; cannot auto-download NuRec scene")
 
-        try:
-            from huggingface_hub import HfApi, hf_hub_download
-        except ImportError as exc:
-            raise ImportError("huggingface_hub is required for auto scene download") from exc
+        from huggingface_hub import HfApi, hf_hub_download
 
         api = HfApi()
         files = api.list_repo_files(repo_id=repo_id, repo_type="dataset", token=token)

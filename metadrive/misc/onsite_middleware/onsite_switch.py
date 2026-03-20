@@ -883,11 +883,11 @@ class OnSiteSwitch:
             msg.s_roles.append(role)
 
         data = msg.SerializeToString()
-        data = self._pubrole_encrypt(data)
-        length = len(data)
-        ret, put_ms = self._timed_put(self.channel_map["pubrole_encrypt"].put, MT_PUBROLE, length, data)
+        ret, put_ms = self._timed_put(self.channel_map["pubrole"].put, MT_PUBROLE, len(data), data)
+        data_enc = self._pubrole_encrypt(data)
+        ret_enc, put_enc_ms = self._timed_put(self.channel_map["pubrole_encrypt"].put, MT_PUBROLE, len(data_enc), data_enc)
         self._log_message_debug(
-            "send", MT_PUBROLE, {**self._proto_to_dict(msg), "ret": ret}, "main", channel_op="put", channel_elapsed_ms=put_ms
+            "send", MT_PUBROLE, {**self._proto_to_dict(msg), "ret": [ret, ret_enc]}, "main", channel_op="put", channel_elapsed_ms=put_ms + put_enc_ms
         )
 
         if ret != 0:
