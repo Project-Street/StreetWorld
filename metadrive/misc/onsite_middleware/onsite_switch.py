@@ -47,6 +47,12 @@ class TERMINAL_TYPE(Enum):
     TESTEE = "apollo_testee"
 
 
+class SIM_STATE(Enum):
+    IDLE = "idle"
+    PREPARED = "prepared"
+    STARTED = "started"
+
+
 class OnSiteSwitch:
     """
     OnSite communication middleware for MetaDrive.
@@ -68,7 +74,6 @@ class OnSiteSwitch:
     def __init__(
         self,
         onsite_dir,
-        recv_none_sleep=0.02,
         terminal_type=TERMINAL_TYPE.SIMULATOR,
         image_sizes=None,
         n_warm_up=10,
@@ -78,14 +83,12 @@ class OnSiteSwitch:
 
         Args:
             onsite_dir: OnSite workspace directory, containing config/common.yaml and daemon/start.sh
-            recv_none_sleep: Sleep time (seconds) when recv returns None/invalid
             terminal_type: OnSite terminal type enum for channel client_name
             image_sizes: Dict of camera_name -> (H, W) image sizes for warm-up
             n_warm_up: Number of random warm-up image batches to send (timestamp=-1)
         """
         self.onsite_dir = Path(onsite_dir).expanduser().resolve()
         self._daemon_proc = None
-        self.recv_none_sleep = float(recv_none_sleep)
         if not isinstance(terminal_type, TERMINAL_TYPE):
             raise TypeError("terminal_type must be TERMINAL_TYPE enum")
         self.terminal_type = terminal_type
@@ -452,7 +455,6 @@ class OnSiteSwitch:
         """
         (ret, msg), get_ms = self._timed_get(self.channel_map["prepare"].get)
         if msg is None or ret < 0:
-            time.sleep(self.recv_none_sleep)
             return None
 
         if msg.type() == MT_ACTOR_PREPARE:
@@ -563,7 +565,6 @@ class OnSiteSwitch:
         """
         (ret, msg), get_ms = self._timed_get(self.channel_map["notify"].get)
         if msg is None or ret < 0:
-            time.sleep(self.recv_none_sleep)
             return None
 
         if msg.type() == MT_NOTIFY:
@@ -604,7 +605,6 @@ class OnSiteSwitch:
         """
         (ret, msg), get_ms = self._timed_get(self.channel_map["pubrole_encrypt"].get)
         if msg is None or ret < 0:
-            time.sleep(self.recv_none_sleep)
             return None
 
         if msg.type() == MT_PUBROLE:
@@ -629,7 +629,6 @@ class OnSiteSwitch:
 
         (ret, msg), get_ms = self._timed_get(self.channel_map["vehiclecontrol"].get)
         if msg is None or ret < 0:
-            time.sleep(self.recv_none_sleep)
             return None
 
         if msg.type() == VEHICLE_CONTROL:
@@ -660,7 +659,6 @@ class OnSiteSwitch:
 
         (ret, msg), get_ms = self._timed_get(self.channel_map["vehiclecontrol"].get)
         if msg is None or ret < 0:
-            time.sleep(self.recv_none_sleep)
             return None
 
         if msg.type() == VEHICLE_FEEDBACK:
@@ -687,7 +685,6 @@ class OnSiteSwitch:
 
         (ret, msg), get_ms = self._timed_get(self.channel_map["sessioninfo"].get)
         if msg is None or ret < 0:
-            time.sleep(self.recv_none_sleep)
             return None
 
         if msg.type() == MT_SESSIONINFO:
@@ -715,34 +712,10 @@ class OnSiteSwitch:
         """
         images, get_ms = self._timed_get(self.channel_map["camera"].get_image_simple)
         if images is None or len(images) == 0:
-            time.sleep(self.recv_none_sleep)
             return None
 
         decoded_images = []
         for i, image in enumerate(images):
-            raw_timestamp_sec = float(image.timestamp_sec)
-            raw_measurement_time = float(image.measurement_time)
-            raw_camera_timestamp = int(image.camera_timestamp)
-            suspicious_camera_timestamp = raw_camera_timestamp > (2**63 - 1)
-            suspicious_negative_time = raw_timestamp_sec < 0 or raw_measurement_time < 0
-            if suspicious_camera_timestamp or suspicious_negative_time:
-                wrapped_signed_camera_timestamp = (
-                    raw_camera_timestamp - (2**64) if suspicious_camera_timestamp else raw_camera_timestamp
-                )
-                logger.warning(
-                    "Suspicious incoming image timing: index=%d "
-                    "timestamp_sec=%r measurement_time=%r camera_timestamp=%r "
-                    "camera_timestamp_as_signed=%r sequence_num=%r encoding=%r size=%dx%d",
-                    i,
-                    raw_timestamp_sec,
-                    raw_measurement_time,
-                    raw_camera_timestamp,
-                    wrapped_signed_camera_timestamp,
-                    int(image.sequence_num),
-                    str(image.encoding),
-                    int(image.width),
-                    int(image.height),
-                )
             if image.measurement_time == -1:
                 logger.debug("Drop warm-up image: index=%d measurement_time=%s", i, image.measurement_time)
                 continue
@@ -783,7 +756,6 @@ class OnSiteSwitch:
                 )
 
         if len(decoded_images) == 0:
-            time.sleep(self.recv_none_sleep)
             return None
 
         self._log_message_debug(

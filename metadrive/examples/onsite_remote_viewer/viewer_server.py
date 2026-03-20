@@ -8,6 +8,7 @@ using the latest action from remote clients.
 
 import argparse
 import logging
+import os
 import threading
 import time
 import traceback
@@ -19,7 +20,7 @@ try:
 except ImportError as exc:  # pragma: no cover - runtime dependency
     raise ImportError("grpcio is required for viewer_server.py") from exc
 
-from metadrive.misc.onsite_middleware import OnSiteSwitch, TERMINAL_TYPE
+from metadrive.misc.onsite_middleware import OnSiteSwitch, TERMINAL_TYPE, SIM_STATE
 from metadrive.misc.onsite_middleware.onsite_proto.main.proto.enums_pb2 import (
     NT_START_TEST,
     NT_ABORT_TEST,
@@ -62,9 +63,8 @@ def _save_received_image(image) -> None:
 
 
 def run_server_loop(middleware: OnSiteSwitch, action_state, frame_state, state_lock: threading.Lock,
-                    save_debug_image: bool = False) -> None:
-    recv_prepare = False
-    start_test = False
+                    save_debug_image: bool = False, none_sleep_s: float = 0.02) -> None:
+    sim_state = SIM_STATE.IDLE
     session_id = ""
     actor_id = ""
     last_loop_time = time.perf_counter()
@@ -73,35 +73,36 @@ def run_server_loop(middleware: OnSiteSwitch, action_state, frame_state, state_l
         now = time.perf_counter()
         loop_ms = (now - last_loop_time) * 1000.0
         last_loop_time = now
-        logger.debug("=> => => => Loop => => => => (%.3f ms)", loop_ms)
+        print("=> => => => Loop => => => => (%.3f ms)", loop_ms)
 
         notify = middleware.recv_notify()
-        if notify is not None:
+        if notify is None and sim_state != SIM_STATE.STARTED:
+            time.sleep(none_sleep_s)
+        else:
+            logger.info(f"Received Notify: type={notify.type} role_id={notify.role_id}")
             if notify.type in (NT_ABORT_TEST, NT_FINISH_TEST):
-                logger.info("Finish session")
-                start_test = False
-                recv_prepare = False
-                session_id = ""
-                actor_id = ""
+                sim_state = SIM_STATE.IDLE
+                session_id, actor_id = "", ""
             elif notify.type == NT_START_TEST:
-                logger.info("Start session")
-                start_test = True
+                sim_state = SIM_STATE.STARTED
 
-        if not recv_prepare:
+        if sim_state == SIM_STATE.IDLE:
             result = middleware.recv_actor_prepare()
             if result is not None:
                 session_id, actor_id, _, _ = result
-                recv_prepare = True
+                sim_state = SIM_STATE.PREPARED
             time.sleep(0.5)
 
-        if recv_prepare and not start_test:
+        if sim_state == SIM_STATE.PREPARED:
             middleware.send_actor_prepare_result(session_id=session_id, actor_id=actor_id, result=True)
             time.sleep(0.5)
         
         frame = _recv_first_image_rgb(middleware)
-        if frame is None or not recv_prepare or not start_test:
+        if frame is None and sim_state != SIM_STATE.STARTED:
+            time.sleep(none_sleep_s)
+        if frame is None or sim_state != SIM_STATE.STARTED:
             continue
-        
+
         img = frame["rgb"]
         raw_timestamp = frame.get("camera_timestamp")
         timestamp_us = int(raw_timestamp)
@@ -164,7 +165,7 @@ def main() -> None:
     parser.add_argument("--onsite_dir", type=str, default="onsite", help="OnSite workspace directory")
     parser.add_argument("--grpc_host", type=str, default="0.0.0.0", help="viewer server bind host")
     parser.add_argument("--grpc_port", type=int, default=50051, help="viewer server bind port")
-    parser.add_argument("--recv_none_sleep", type=float, default=0.02, help="sleep seconds when recv returns empty")
+    parser.add_argument("--none_sleep_s", type=float, default=0.02, help="sleep seconds when recv returns empty")
     parser.add_argument("--save-debug-image", action="store_true",
                         help="Save debug images regardless of log level")
     parser.add_argument("--log_level", type=str, default="INFO")
@@ -194,17 +195,24 @@ def main() -> None:
 
     middleware = OnSiteSwitch(
         onsite_dir=args.onsite_dir,
-        recv_none_sleep=args.recv_none_sleep,
         terminal_type=TERMINAL_TYPE.TESTEE,
     )
 
     try:
-        run_server_loop(middleware, action_state, frame_state, state_lock, save_debug_image=args.save_debug_image)
+        run_server_loop(
+            middleware,
+            action_state,
+            frame_state,
+            state_lock,
+            save_debug_image=args.save_debug_image,
+            none_sleep_s=args.none_sleep_s,
+        )
     except KeyboardInterrupt:
-        logger.info("Interrupted by user")
+        logger.info("Interrupted by user: force exiting now")
     finally:
         middleware.close()
-        grpc_server.stop(grace=1)
+        grpc_server.stop(grace=0)
+        os._exit(130)
 
 
 if __name__ == "__main__":

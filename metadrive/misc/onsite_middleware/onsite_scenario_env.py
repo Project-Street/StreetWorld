@@ -39,6 +39,9 @@ class OnSiteScenarioEnv(ScenarioEnv):
             self.data_manager.hotload_scenario(str(cfg_path))
         return super().reset(seed=seed, scene_name=scene_name)
 
+    def close(self):
+        self.model.close()
+
     def _update_scene(self):
         """
         In OnSite mode, actor state is controlled by Notify, so skip actor.update_state().

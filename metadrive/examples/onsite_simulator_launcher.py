@@ -15,7 +15,7 @@ import sys
 import os
 from pathlib import Path
 
-from metadrive.misc.onsite_middleware import OnSiteSwitch, OnSiteScenarioEnv, TERMINAL_TYPE
+from metadrive.misc.onsite_middleware import OnSiteSwitch, OnSiteScenarioEnv, TERMINAL_TYPE, SIM_STATE
 from metadrive.manager.agent_manager import AgentState
 from metadrive.misc.nurec_interface.simulator_interface import SimulatorInterface
 from metadrive.onstite_config import ONSITE_DEFAULT_CONFIG
@@ -40,18 +40,16 @@ NOTIFY_TO_STATE = {
     NT_FINISH_TEST: AgentState.SUCCESS,
     NT_DESTROY_ROLE: AgentState.IDLE,
     NT_ARRIVED_ROLE: AgentState.SUCCESS,
-    NT_ROLLED: AgentState.CRASH_OBJECT,
-    NT_PAUSE_TEST: None,  # Ignore
+    NT_ROLLED: AgentState.CRASH_OBJECT
 }
 
 # Global state variables
-recv_prepare = False
-start_test = False
+sim_state = SIM_STATE.IDLE
 session_id = ""
 actor_id = "simulator"
 
 
-def process_notify(middleware, env):
+def process_notify(middleware, env, none_sleep_s):
     """
     Process Notify messages from OnSite server.
 
@@ -62,67 +60,38 @@ def process_notify(middleware, env):
         middleware: OnSiteMiddleware instance
         env: OnSiteScenarioEnv instance
     """
-    global start_test, recv_prepare, session_id
+    global sim_state, session_id, actor_id
 
     # Collect all pending Notify messages
     notifies = middleware.recv_all_notifies()
+    if not notifies and sim_state != SIM_STATE.STARTED:
+        time.sleep(none_sleep_s)
 
     for notify in notifies:
         role_id = notify.role_id
         notify_type = notify.type
 
-        mapped_state = NOTIFY_TO_STATE[notify_type]
+        mapped_state = NOTIFY_TO_STATE.get(notify_type)
         logger.info(f"Received Notify: type={mapped_state}, role_id={role_id}")
 
-        # Map NotifyType to AgentStates
-        new_state = mapped_state
-
-        if new_state is None:
-            # Ignore this notify type
+        if mapped_state is None:
             continue
 
         # Handle session-level notifications
         if notify_type in [NT_ABORT_TEST, NT_FINISH_TEST]:
-            logger.info(f"Session ended: {notify_type}")
-            start_test = False
-            recv_prepare = False
+            sim_state = SIM_STATE.IDLE
+            session_id, actor_id = "", ""
             continue
         elif notify_type == NT_START_TEST:
-            logger.info(f"Session started: {notify_type}")
-            start_test = True
-            
-            env.agent_managers["actor"].set_state(new_state)
+            sim_state = SIM_STATE.STARTED
 
         # Actor state is controlled by notify; ignore notifies for other roles.
-        if role_id == "actor":
-            env.agent_managers["actor"].set_state(new_state)
-            logger.info(f"Agent actor state updated to {new_state}")
+        if role_id == "actor" or notify_type == NT_START_TEST:
+            env.agent_managers["actor"].set_state(mapped_state)
+            logger.info(f"Agent actor state updated to {mapped_state}")
         else:
             logger.debug(f"Ignore notify for non-actor role: role_id={role_id}, type={notify_type}")
 
-
-
-def get_prepare(middleware, env):
-    """
-    Receive ActorPrepare message from OnSite server.
-
-    Args:
-        middleware: OnSiteMiddleware instance
-
-    Returns:
-        tuple: (session_id, actor_id, brief_data, scene_name) if received, None otherwise
-    """
-    global recv_prepare, session_id
-
-    result = middleware.recv_actor_prepare()
-    if result is None:
-        return None
-
-    session_id, _, brief_data, scene_name = result
-    logger.info(f"Reset env with scene_name={scene_name} parsed from session_id={session_id}")
-    env.reset(scene_name=scene_name)
-    recv_prepare = True
-    return result
 
 
 def _extract_image_sizes_from_actor_config(env_config):
@@ -131,7 +100,7 @@ def _extract_image_sizes_from_actor_config(env_config):
 
 
 
-def main_loop(env : OnSiteScenarioEnv, middleware: OnSiteSwitch, save_debug_image=False):
+def main_loop(env : OnSiteScenarioEnv, middleware: OnSiteSwitch, save_debug_image=False, none_sleep_s=0.02):
     """
     Main communication loop with OnSite server.
 
@@ -144,7 +113,7 @@ def main_loop(env : OnSiteScenarioEnv, middleware: OnSiteSwitch, save_debug_imag
         env: OnSiteScenarioEnv instance
         middleware: OnSiteMiddleware instance
     """
-    global recv_prepare, start_test
+    global sim_state
 
     logger.info("Starting main loop")
     last_loop_time = time.perf_counter()
@@ -155,23 +124,26 @@ def main_loop(env : OnSiteScenarioEnv, middleware: OnSiteSwitch, save_debug_imag
         last_loop_time = now
         logger.debug(f"=> => => => Loop => => => => ({loop_ms:.3f} ms)")
         # Phase 1: Process Notify messages (at beginning of each iteration)
-        process_notify(middleware, env)
+        process_notify(middleware, env, none_sleep_s)
 
         # Phase 2: Wait for ActorPrepare
-        if not recv_prepare:
-            result = get_prepare(middleware, env)
+        if sim_state == SIM_STATE.IDLE:
+            result = middleware.recv_actor_prepare()
             if result is not None:
-                _, _, _, scene_name = result
+                session_id, actor_id, _, scene_name = result
+                logger.info(f"Reset env with scene_name={scene_name} parsed from session_id={session_id}")
+                env.reset(scene_name=scene_name)
                 middleware.configure_rlsl_map(env.config["scene_config_directory"], scene_name)
+                sim_state = SIM_STATE.PREPARED
             time.sleep(0.5)
-            continue
 
         # Phase 3: Send ActorPrepareResult and SubRole
-        if recv_prepare and not start_test:
+        if sim_state == SIM_STATE.PREPARED:
             middleware.send_actor_prepare_result(session_id, actor_id, result=True)
-            # Send SubRole (only session_id required)
             middleware.send_sub_role(session_id)
             time.sleep(0.5)
+
+        if sim_state != SIM_STATE.STARTED:
             continue
 
         # Phase 4: Main simulation loop
@@ -189,17 +161,8 @@ def main_loop(env : OnSiteScenarioEnv, middleware: OnSiteSwitch, save_debug_imag
 
         # Send updated states to OnSite (all from obs)
         if "states" in obs:
-            middleware.send_pub_role(
-                obs,
-                env.last_received_pub_role,
-                current_timestamp,
-                session_id
-            )
-            middleware.send_vehicle_feedback(
-                obs,
-                current_timestamp,
-                vehicle_feedback  # Use received feedback for preserving fields
-            )
+            middleware.send_pub_role(obs, env.last_received_pub_role, current_timestamp, session_id)
+            middleware.send_vehicle_feedback(obs, current_timestamp, vehicle_feedback)
 
         # 3. Send images
         if 'gaussian' in obs:
@@ -209,8 +172,6 @@ def main_loop(env : OnSiteScenarioEnv, middleware: OnSiteSwitch, save_debug_imag
                 if len(images) > 0:
                     # Get the latest image
                     images_to_send[camera_name] = images[-1]
-                    if save_debug_image and "head_front" in camera_name.lower():
-                        _save_front_image(images[-1], current_timestamp)
             if images_to_send:
                 middleware.send_images(images_to_send, timestamp_sec)
 
@@ -233,53 +194,50 @@ def main():
                         help='gRPC server port for NuRec renderer')
     parser.add_argument('--save-debug-image', action='store_true',
                         help='Save debug images regardless of log level')
+    parser.add_argument('--none_sleep_s', type=float, default=0.02,
+                        help='Sleep seconds when recv returns empty')
     parser.add_argument('-l', '--log-level', type=str, default='INFO',
                         help='Logging level, e.g. DEBUG/INFO/WARNING/ERROR')
     args = parser.parse_args()
     logging.getLogger().setLevel(getattr(logging, args.log_level.upper(), logging.INFO))
 
-    # Initialize environment
-    logger.info("Initializing MetaDrive environment...")
-    model = SimulatorInterface(
-        grpc_host=args.grpc_host,
-        grpc_port=args.grpc_port,
-        camera_model_type="pinhole",
-    )
-    env_config = ONSITE_DEFAULT_CONFIG
-    env_config["scene_config_directory"] = args.scene_config_directory
-    env = OnSiteScenarioEnv(model, env_config)
-    logger.info("MetaDrive environment initialized successfully")
+    model = None
+    env = None
+    middleware = None
 
-    # Initialize OnSite middleware
-    logger.info("Initializing OnSite middleware...")
-    image_sizes = _extract_image_sizes_from_actor_config(env_config)
-    middleware = OnSiteSwitch(
-        onsite_dir=args.onsite_dir,
-        terminal_type=TERMINAL_TYPE.SIMULATOR,
-        image_sizes=image_sizes,
-    )
-    middleware.start_onsite_daemon()
-    logger.info("OnSite middleware initialized successfully")
-
-    # Run main loop
-    main_loop(env, middleware, save_debug_image=args.save_debug_image)
-    middleware.close()
-
-
-def _save_front_image(image, timestamp_us):
-    base_ts = os.environ["ONSITE_LOG_TS"] if "ONSITE_LOG_TS" in os.environ else get_log_timestamp()
-    out_dir = Path("logs") / f"image_{base_ts}"
-    out_dir.mkdir(parents=True, exist_ok=True)
-    out_path = out_dir / f"{int(timestamp_us)}.png"
     try:
-        import imageio.v2 as imageio
-        imageio.imwrite(out_path, image)
-    except Exception:
-        try:
-            from PIL import Image
-            Image.fromarray(image).save(out_path)
-        except Exception as exc:
-            logger.debug("Failed to save front image: %s", exc)
+        # Initialize environment
+        logger.info("Initializing MetaDrive environment...")
+        model = SimulatorInterface(
+            grpc_host=args.grpc_host,
+            grpc_port=args.grpc_port,
+            camera_model_type="pinhole",
+        )
+        env_config = ONSITE_DEFAULT_CONFIG
+        env_config["scene_config_directory"] = args.scene_config_directory
+        env = OnSiteScenarioEnv(model, env_config)
+        logger.info("MetaDrive environment initialized successfully")
+
+        # Initialize OnSite middleware
+        logger.info("Initializing OnSite middleware...")
+        image_sizes = _extract_image_sizes_from_actor_config(env_config)
+        middleware = OnSiteSwitch(
+            onsite_dir=args.onsite_dir,
+            terminal_type=TERMINAL_TYPE.SIMULATOR,
+            image_sizes=image_sizes,
+        )
+        middleware.start_onsite_daemon()
+        logger.info("OnSite middleware initialized successfully")
+
+        # Run main loop
+        main_loop(env, middleware, save_debug_image=args.save_debug_image, none_sleep_s=args.none_sleep_s)
+    except KeyboardInterrupt:
+        logger.info("Interrupted by user, shutting down...")
+    finally:
+        env.close()
+        middleware.close()
+        os._exit(130)
+
 
 if __name__ == "__main__":
     main()

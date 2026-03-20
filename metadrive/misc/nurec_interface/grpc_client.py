@@ -77,3 +77,10 @@ class NurecGrpcClient:
     def load_model(self, ckpt_path: str) -> render_pb2.LoadModelResponse:
         request = render_pb2.LoadModelRequest(ckpt_path=str(ckpt_path))
         return self._stub.LoadModel(request, timeout=self._timeout_s)
+
+    def close(self) -> None:
+        if self._channel is None:
+            return
+        self._channel.close()
+        self._channel = None
+        self._stub = None

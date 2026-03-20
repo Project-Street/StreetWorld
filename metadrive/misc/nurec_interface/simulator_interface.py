@@ -329,6 +329,21 @@ class SimulatorInterface:
                 return model
         return None
 
+    def close(self) -> None:
+        proc = self._local_server_proc
+        self._local_server_proc = None
+        if proc is not None and proc.poll() is None:
+            proc.terminate()
+            try:
+                proc.wait(timeout=3.0)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+            logger.info("Stopped simple-nurec server pid=%s", proc.pid)
+
+        if self._simple_nurec_log_fp is not None:
+            self._simple_nurec_log_fp.close()
+            self._simple_nurec_log_fp = None
+
     @staticmethod
     def _load_cfg(cfg_path: Path) -> Dict[str, Any]:
         data = yaml.safe_load(cfg_path.read_text())
