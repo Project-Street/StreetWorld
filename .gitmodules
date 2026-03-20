@@ -16,3 +16,6 @@
 [submodule "navsim"]
 	path = navsim
 	url = https://github.com/autonomousvision/navsim.git
+[submodule "OpenEMMA"]
+	path = OpenEMMA
+	url = https://github.com/taco-group/OpenEMMA.git

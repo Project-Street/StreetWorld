@@ -19,8 +19,9 @@ class GaussianFrameRecorder:
         self.output_path = output_path
         self.fps = fps
         self.frames = []  # List of {camera_name: frame_image}
+        self.scene_names = []  # List of scene names per frame
 
-    def update_frame(self, observation, plan_traj):
+    def update_frame(self, observation, plan_traj, scene_name=None):
         """
         Record current frame from all cameras and overlay planned trajectory on camera_0.
 
@@ -63,6 +64,7 @@ class GaussianFrameRecorder:
                 frame_data[cam_name] = latest_frame.copy()
 
         self.frames.append(frame_data)
+        self.scene_names.append(scene_name)
 
     def _draw_plan_traj(self, img, plan_traj, z_pos, lidar2cam, k_mat):
         """Project planned trajectory to image and draw on the frame."""
@@ -88,6 +90,7 @@ class GaussianFrameRecorder:
             return img
 
         cam_pts = (l2c @ pts_lidar.T).T
+        print(cam_pts)
         depth = cam_pts[:, 2]
         valid = depth > 1e-5
         if not np.any(valid):
@@ -200,6 +203,24 @@ class GaussianFrameRecorder:
 
                 # Place labeled image in grid
                 grid[y_start + y_offset:y_end, x_start + x_offset:x_end] = labeled_img
+
+            scene_name = None
+            if frame_idx < len(self.scene_names):
+                scene_name = self.scene_names[frame_idx]
+            if scene_name:
+                font = cv2.FONT_HERSHEY_SIMPLEX
+                font_scale = 0.8
+                thickness = 2
+                text = str(scene_name)
+                text_size = cv2.getTextSize(text, font, font_scale, thickness)[0]
+                pad_x = 12
+                pad_y = 10
+                box_w = text_size[0] + pad_x * 2
+                box_h = text_size[1] + pad_y * 2
+                cv2.rectangle(grid, (0, 0), (box_w, box_h), self.BG_COLOR, thickness=-1)
+                text_x = pad_x
+                text_y = pad_y + text_size[1]
+                cv2.putText(grid, text, (text_x, text_y), font, font_scale, self.TEXT_COLOR, thickness)
 
             # Convert RGB to BGR for cv2
             grid_bgr = grid[..., ::-1]

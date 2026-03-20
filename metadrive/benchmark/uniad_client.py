@@ -42,7 +42,8 @@ class UniADClient(GrpcClient):
         uniad_config: dict,
         host: str = "localhost",
         port: int = 50052,
-        stack_size: int = 3
+        stack_size: int = 3,
+        add_lora: bool = False
     ):
         """
         Initialize UniAD gRPC client.
@@ -56,7 +57,7 @@ class UniADClient(GrpcClient):
         super().__init__(host=host, port=port)
 
         # Initialize UniAD model
-        self.uniad = self._create_uniad(uniad_config)
+        self.uniad = self._create_uniad(uniad_config, add_lora=add_lora)
 
         # Image stack configuration
         self.stack_size = stack_size
@@ -79,11 +80,11 @@ class UniADClient(GrpcClient):
         # Record current scene name
         self.scene_name = None
 
-    def _create_uniad(self, config: dict):
+    def _create_uniad(self, config: dict, add_lora: bool = False):
         """Create UniAD model from config."""
         # Import here to avoid dependency if not using UniAD
         from rl_framework.uniad.loader import create_uniad
-        return create_uniad(config)
+        return create_uniad(config, add_lora)
 
     def run_uniad_inference(self, obs_img: Dict, obs_info: Dict, step_info: Dict) -> np.ndarray:
         """
@@ -208,6 +209,17 @@ def main():
         default=1000,
         help="Number of steps to run (default: 1000)"
     )
+    parser.add_argument(
+        "--checkpoint",
+        type=str,
+        default=str(Path(__file__).resolve().parents[2] / "UniAD_SIM/ckpts/uniad_base_e2e.pth"),
+        help="Path to UniAD checkpoint (default: UniAD_SIM/ckpts/uniad_base_e2e.pth)",
+    )
+    parser.add_argument(
+        "--add-lora",
+        action="store_true",
+        help="Inject LoRA parametrizations into VAD decoders",
+    )
 
     args = parser.parse_args()
 
@@ -217,7 +229,7 @@ def main():
     #     uniad_config = json.load(f)
     uniad_config = {
         'config_path': Path(__file__).resolve().parents[2] / "UniAD_SIM/projects/configs/stage2_e2e/base_e2e.py",
-        'checkpoint_path': Path(__file__).resolve().parents[2] / "UniAD_SIM/ckpts/uniad_base_e2e.pth",
+        'checkpoint_path': args.checkpoint,
         'device': 'cuda:0',
         'AD_root': Path(__file__).resolve().parents[2] / "UniAD_SIM"
     }
@@ -226,7 +238,8 @@ def main():
     client = UniADClient(
         uniad_config=uniad_config,
         host=args.host,
-        port=args.port
+        port=args.port,
+        add_lora=args.add_lora
     )
 
     # Initialize FrameRecorder for visualization
@@ -283,7 +296,7 @@ def main():
                 print_step_info(info)
                 # Run UniAD inference
                 plan_traj = client.run_uniad_inference(obs_img, obs_info, info)
-                # gaussian_recorder.update_frame((obs_img, obs_info), plan_traj)
+                gaussian_recorder.update_frame((obs_img, obs_info), plan_traj)
                 acc, steer = traj2control(plan_traj, obs_info)
                 action = [steer, acc]
 
@@ -300,7 +313,7 @@ def main():
 
         print(f"Total reward: {total_reward:.2f}")
         print(f"Final metrics: {metrics_recorder.summary()}")
-        # gaussian_recorder.save_video()
+        gaussian_recorder.save_video()
         
     finally:
         client.close()

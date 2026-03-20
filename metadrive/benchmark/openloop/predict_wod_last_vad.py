@@ -203,12 +203,12 @@ def create_vad(vad_config: dict, add_lora: bool = False):
         if fp16_cfg is not None:
             wrap_fp16_model(model)
 
-        checkpoint = load_checkpoint(model, checkpoint_path_abs, map_location="cpu")
-        model = fuse_conv_bn(model)
-
         if add_lora:
             injected = _inject_vad_lora(model)
             LOGGER.info("LoRA enabled for VAD decoders (modules injected: %s)", injected)
+
+        checkpoint = load_checkpoint(model, checkpoint_path_abs, map_location="cpu")
+        model = fuse_conv_bn(model)
 
         if "CLASSES" in checkpoint.get("meta", {}):
             model.CLASSES = checkpoint["meta"]["CLASSES"]
