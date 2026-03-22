@@ -269,6 +269,7 @@ class BaseEnv(gym.Env):
 
     # ===== Run-time =====
     def step(self, actions: Union[Union[np.ndarray, list], Dict[AnyStr, Union[list, np.ndarray]], int]):
+        timer = time.perf_counter()
         for i in range(self.config["decision_repeat"]):
             # simulate or replay
             for manager in self.agent_managers.values():
@@ -279,15 +280,19 @@ class BaseEnv(gym.Env):
             # if "record_manager" in self.managers and i < self.config["decision_repeat"] - 1:
             #     self.record_manager.step()
         self.step_manager.step()
+        print(f"Step function execution time: {(time.perf_counter() - timer) * 1000:.3f} ms")
 
+        timer = time.perf_counter()
         # to get new pose and update gaussian model
         self._update_scene()
+        print(f"Scene update time: {(time.perf_counter() - timer) * 1000:.3f} ms")
 
+        timer = time.perf_counter()
         after_step_infos = {}
         for mgr_n, manager in self.agent_managers.items() :
             new_step_infos = manager.observe()
             after_step_infos[mgr_n] = new_step_infos
-
+        print(f"Observation collection time: {(time.perf_counter() - timer) * 1000:.3f} ms")
         # Note that we use shallow update for info dict in this function! This will accelerate system.
         # engine_info = merge_dicts(
         #     after_step_infos, allow_new_keys=True, without_copy=True
@@ -301,9 +306,9 @@ class BaseEnv(gym.Env):
 
         for name, mgr in self.agent_managers.items():
             mgr.update_state()
-            obj_pose = mgr.get_pose()
             if mgr.state == AgentState.ALIVE:
-                self._surrounding_pre_collection[name] = mgr.get_base_state(obj_pose)
+                self._surrounding_pre_collection[name] = mgr.get_base_state()
+                obj_pose = self._surrounding_pre_collection[name]['transform']
                 if name != 'actor':
                     new_object_poses[name] = torch.from_numpy(obj_pose)
         self.model.update_scene(self.step_manager.current_timestamp, new_object_poses)

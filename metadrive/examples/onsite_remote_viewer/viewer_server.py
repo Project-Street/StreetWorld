@@ -42,7 +42,7 @@ def run_server_loop(
     session_id = ""
     actor_id = ""
     last_loop_time = time.perf_counter()
-
+    last_image_time = None
     while True:
         now = time.perf_counter()
         loop_ms = (now - last_loop_time) * 1000.0
@@ -77,6 +77,13 @@ def run_server_loop(
             time.sleep(none_sleep_s)
         if frame is None or sim_state != SIM_STATE.STARTED:
             continue
+
+        if last_image_time is None:
+            last_image_time = time.perf_counter()
+        else:
+            image_interval_ms = (time.perf_counter() - last_image_time) * 1000.0
+            print(f"Received image ({image_interval_ms:.3f} ms since last)")
+            last_image_time = time.perf_counter()
 
         img = frame["rgb"]
         raw_timestamp = frame.get("camera_timestamp")
@@ -154,6 +161,7 @@ def main() -> None:
     action_state = {"steering": 0.0, "throttle_brake": 0.0}
     frame_state = {"image": None}
     state_lock = threading.Lock()
+    exit_code = 0
 
     max_bytes = 2048 * 2048 * 3
     logger.info("Using gRPC max message bytes: %d", max_bytes)
@@ -186,11 +194,15 @@ def main() -> None:
             none_sleep_s=args.none_sleep_s,
         )
     except KeyboardInterrupt:
-        logger.info("Interrupted by user: force exiting now")
+        exit_code = 130
+        logger.info("Interrupted by user")
+    except BaseException:
+        exit_code = 1
+        logger.exception("Unhandled exception in OnSite remote viewer server")
     finally:
         middleware.close()
         grpc_server.stop(grace=0)
-        os._exit(130)
+        os._exit(exit_code)
 
 
 if __name__ == "__main__":

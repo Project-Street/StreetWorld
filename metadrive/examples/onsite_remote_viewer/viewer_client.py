@@ -3,6 +3,7 @@
 
 Client actively connects to remote gRPC server, sends Action, and receives Image.
 """
+import os
 
 import argparse
 import logging
@@ -156,6 +157,7 @@ def main() -> None:
     controller = KeyboardController(viewer.window)
     grpc_client = OnsiteViewerGrpcClient(args.grpc_host, args.grpc_port, max_bytes, timeout_s=args.timeout)
     last_image = None
+    exit_code = 0
 
     try:
         while viewer.is_running():
@@ -174,10 +176,15 @@ def main() -> None:
                     save_received_image(img)
                 last_image = img
     except KeyboardInterrupt:
+        exit_code = 130
         logger.info("Interrupted by user")
+    except BaseException:
+        exit_code = 1
+        logger.exception("Unhandled exception in OnSite remote viewer client")
     finally:
         grpc_client.close()
         viewer.shutdown()
+        os._exit(exit_code)
 
 
 if __name__ == "__main__":

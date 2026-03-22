@@ -63,6 +63,7 @@ def main() -> None:
     actor_id = ""
     last_image = None
     action_state = {"steering": 0.0, "throttle_brake": 0.0}
+    exit_code = 0
 
     try:
         while viewer.is_running():
@@ -104,10 +105,16 @@ def main() -> None:
             if args.save_debug_image:
                 save_received_image(last_image)
             middleware.send_vehicle_control(action_state["steering"], action_state["throttle_brake"])
+    except KeyboardInterrupt:
+        exit_code = 130
+        logger.info("Interrupted by user")
+    except BaseException:
+        exit_code = 1
+        logger.exception("Unhandled exception in OnSite viewer")
     finally:
         middleware.close()
         viewer.shutdown()
-        os._exit(130)
+        os._exit(exit_code)
 
 
 if __name__ == "__main__":

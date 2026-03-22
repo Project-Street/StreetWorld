@@ -7,6 +7,8 @@ including message sending/receiving and data format conversion between OnSite pr
 
 import json
 import logging
+import os
+import signal
 import sys
 import time
 import subprocess
@@ -137,21 +139,36 @@ class OnSiteSwitch:
         return multicast
 
     def start_onsite_daemon(self):
-        start_script = self.onsite_dir / "daemon" / "start.sh"
-        if not start_script.exists():
-            raise FileNotFoundError(f"OnSite daemon start script not found: {start_script}")
-        if self._daemon_proc is not None and self._daemon_proc.poll() is None:
-            logger.info("OnSite daemon already running, pid=%s", self._daemon_proc.pid)
-            return
+        daemon_dir = self.onsite_dir / "daemon"
+        daemon_bin = daemon_dir / "daemon"
+        daemon_lib_dir = daemon_dir / "Lib"
+        if not daemon_bin.exists():
+            logger.info("OnSite daemon not started because binary is missing: %s", daemon_bin)
+            raise FileNotFoundError(f"OnSite daemon binary not found: {daemon_bin}")
+
+        env = os.environ.copy()
+        ld_library_path = env.get("LD_LIBRARY_PATH", "")
+        env["LD_LIBRARY_PATH"] = (
+            f"{daemon_lib_dir}:{ld_library_path}" if ld_library_path else str(daemon_lib_dir)
+        )
         self._daemon_proc = subprocess.Popen(
-            ["bash", str(start_script)],
-            cwd=str(start_script.parent),
+            [str(daemon_bin)],
+            cwd=str(daemon_dir),
+            env=env,
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
+            start_new_session=True,
         )
         time.sleep(3)
-        logger.info("Started OnSite daemon process pid=%s via %s", self._daemon_proc.pid, start_script)
+        if self._daemon_proc.poll() is None:
+            logger.info("Started OnSite daemon process pid=%s via %s", self._daemon_proc.pid, daemon_bin)
+            return
+        logger.info(
+            "OnSite daemon was not started successfully; pid=%s exited early with code=%s",
+            self._daemon_proc.pid,
+            self._daemon_proc.returncode,
+        )
 
     def _init_logger(self):
         # Follow root logger level (set by entrypoint --log-level).
@@ -437,11 +454,23 @@ class OnSiteSwitch:
         # Channels are managed by libMulticastNetwork, no explicit cleanup needed
         if self._daemon_proc is not None:
             if self._daemon_proc.poll() is None:
-                self._daemon_proc.terminate()
                 try:
+                    # The binary handles SIGINT cleanly; send it to the whole process group
+                    # so helper children do not survive as orphans.
+                    os.killpg(self._daemon_proc.pid, signal.SIGINT)
                     self._daemon_proc.wait(timeout=3.0)
                 except subprocess.TimeoutExpired:
-                    self._daemon_proc.kill()
+                    logger.warning("OnSite daemon did not exit after SIGINT, escalating to SIGTERM")
+                    os.killpg(self._daemon_proc.pid, signal.SIGTERM)
+                    try:
+                        self._daemon_proc.wait(timeout=3.0)
+                    except subprocess.TimeoutExpired:
+                        logger.warning("OnSite daemon did not exit after SIGTERM, escalating to SIGKILL")
+                        os.killpg(self._daemon_proc.pid, signal.SIGKILL)
+                try:
+                    self._daemon_proc.wait(timeout=1.0)
+                except subprocess.TimeoutExpired:
+                    logger.exception("Timed out waiting for OnSite daemon to reap after SIGKILL")
             self._daemon_proc = None
 
     # ==================== Receive Methods ====================

@@ -10,7 +10,7 @@ from pathlib import Path
 import torch
 from metadrive.envs.scenario_env import ScenarioEnv
 from metadrive.manager.agent_manager import AgentState
-
+import time
 logger = logging.getLogger(__name__)
 
 
@@ -46,23 +46,16 @@ class OnSiteScenarioEnv(ScenarioEnv):
         """
         In OnSite mode, actor state is controlled by Notify, so skip actor.update_state().
         """
-        self._surrounding_pre_collection = {}
         new_object_poses = {}
         for name, mgr in self.agent_managers.items():
             if name != "actor":
                 mgr.update_state()
 
-            if mgr.state != AgentState.ALIVE:
-                continue
-
-            obj_pose = mgr.get_pose()
-            self._surrounding_pre_collection[name] = mgr.get_base_state(obj_pose)
-            
-            if name != "actor":
+            if name != "actor" and mgr.state == AgentState.ALIVE and not mgr.is_static:
+                obj_pose = mgr.get_pose()
                 new_object_poses[name] = torch.from_numpy(obj_pose)
 
         self.model.update_scene(self.step_manager.current_timestamp, new_object_poses)
-
     def update_agent_from_pub_role_single(self, agent_name, role):
         """
         Update a single agent from PubRole SingleRole message.

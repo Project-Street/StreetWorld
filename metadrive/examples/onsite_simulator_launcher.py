@@ -60,7 +60,7 @@ def process_notify(middleware, env, none_sleep_s):
         middleware: OnSiteMiddleware instance
         env: OnSiteScenarioEnv instance
     """
-    global sim_state, session_id, actor_id
+    global sim_state, session_id
 
     # Collect all pending Notify messages
     notifies = middleware.recv_all_notifies()
@@ -80,7 +80,7 @@ def process_notify(middleware, env, none_sleep_s):
         # Handle session-level notifications
         if notify_type in [NT_ABORT_TEST, NT_FINISH_TEST]:
             sim_state = SIM_STATE.IDLE
-            session_id, actor_id = "", ""
+            session_id = ""
             continue
         elif notify_type == NT_START_TEST:
             sim_state = SIM_STATE.STARTED
@@ -122,7 +122,7 @@ def main_loop(env : OnSiteScenarioEnv, middleware: OnSiteSwitch, save_debug_imag
         now = time.perf_counter()
         loop_ms = (now - last_loop_time) * 1000.0
         last_loop_time = now
-        logger.debug(f"=> => => => Loop => => => => ({loop_ms:.3f} ms)")
+        logger.info(f"=> => => => Loop => => => => ({loop_ms:.3f} ms)")
         # Phase 1: Process Notify messages (at beginning of each iteration)
         process_notify(middleware, env, none_sleep_s)
 
@@ -130,7 +130,7 @@ def main_loop(env : OnSiteScenarioEnv, middleware: OnSiteSwitch, save_debug_imag
         if sim_state == SIM_STATE.IDLE:
             result = middleware.recv_actor_prepare()
             if result is not None:
-                session_id, actor_id, _, scene_name = result
+                session_id, _ , _, scene_name = result
                 logger.info(f"Reset env with scene_name={scene_name} parsed from session_id={session_id}")
                 env.reset(scene_name=scene_name)
                 middleware.configure_rlsl_map(env.config["scene_config_directory"], scene_name)
@@ -205,6 +205,8 @@ def main():
     env = None
     middleware = None
 
+    exit_code = 0
+
     try:
         # Initialize environment
         logger.info("Initializing MetaDrive environment...")
@@ -232,11 +234,17 @@ def main():
         # Run main loop
         main_loop(env, middleware, save_debug_image=args.save_debug_image, none_sleep_s=args.none_sleep_s)
     except KeyboardInterrupt:
-        logger.info("Interrupted by user, shutting down...")
+        exit_code = 130
+        logger.info("Interrupted by user")
+    except BaseException:
+        exit_code = 1
+        logger.exception("Unhandled exception in OnSite simulator launcher")
     finally:
-        env.close()
-        middleware.close()
-        os._exit(130)
+        if env is not None:
+            env.close()
+        if middleware is not None:
+            middleware.close()
+        os._exit(exit_code)
 
 
 if __name__ == "__main__":

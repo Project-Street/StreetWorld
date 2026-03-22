@@ -12,6 +12,7 @@ from metadrive.policy.replay_policy import ReplayPolicy
 from metadrive.obs.gaussian_obs import GaussianObservation
 from metadrive.obs.navigation_obs import NavigationObservation
 from metadrive.base_class.base_object import BaseObject
+import time
 logger = get_logger()
 
 
@@ -118,7 +119,7 @@ class AgentManager(BaseManager):
         But other policies like ReplayPolicy should be called in after_step, as they already know the final state and
         exempt the requirement for rolling out the dynamic system to get it.
         """
-        if hasattr(self.policy, 'static') and self.policy.static:
+        if self.is_static:
             return
 
         if self.state == AgentState.ALIVE:
@@ -146,7 +147,7 @@ class AgentManager(BaseManager):
 
         if self.state == AgentState.ALIVE:
             # crash checks from controller
-            if self.check_crash and isinstance(self.controller, BaseVehicle):
+            if not self.is_static and self.check_crash and isinstance(self.controller, BaseVehicle):
                 self.controller.crash_check()
                 
                 if self.controller.crash_human:
@@ -222,19 +223,29 @@ class AgentManager(BaseManager):
         return {'observation': self.last_observation}
 
     def get_pose(self):
+        if self.state != AgentState.ALIVE:
+            raise ValueError(f"Cannot get pose for agent in state {self.state}")
         return self.controller.transform
 
     def get_base_state(self, transform=None):
-        if transform is None:
-            transform = self.get_pose()
-        velocity = np.asarray(self.controller.velocity, dtype=np.float32)
+        if self.state != AgentState.ALIVE:
+            raise ValueError(f"Cannot get state for agent in state {self.state}")
+        
+        transform = self.get_pose()
         position = np.asarray(self.controller.position, dtype=np.float32)
-        acceleration = np.asarray(self.controller.acceleration, dtype=np.float32)
-        length = float(self.controller.LENGTH)
-        width = float(self.controller.WIDTH)
-        height = float(self.controller.HEIGHT)
-        angular_velocity = float(self.controller.angular_velocity)
-        angular_acceleration = float(self.controller.angular_acceleration)
+        length = self.controller.LENGTH
+        width = self.controller.WIDTH
+        height = self.controller.HEIGHT
+        if self.is_static:
+            velocity = np.zeros(3, dtype=np.float32)
+            acceleration = np.zeros(3, dtype=np.float32)
+            angular_velocity = 0.0
+            angular_acceleration = 0.0
+        else:
+            velocity = np.asarray(self.controller.velocity, dtype=np.float32)
+            acceleration = np.asarray(self.controller.acceleration, dtype=np.float32)
+            angular_velocity = float(self.controller.angular_velocity)
+            angular_acceleration = float(self.controller.angular_acceleration)
 
         return {
             "controller": self.controller,
@@ -273,3 +284,7 @@ class AgentManager(BaseManager):
         self.policy = None
 
         self.INITIALIZED = False
+
+    @property
+    def is_static(self):
+        return hasattr(self.policy, 'static') and self.policy.static
