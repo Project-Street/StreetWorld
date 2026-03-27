@@ -97,7 +97,7 @@ SCENARIO_ENV_CONFIG = dict(
 
     # ===== Episode Bonus =====
     success_bonus=75.0,
-    max_step=150,
+    max_step=300,
 )
 
 
@@ -257,7 +257,7 @@ class ScenarioEnv(BaseEnv):
             AgentState.CRASH_WORLD,
             # AgentState.OUT_OF_ROAD,
         }
-        collision = state in collision_states
+        collision = state in collision_states or state == AgentState.OUT_OF_ROAD
         step_info["collision"] = int(collision)
         collision_reward = 0.0
         if collision:

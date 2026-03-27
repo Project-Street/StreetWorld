@@ -62,8 +62,8 @@ class SharpVideoSimulatorInterface:
             cfg_text = yaml.safe_load(f)
         
         scene_name = cfg_text['scene_name']
-        timestamp_range = [cfg_text['start_time'], cfg_text['end_time']]
-        self.end_timestamp = cfg_text['end_time']
+        timestamp_range = [cfg_text['start_time'], cfg_text['end_time'] - 100000]
+        self.end_timestamp = cfg_text['end_time'] - 100000
 
         camera_rig_config = cfg_text['camera_rig_config']
         camera_params = self._load_camera_rig(camera_rig_config)
@@ -92,7 +92,7 @@ class SharpVideoSimulatorInterface:
             tracking_data[obj_id]['poses'] = new_poses
 
             # StreetGaussian expects (l,w,h) as size order.
-            tracking_data[obj_id]['size'] = [tracking_data[obj_id]['size'][i] for i in [1, 0, 2]] # (w,l,h) -> (l,w,h)
+            tracking_data[obj_id]['size'] = [tracking_data[obj_id]['size'][i] * 0.7 for i in [1, 0, 2]] # (w,l,h) -> (l,w,h)
             # print([s * 0.1 for s in tracking_data[obj_id]['size']])
         # tracking_data = {}
 
@@ -113,7 +113,9 @@ class SharpVideoSimulatorInterface:
         # Load foreground and background Gaussian models
         self.fg_gaussians_path = cfg['fg_gaussians_path']
         self.bg_gaussians_path = cfg['bg_gaussians_path']
-
+        self.end_timestamp = cfg['end_time'] - 100000
+        self.current_timestamp = 0
+        
         # Round to nearest timestamp at interval of 100_000 microseconds
         rounded_timestamp = min(self.current_timestamp - (self.current_timestamp % 100000), self.end_timestamp) if self.current_timestamp % 100000 < 50000 else min(self.current_timestamp + (100000 - self.current_timestamp % 100000), self.end_timestamp)
         rounded_timestamp = int(rounded_timestamp // 100000)

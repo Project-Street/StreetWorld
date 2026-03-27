@@ -168,9 +168,12 @@ class BaseEnv(gym.Env):
                 self.agent_managers[n].destroy()
                 self.agent_managers.pop(n)
 
-        self.data_manager.reset(scene_id=scene_id)
+        updated_init_state = self.data_manager.reset(scene_id=scene_id)
 
         scenario_data = self.data_manager.get_current_scenario_data()
+        if updated_init_state is not None:
+            scenario_data = dict(scenario_data)
+            scenario_data["init_state"] = updated_init_state
         self.step_manager.reset(**scenario_data)
         scene_map = self.map_manager.reset(config=self.config['map_config'], physics_world=self.physics_world, **scenario_data)
         self._reset_agents(scenario_data, scene_map)

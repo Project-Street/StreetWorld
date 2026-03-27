@@ -81,7 +81,7 @@ def main():
         submission.authors[:] = ['jrguo']  # Please modify accordingly.
         submission.affiliation = 'Zhejiang University'  # Please modify accordingly.
         submission.account_name = 'jrguo888@gmail.com'  # Please modify accordingly.
-        submission.unique_method_name = 'UniAD-RL'  # Please modify accordingly.
+        submission.unique_method_name = args.submission_name  # Please modify accordingly.
         submission.method_link = 'none'  # Please modify accordingly.
         submission.description = ''  # Please modify accordingly.
         submission.uses_public_model_pretraining = True # Please modify accordingly.

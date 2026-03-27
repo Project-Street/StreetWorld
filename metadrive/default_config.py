@@ -87,7 +87,12 @@ BASE_DEFAULT_CONFIG = dict(
     # ===== participant =====
     map_config=dict(
         # Vehicle model. Candidates: "s", "m", "l", "xl", "default". random_agent_model makes this config invalid
-        store_map=False
+        store_map=False,
+        ground_plane_mode="single",
+        ground_plane_chunk_length=5.0,
+        ground_plane_chunk_width=40.0,
+        ground_plane_chunk_overlap=0.5,
+        ground_plane_chunk_fit_radius=7.5,
     ),
 
 
