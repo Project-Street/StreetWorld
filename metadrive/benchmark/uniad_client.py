@@ -14,7 +14,7 @@ Usage:
 
 import argparse
 from pathlib import Path
-from typing import Dict, Tuple
+from typing import Any, Dict, Tuple, Union
 import sys
 RL_FRAMEWORK_ROOT=Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(RL_FRAMEWORK_ROOT))
@@ -86,16 +86,24 @@ class UniADClient(GrpcClient):
         from rl_framework.uniad.loader import create_uniad
         return create_uniad(config, add_lora)
 
-    def run_uniad_inference(self, obs_img: Dict, obs_info: Dict, step_info: Dict) -> np.ndarray:
+    def run_uniad_inference(
+        self,
+        obs_img: Dict,
+        obs_info: Dict,
+        step_info: Dict,
+        return_output: bool = False,
+    ) -> Union[np.ndarray, Tuple[np.ndarray, Dict[str, Any]]]:
         """
         Run UniAD inference on current observation.
 
         Args:
             obs_img: Latest camera frames (single frame)
             obs_info: Observation metadata
+            return_output: If True, also return the raw UniAD output dict
 
         Returns:
             plan_traj: Planned trajectory (N, 2) array
+            If return_output=True, returns (plan_traj, output_dict)
         """
         # Stack images for temporal input
         obs_img_stacked = {}
@@ -115,9 +123,12 @@ class UniADClient(GrpcClient):
                 # feature_extractor=False,
                 **raw_data
             )
-            plan_traj = results[0]['planning']['result_planning']['sdc_traj'][0]
+            result_dict = results[0]
+            plan_traj = result_dict['planning']['result_planning']['sdc_traj'][0]
             plan_traj = plan_traj.detach().cpu().numpy()
 
+        if return_output:
+            return plan_traj, result_dict
         return plan_traj
 
     def _prepare_uniad_input(self, obs_img: Dict, obs_info: Dict, step_info: Dict) -> Dict:
@@ -220,6 +231,13 @@ def main():
         action="store_true",
         help="Inject LoRA parametrizations into VAD decoders",
     )
+    parser.add_argument(
+        "--bev-render",
+        type=str,
+        default="output",
+        choices=["none", "traj", "output"],
+        help="BEV render mode: none (disable), traj (planning only), output (bbox+road+planning)",
+    )
 
     args = parser.parse_args()
 
@@ -243,8 +261,13 @@ def main():
     )
 
     # Initialize FrameRecorder for visualization
-    from visualize_utils import GaussianFrameRecorder, print_step_info
-    gaussian_recorder = GaussianFrameRecorder(output_path='./driving_uniad.mp4', fps=10)
+    from visualize_utils_uniad import UniADGaussianFrameRecorder, print_step_info
+    gaussian_recorder = UniADGaussianFrameRecorder(
+        output_path='./driving_uniad.mp4',
+        fps=10,
+    )
+    gaussian_recorder.enable_bev = (args.bev_render != "none")
+    gaussian_recorder.bev_render_mode = args.bev_render
     metrics_recorder = MetricsRecorder()
     
     try:
@@ -271,13 +294,22 @@ def main():
 
             # Run UniAD inference for first step
             print("Running initial UniAD inference...")
-            dt = 0.1
-            linear_velocity = np.asarray(obs_info["linear_velocity"], dtype=np.float32)
-            prev_pos = np.asarray(obs_info["ego_pos"], dtype=np.float32) - linear_velocity * dt
+            # dt = 0.1
+            # linear_velocity = np.asarray(obs_info["linear_velocity"], dtype=np.float32)
+            # prev_pos = np.asarray(obs_info["ego_pos"], dtype=np.float32) - linear_velocity * dt
             # prev_angle = float(obs_info["angular_velocity"]) * dt
-            client.uniad.module.prev_frame_info["prev_pos"] = prev_pos
+            # client.uniad.module.prev_frame_info["prev_pos"] = prev_pos
             # client.uniad.module.prev_frame_info["prev_angle"] = prev_angle
-            plan_traj = client.run_uniad_inference(obs_img, obs_info, reset_info)
+            inference_result = client.run_uniad_inference(
+                obs_img,
+                obs_info,
+                reset_info,
+                return_output=(args.bev_render == "output"),
+            )
+            if args.bev_render == "output":
+                plan_traj, _ = inference_result
+            else:
+                plan_traj = inference_result
             acc, steer = traj2control(plan_traj, obs_info)
             action = [steer, acc]
             print(f"Initial action: steer={steer:.4f}, acc={acc:.4f}")
@@ -295,8 +327,23 @@ def main():
                 metrics_recorder.update(info)
                 print_step_info(info)
                 # Run UniAD inference
-                plan_traj = client.run_uniad_inference(obs_img, obs_info, info)
-                gaussian_recorder.update_frame((obs_img, obs_info), plan_traj)
+                output_dict = None
+                inference_result = client.run_uniad_inference(
+                    obs_img,
+                    obs_info,
+                    info,
+                    return_output=(args.bev_render == "output"),
+                )
+                if args.bev_render == "output":
+                    plan_traj, output_dict = inference_result
+                else:
+                    plan_traj = inference_result
+                gaussian_recorder.update_frame(
+                    (obs_img, obs_info),
+                    plan_traj,
+                    scene_name=info.get("scene_name"),
+                    uniad_output=output_dict,
+                )
                 acc, steer = traj2control(plan_traj, obs_info)
                 action = [steer, acc]
 
@@ -310,7 +357,8 @@ def main():
             metrics_recorder.end_episode(last_info)
             print(f"Episode {episode_index} reward: {reward_sum:.2f}")
             print(f"Metrics so far: {metrics_recorder.summary()}")
-
+            if episode_index >= 3:
+                break
         print(f"Total reward: {total_reward:.2f}")
         print(f"Final metrics: {metrics_recorder.summary()}")
         gaussian_recorder.save_video()

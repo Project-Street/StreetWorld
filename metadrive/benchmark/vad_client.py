@@ -12,7 +12,7 @@ from mmdet3d.models import build_model
 
 import argparse
 from pathlib import Path
-from typing import Dict, Tuple
+from typing import Any, Dict, Tuple, Union
 
 import numpy as np
 
@@ -31,6 +31,8 @@ os.environ['no_proxy'] = '127.0.0.1,localhost'
 
 from logging import getLogger
 LOGGER = getLogger(__name__)
+
+from rl_framework.vad.trajectory import decode_ego_future_traj
 
 def _resolve_attention_module(attn, decoder_name: str, layer_idx: int, attn_idx: int):
     if hasattr(attn, "in_proj_weight"):
@@ -280,16 +282,24 @@ class VADClient(GrpcClient):
         """Create VAD model from config."""
         return create_vad(config, add_lora=bool(config.get("add_lora", False)))
 
-    def run_vad_inference(self, obs_img: Dict, obs_info: Dict, step_info: Dict) -> np.ndarray:
+    def run_vad_inference(
+        self,
+        obs_img: Dict,
+        obs_info: Dict,
+        step_info: Dict,
+        return_output: bool = False,
+    ) -> Union[np.ndarray, Tuple[np.ndarray, Dict[str, Any]]]:
         """
         Run VAD inference on current observation.
 
         Args:
             obs_img: Latest camera frames (single frame)
             obs_info: Observation metadata
+            return_output: If True, also return the raw VAD output dict
 
         Returns:
             plan_traj: Planned trajectory (N, 2) array
+            If return_output=True, returns (plan_traj, output_dict)
         """
         # Stack images for temporal input
         obs_img_stacked = {}
@@ -307,13 +317,23 @@ class VADClient(GrpcClient):
             results = self.vad(
                 return_loss=False,
                 rescale=True,
+                return_bbox=bool(return_output),
                 # feature_extractor=False,
                 **raw_data
             )
-            # 0: right, 1: left, 2: straight
-            # print(results[0]['pts_bbox']['ego_fut_preds'])
-            plan_traj = results[0]['pts_bbox']['ego_fut_preds'][0, raw_data['command'][0][0]] # [6 (ts), 2]
-            plan_traj = plan_traj.detach().cpu().numpy()
+            result_dict = results[0]
+            pts_bbox = result_dict['pts_bbox']
+            plan_traj = decode_ego_future_traj(
+                pts_bbox['ego_fut_preds'],
+                ego_fut_cmd=pts_bbox.get('ego_fut_cmd', raw_data.get('ego_fut_cmd')),
+                fallback_cmd=raw_data.get('command'),
+                cumulative=True,
+            )
+
+            if plan_traj.ndim != 2 or plan_traj.shape[1] != 2:
+                raise ValueError(f"plan_traj must be (N,2), got shape {plan_traj.shape}")
+        if return_output:
+            return plan_traj, result_dict
         return plan_traj
 
     def _prepare_vad_input(self, obs_img: Dict, obs_info: Dict, step_info: Dict) -> Dict:
@@ -323,8 +343,8 @@ class VADClient(GrpcClient):
         # print(obs_img.keys())
         obs_info['relative_timestamp'] = step_info['relative_timestamp']
         obs_info['scene_token'] = step_info['scene_name']
-        raw_data = parse_raw(obs_img, obs_info, self.cameras, self.img_norm_cfg, [int(1600*0.8), int(900*0.8)])
-        # raw_data = parse_vad_obs(obs_img, obs_info, self.cameras, get_vad_img_norm_cfg())
+        # raw_data = parse_raw(obs_img, obs_info, self.cameras, self.img_norm_cfg, [int(1600*0.8), int(900*0.8)])
+        raw_data = parse_vad_obs(obs_img, obs_info, self.cameras, get_vad_img_norm_cfg())
         # Store raw images for reference
         self._raw_images = raw_data.get('raw_imgs', {})
         # Remove raw_imgs from data to pass to model
@@ -420,6 +440,13 @@ def main():
         default=str(Path(__file__).resolve().parents[2] / "VAD/ckpts/VAD_base.pth"),
         help="Path to VAD checkpoint (default: VAD/ckpts/VAD_base.pth)",
     )
+    parser.add_argument(
+        "--bev-render",
+        type=str,
+        default="traj",
+        choices=["none", "traj", "output"],
+        help="BEV render mode: none (disable), traj (planning only), output (bbox+map+planning)",
+    )
 
     args = parser.parse_args()
 
@@ -443,8 +470,13 @@ def main():
 
     # Initialize FrameRecorder for visualization
     # from drive_with_streetstudio import GaussianFrameRecorder
-    from visualize_utils import GaussianFrameRecorder, print_step_info
-    gaussian_recorder = GaussianFrameRecorder(output_path='./driving_vad.mp4', fps=10)
+    from visualize_utils_vad import VADGaussianFrameRecorder, print_step_info
+    gaussian_recorder = VADGaussianFrameRecorder(
+        output_path='./driving_vad.mp4',
+        fps=10,
+        enable_bev=(args.bev_render != "none"),
+        bev_render_mode=args.bev_render,
+    )
     metrics_recorder = MetricsRecorder()
     
     try:
@@ -472,7 +504,16 @@ def main():
 
             # Run VAD inference for first step
             print("Running initial VAD inference...")
-            plan_traj = client.run_vad_inference(obs_img, obs_info, reset_info)
+            inference_result = client.run_vad_inference(
+                obs_img,
+                obs_info,
+                reset_info,
+                return_output=(args.bev_render == "output"),
+            )
+            if args.bev_render == "output":
+                plan_traj, _ = inference_result
+            else:
+                plan_traj = inference_result
             acc, steer = traj2control(plan_traj, obs_info)
             action = [steer, acc]
             print(f"Initial action: steer={steer:.4f}, acc={acc:.4f}")
@@ -487,15 +528,30 @@ def main():
                 # Update image stacks
                 client._update_image_stacks(obs_img)
                 print_step_info(info)
-                # gaussian_recorder.update_frame((obs_img, obs_info))
                 
                 reward_sum += reward
                 total_reward += reward
                 metrics_recorder.update(info)
 
                 # Run VAD inference
-                plan_traj = client.run_vad_inference(obs_img, obs_info, info)
-                # gaussian_recorder.update_frame((obs_img, obs_info), plan_traj)
+                vad_output = None
+                inference_result = client.run_vad_inference(
+                    obs_img,
+                    obs_info,
+                    info,
+                    return_output=(args.bev_render == "output"),
+                )
+                if args.bev_render == "output":
+                    plan_traj, vad_output = inference_result
+                else:
+                    plan_traj = inference_result
+                gaussian_recorder.update_frame(
+                    (obs_img, obs_info),
+                    plan_traj,
+                    scene_name=info.get("scene_name"),
+                    vad_output=vad_output,
+                )
+                print(plan_traj)
                 acc, steer = traj2control(plan_traj, obs_info)
                 action = [steer, acc]
 
@@ -509,10 +565,11 @@ def main():
             metrics_recorder.end_episode(last_info)
             print(f"Episode {episode_index} reward: {reward_sum:.2f}")
             print(f"Metrics so far: {metrics_recorder.summary()}")
-
+            if episode_index >= 3:
+                break
         print(f"Total reward: {total_reward:.2f}")
         print(f"Final metrics: {metrics_recorder.summary()}")
-        # gaussian_recorder.save_video()
+        gaussian_recorder.save_video()
         
     finally:
         client.close()

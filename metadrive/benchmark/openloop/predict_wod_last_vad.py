@@ -424,7 +424,7 @@ def main():
         raise RuntimeError("VAD dataparser uses CUDA tensors; CUDA is required.")
 
     from rl_framework.vad.dataparser import get_vad_img_norm_cfg, parse_vad_obs
-    from rl_framework.uniad.dataparser import parse_raw
+    from rl_framework.vad.trajectory import decode_ego_future_traj
 
     vad_config = default_vad_config()
     if args.config:
@@ -456,17 +456,19 @@ def main():
         frame_name = build_frame_name(scene_id, frame_id)
 
         obs_info = build_obs_info(metadata, cam_params, frame_name)
-        # raw_data = parse_vad_obs(obs_img, obs_info, set(), img_norm_cfg)
-        raw_data = parse_raw(obs_img, obs_info, [name for name, _ in CAMERA_MAP], img_norm_cfg, [int(1600*0.8), int(900*0.8)])
+        raw_data = parse_vad_obs(obs_img, obs_info, set(), img_norm_cfg)
         raw_data["img"] = [raw_data["img"]]
 
         with torch.no_grad():
             result = model(return_loss=False, rescale=True, **raw_data)
 
-        command_tensor = raw_data["command"][0]  # type: ignore[index]
-        cmd_index = int(command_tensor[0].item())  # type: ignore[index]
-        plan_traj = result[0]["pts_bbox"]["ego_fut_preds"][0, cmd_index]
-        plan_traj = plan_traj.detach().cpu().numpy()
+        pts_bbox = result[0]["pts_bbox"]
+        plan_traj = decode_ego_future_traj(
+            pts_bbox["ego_fut_preds"],
+            ego_fut_cmd=pts_bbox.get("ego_fut_cmd", raw_data.get("ego_fut_cmd")),
+            fallback_cmd=raw_data.get("command"),
+            cumulative=True,
+        )
 
         plan_traj[:, [0, 1]] = plan_traj[:, [1, 0]]
         plan_traj[:, 1] = -plan_traj[:, 1]

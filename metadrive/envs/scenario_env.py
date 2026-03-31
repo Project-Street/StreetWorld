@@ -257,7 +257,7 @@ class ScenarioEnv(BaseEnv):
             AgentState.CRASH_WORLD,
             # AgentState.OUT_OF_ROAD,
         }
-        collision = state in collision_states or state == AgentState.OUT_OF_ROAD
+        collision = state in collision_states #or state == AgentState.OUT_OF_ROAD
         step_info["collision"] = int(collision)
         collision_reward = 0.0
         if collision:
