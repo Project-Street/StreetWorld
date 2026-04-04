@@ -14,6 +14,22 @@ class ScenarioDataManager(BaseManager):
     DEFAULT_DATA_BUFFER_SIZE = 100
     PRIORITY = -10
 
+    @staticmethod
+    def _build_ground_plane(ego_poses, ego_height, start_ts):
+        normals = np.stack([np.asarray(pose)[:3, 2] for pose in ego_poses.values()], axis=0)
+        average_normal = normals.sum(axis=0)
+        average_normal_norm = np.linalg.norm(average_normal)
+        if average_normal_norm == 0:
+            raise ValueError("Average ego normal has zero length.")
+        average_normal = average_normal / average_normal_norm
+
+        start_pose = np.asarray(ego_poses[start_ts])
+        start_bottom_center = start_pose[:3, 3] - start_pose[:3, 2] * (ego_height / 2)
+
+        return {
+            'normal': average_normal.tolist(),
+            'constant': float(np.dot(average_normal, start_bottom_center))
+        }
 
     def __init__(self, config, loader):
 
@@ -164,14 +180,12 @@ class ScenarioDataManager(BaseManager):
         config_dict["controller"] = config_dict.get("controller", random_vehicle_type(self.np_random)) 
         current_metadata = self.get_current_scenario_data()
         ego_poses = current_metadata['ego_poses']
-        # average_ego_height =  np.mean([pose[2][3] for pose in ego_poses.values()])
         start_ts = current_metadata['timestamp_range'][0]
-        start_ego_height = ego_poses[start_ts][2][3]
-        ground_height = start_ego_height - config_dict["controller"].DEFAULT_HEIGHT / 2 + 0.1
-        current_metadata['ground_plane'] = {
-            'normal': [0, 0, 1],
-            'constant': ground_height
-        }
+        current_metadata['ground_plane'] = self._build_ground_plane(
+            ego_poses,
+            ego_height=config_dict["controller"].DEFAULT_HEIGHT,
+            start_ts=start_ts
+        )
 
     def get_current_scenario_data(self):
         return self.get_scenario_data(self.current_scenario_id)

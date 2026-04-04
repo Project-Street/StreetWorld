@@ -5,16 +5,22 @@ import json
 import logging
 import os
 import re
+import zipfile
 from pathlib import Path
 from collections import defaultdict
 from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
+import requests
 import torch
+import yaml
 
 from metadrive.utils.trajectory import build_rotation
 
 logger = logging.getLogger(__name__)
+
+_NUREC_SCENE_API_BASE = os.getenv("NUREC_SCENE_API_BASE", "http://101.201.109.161:8000")
+_NUREC_SCENE_API_KEY = os.getenv("NUREC_SCENE_API_KEY", "tj2026onsite-track4")
 
 _XODR_HEADER_TAG_RE = re.compile(r"<header\b[^>]*>", re.IGNORECASE | re.DOTALL)
 _XODR_ATTR_RE = re.compile(r'([A-Za-z_][A-Za-z0-9_]*)="([^"]*)"')
@@ -360,15 +366,127 @@ def discover_scenes(nurec_path: Path) -> Dict[Path, List[Tuple[str, Path]]]:
             continue
         scene_dir = (Path(root) / "rig_trajectories.json").parent
         wrapper_dir = scene_dir.parent
-        batch_dir = wrapper_dir.parent
-        if not batch_dir.name.startswith("Batch"):
-            continue
-        if scene_dir.name != wrapper_dir.name:
-            continue
+        if wrapper_dir.name.startswith("Batch"):
+            batch_dir = wrapper_dir
+        else:
+            batch_dir = wrapper_dir.parent
+            if not batch_dir.name.startswith("Batch"):
+                continue
+            if scene_dir.name != wrapper_dir.name:
+                continue
         by_batch[batch_dir].append((scene_dir.name, scene_dir))
     for batch_dir in by_batch:
         by_batch[batch_dir].sort(key=lambda x: x[0])
     return dict(sorted(by_batch.items(), key=lambda x: x[0].name))
+
+
+def _safe_extract_all(zf: zipfile.ZipFile, out_dir: Path) -> None:
+    out_dir_resolved = out_dir.resolve()
+    for member in zf.infolist():
+        member_path = out_dir / member.filename
+        try:
+            member_resolved = member_path.resolve()
+        except FileNotFoundError:
+            member_resolved = member_path.parent.resolve() / member_path.name
+        if out_dir_resolved not in (member_resolved, *member_resolved.parents):
+            raise ValueError(f"Unsafe archive member path: {member.filename}")
+    zf.extractall(out_dir)
+
+
+def _write_scene_config(scene_name: str, scene_root: Path, pose_dir: Path, scene_cfg_dir: Path) -> Path:
+    scene_cfg_dir.mkdir(parents=True, exist_ok=True)
+    cwd_root = Path.cwd()
+    cfg = {
+        "scene_name": scene_name,
+        "scene_uuid": scene_name,
+        "scene_root": str(scene_root.resolve()),
+        "pose_data_path": os.path.relpath(pose_dir, cwd_root),
+        "ego_pose_path": os.path.relpath(pose_dir / "ego_pose.json", cwd_root),
+        "trajectory_path": os.path.relpath(pose_dir / "trajectory.json", cwd_root),
+    }
+    out_yaml = scene_cfg_dir / f"{scene_name}.yaml"
+    out_yaml.write_text(yaml.safe_dump(cfg, sort_keys=False, allow_unicode=False), encoding="utf-8")
+    return out_yaml
+
+
+def parse_scene_batch_name(scene_name: str) -> str:
+    match = re.fullmatch(r"(\d+)_(\d+)", scene_name)
+    if match is None:
+        raise ValueError(f"scene_name must match <batch>_<scene>, got: {scene_name}")
+    return f"Batch{int(match.group(1)):04d}"
+
+
+def prepare_nurec_scene_data(
+    scene_name: str,
+    scene_cfg_dir: Path | str,
+    nurec_root: Path | str = Path("data/NuRec"),
+    trajectory_root: Path | str = Path("data/trajectory"),
+    api_base: str = _NUREC_SCENE_API_BASE,
+    api_key: str = _NUREC_SCENE_API_KEY,
+) -> Path:
+    scene_cfg_dir = Path(scene_cfg_dir)
+    nurec_root = Path(nurec_root)
+    trajectory_root = Path(trajectory_root)
+    scene_id = scene_name
+    batch_name = parse_scene_batch_name(scene_name)
+    api_base = api_base.rstrip("/")
+    headers = {"X-API-Key": api_key}
+
+    meta_resp = requests.get(f"{api_base}/api/scenes/{scene_id}/meta", headers=headers, timeout=10)
+    meta_resp.raise_for_status()
+
+    download_resp = requests.post(f"{api_base}/api/scenes/{scene_id}/download", headers=headers, timeout=10)
+    download_resp.raise_for_status()
+    download_data = download_resp.json()
+
+    scene_root = nurec_root / batch_name
+    local_usdz = scene_root / f"{scene_name}.usdz"
+    scene_dir = scene_root / scene_name
+
+    scene_root.mkdir(parents=True, exist_ok=True)
+    trajectory_root.mkdir(parents=True, exist_ok=True)
+    scene_cfg_dir.mkdir(parents=True, exist_ok=True)
+
+    total_size = int(download_data.get("size") or 0)
+    print(f"Downloading scene {scene_name} -> {local_usdz}")
+    with requests.get(download_data["download_url"], stream=True, timeout=60) as resp:
+        resp.raise_for_status()
+        if total_size <= 0:
+            content_length = resp.headers.get("Content-Length")
+            if content_length and content_length.isdigit():
+                total_size = int(content_length)
+
+        downloaded = 0
+        with local_usdz.open("wb") as f:
+            for chunk in resp.iter_content(chunk_size=1024 * 1024):
+                if not chunk:
+                    continue
+                f.write(chunk)
+                downloaded += len(chunk)
+                if total_size > 0:
+                    percent = downloaded / total_size * 100.0
+                    print(
+                        f"\rDownloading {scene_name}: {percent:.1f}% ({downloaded}/{total_size})",
+                        end="",
+                        flush=True,
+                    )
+                else:
+                    print(
+                        f"\rDownloading {scene_name}: {downloaded} bytes",
+                        end="",
+                        flush=True,
+                    )
+    print()
+
+    scene_dir.mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(local_usdz, "r") as zf:
+        _safe_extract_all(zf, scene_dir)
+    local_usdz.unlink()
+    generate_corrected_xodr(scene_dir)
+
+    pose_dir = trajectory_root / scene_name
+    export_one_scene(scene_dir, pose_dir)
+    return _write_scene_config(scene_name=scene_name, scene_root=scene_root, pose_dir=pose_dir, scene_cfg_dir=scene_cfg_dir)
 
 
 def export_one_scene(scene_dir: Path, out_dir: Path) -> None:

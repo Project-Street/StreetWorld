@@ -192,6 +192,12 @@ def main():
                         help='gRPC server host for NuRec renderer')
     parser.add_argument('--grpc-port', type=int, default=9001,
                         help='gRPC server port for NuRec renderer')
+    parser.add_argument(
+        "--nurec-data-directory",
+        type=str,
+        default="data/NuRec",
+        help="Directory for NuRec raw scene data",
+    )
     parser.add_argument('--save-debug-image', action='store_true',
                         help='Save debug images regardless of log level')
     parser.add_argument('--none_sleep_s', type=float, default=0.02,
@@ -214,6 +220,7 @@ def main():
             grpc_host=args.grpc_host,
             grpc_port=args.grpc_port,
             camera_model_type="pinhole",
+            nurec_data_directory=args.nurec_data_directory,
         )
         env_config = ONSITE_DEFAULT_CONFIG
         env_config["scene_config_directory"] = args.scene_config_directory

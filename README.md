@@ -20,8 +20,6 @@ We support visual manual driving in two deployment scenarios:
 - **Local interaction**: If the simulator is installed on a local Linux machine with a GUI, follow Step 3 in **Quick Start** for interactive manual driving.
 - **Remote interaction**: If the simulator is installed on a remote headless Linux system, such as a server, follow Step 4 in **Quick Start** for remote interaction.
 
-After submitting a task on the OnSite platform, the simulator automatically download and caches the 3D Gaussian Splatting model for the corresponding case and then starts the simulation.
-
 ## Installation
 
 ### Prerequisites
@@ -80,9 +78,25 @@ multicast.field_id
 
 ```bash
 python metadrive/examples/onsite_simulator_launcher.py \
-  --onsite_dir $ONSITE_PATH \
-  --scene_config_directory configs/nurec
+  --scene_config_directory configs/nurec \
+  --nurec-data-directory data/NuRec
 ```
+
+Optional: In default, after submitting a new case on the OnSite platform, the simulator automatically download and caches the data of the case from Aliyun. We provide optional approach that you can download all available NuRec scenes from Aliyun and generate simulator metadata before launch any case, so you do not need to fetch data from Aliyun again each time a new scene starts:
+
+```bash
+python metadrive/examples/prepare_nurec_scenes.py \
+  --nurec-root data/NuRec
+``` 
+
+Optional: by default, the launch script automatically starts a daemon process when no daemon is running on the system. In rare cases, if the script exits unexpectedly, the daemon process may not shut down correctly. You can also choose to start the OnSite daemon manually before launching the simulator:
+
+```bash
+cd onsite/daemon
+LD_LIBRARY_PATH="$(pwd)/Lib:${LD_LIBRARY_PATH}" ./daemon
+```
+
+If the daemon is already running, `onsite_simulator_launcher.py` skips starting a second daemon process.
 
 3. Local Interaction
 
@@ -90,9 +104,8 @@ If the simulator machine has a GUI, launch the local viewer on the same machine:
 
 ```bash
 python metadrive/examples/onsite_viewer.py \
-  --onsite_dir $ONSITE_PATH \
-  --width 1280 \
-  --height 720
+  --width 1600 \
+  --height 900
 ```
 
 4. Remote Interaction
@@ -101,7 +114,6 @@ If the simulator runs on a headless machine, start the viewer server on the same
 
 ```bash
 python metadrive/examples/onsite_remote_viewer/viewer_server.py \
-  --onsite_dir $ONSITE_PATH \
   --grpc_host <host ip> \
   --grpc_port <host port>
 ```
@@ -112,6 +124,6 @@ Then launch the viewer client on another machine in the same LAN:
 python metadrive/examples/onsite_remote_viewer/viewer_client.py \
   --grpc_host <host ip> \
   --grpc_port <host port> \
-  --width 1280 \
-  --height 720
+  --width 1600 \
+  --height 900
 ```

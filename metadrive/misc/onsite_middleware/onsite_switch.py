@@ -43,6 +43,8 @@ from metadrive.utils.logger import get_log_timestamp
 
 logger = logging.getLogger(__name__)
 
+_INT64_MAX = (1 << 63) - 1
+
 
 class TERMINAL_TYPE(Enum):
     SIMULATOR = "simulator"
@@ -145,6 +147,20 @@ class OnSiteSwitch:
         if not daemon_bin.exists():
             logger.info("OnSite daemon not started because binary is missing: %s", daemon_bin)
             raise FileNotFoundError(f"OnSite daemon binary not found: {daemon_bin}")
+
+        daemon_query = subprocess.run(
+            ["pgrep", "-a", "-x", daemon_bin.name],
+            capture_output=True,
+            text=True,
+        )
+        if daemon_query.returncode == 0:
+            logger.info(
+                "OnSite daemon already running, skip start. %s",
+                daemon_query.stdout.splitlines()[0].strip(),
+            )
+            return
+        if daemon_query.returncode != 1:
+            raise RuntimeError(f"Failed to query existing daemon process: {daemon_query.stderr.strip()}")
 
         env = os.environ.copy()
         ld_library_path = env.get("LD_LIBRARY_PATH", "")
@@ -377,27 +393,18 @@ class OnSiteSwitch:
         return enums_pb2.RT_MOTORVEHICLE
 
     @staticmethod
-    def parse_scene_name_from_session_id(session_id: str) -> str:
+    def parse_scene_name_from_archive_id(archive_id: str) -> str:
         """
-        Parse OnSite session_id into MetaDrive scene_name.
+        Parse scene_name from ActorPrepare.archive_info.id.
 
-        Expected session_id format:
-            用户-运行次数-场地编号-作业id-时间戳_目前运行的次数
         Example:
-            tj2026-test1-1-1-1771007315895005_20260214022843_1
-
-        Returns:
-            scene_name in "{场地编号}_{作业id}" format, e.g. "1_1"
+            lua/replay/2_1 -> 2_1
         """
-        raw = str(session_id).strip()
-        parts = raw.rsplit("-", 3)
-        if len(parts) != 4:
-            raise ValueError(f"Invalid session_id format: {session_id}")
-        field_id = parts[1].strip()
-        job_id = parts[2].strip()
-        if not field_id or not job_id:
-            raise ValueError(f"Invalid session_id format: {session_id}")
-        return f"{field_id}_{job_id}"
+        raw = str(archive_id).strip().strip("/")
+        scene_name = raw.rsplit("/", 1)[-1].strip()
+        if not scene_name:
+            raise ValueError(f"Invalid archive_id format: {archive_id}")
+        return scene_name
 
     def initialize_channels(self):
         """
@@ -450,14 +457,12 @@ class OnSiteSwitch:
 
     def close(self):
         """Close all channels and cleanup resources."""
-        logger.info("Closing OnSite middleware")
         # Channels are managed by libMulticastNetwork, no explicit cleanup needed
         if self._daemon_proc is not None:
             if self._daemon_proc.poll() is None:
+                logger.info("Closing OnSite middleware")
+                os.killpg(self._daemon_proc.pid, signal.SIGINT)
                 try:
-                    # The binary handles SIGINT cleanly; send it to the whole process group
-                    # so helper children do not survive as orphans.
-                    os.killpg(self._daemon_proc.pid, signal.SIGINT)
                     self._daemon_proc.wait(timeout=3.0)
                 except subprocess.TimeoutExpired:
                     logger.warning("OnSite daemon did not exit after SIGINT, escalating to SIGTERM")
@@ -467,10 +472,13 @@ class OnSiteSwitch:
                     except subprocess.TimeoutExpired:
                         logger.warning("OnSite daemon did not exit after SIGTERM, escalating to SIGKILL")
                         os.killpg(self._daemon_proc.pid, signal.SIGKILL)
-                try:
-                    self._daemon_proc.wait(timeout=1.0)
-                except subprocess.TimeoutExpired:
-                    logger.exception("Timed out waiting for OnSite daemon to reap after SIGKILL")
+                        try:
+                            self._daemon_proc.wait(timeout=1.0)
+                        except subprocess.TimeoutExpired:
+                            logger.error("Timed out waiting for OnSite daemon to reap after SIGKILL")
+                            self._daemon_proc = None
+                            return
+            logger.info("OnSite daemon process exited. pid=%s, returncode=%s", self._daemon_proc.pid, self._daemon_proc.returncode)
             self._daemon_proc = None
 
     # ==================== Receive Methods ====================
@@ -495,7 +503,7 @@ class OnSiteSwitch:
             session_id = prepare_msg.session_id
             actor_id = prepare_msg.actor_id
             self.actor_id = actor_id
-            scene_name = self.parse_scene_name_from_session_id(session_id)
+            scene_name = self.parse_scene_name_from_archive_id(prepare_msg.archive_info.id)
 
             # Parse brief_data if available
             brief_data = None
@@ -777,10 +785,20 @@ class OnSiteSwitch:
                 )
                 frame_nv12 = frame_data.reshape(int(image.height * 1.5), int(image.width))
                 frame_rgb = cv2.cvtColor(frame_nv12, cv2.COLOR_YUV2RGB_NV12)
+                camera_timestamp = int(image.camera_timestamp)
+                if camera_timestamp < 0 or camera_timestamp > _INT64_MAX:
+                    logger.error(
+                        "Suspicious camera_timestamp detected: index=%d sequence_num=%s measurement_time=%s camera_timestamp=%s",
+                        i,
+                        image.sequence_num,
+                        image.measurement_time,
+                        camera_timestamp,
+                    )
+                    breakpoint()
                 decoded_images.append(
                     {
                         "rgb": frame_rgb,
-                        "camera_timestamp": int(image.camera_timestamp),
+                        "camera_timestamp": camera_timestamp,
                     }
                 )
 

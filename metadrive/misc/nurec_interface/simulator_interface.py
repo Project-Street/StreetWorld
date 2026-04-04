@@ -7,7 +7,6 @@ import re
 import socket
 import subprocess
 import time
-import zipfile
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
@@ -17,9 +16,8 @@ import yaml
 from metadrive.misc.nurec_interface.grpc_client import NurecGrpcClient
 from metadrive.misc.nurec_interface.nurec_parser import (
     compute_sim_world_to_xodr_map,
-    export_one_scene,
-    generate_corrected_xodr,
     parse_camera_params,
+    prepare_nurec_scene_data,
     parse_world_to_nre,
 )
 from metadrive.utils.logger import get_log_timestamp
@@ -28,9 +26,6 @@ logger = logging.getLogger(__name__)
 
 
 class SimulatorInterface:
-    _NUREC_HF_REPO_ID = "nvidia/PhysicalAI-Autonomous-Vehicles-NuRec"
-    _NUREC_HF_BASE_PATH = "sample_set/25.07_release"
-
     def __init__(
         self,
         zNear: float = 0.0001,
@@ -40,12 +35,14 @@ class SimulatorInterface:
         grpc_timeout_s: float = 60.0,
         resolution_scale: float = 1.0,
         camera_model_type: str = "ftheta",
+        nurec_data_directory: str | Path = "data/NuRec",
     ) -> None:
         self.zNear = zNear
         self.zFar = zFar
         self.resolution_scale = resolution_scale
         self._grpc_host = str(grpc_host)
         self._grpc_port = int(grpc_port)
+        self._nurec_data_directory = Path(nurec_data_directory)
         self._local_server_proc: Optional[subprocess.Popen] = None
         self._simple_nurec_log_fp = None
 
@@ -165,76 +162,12 @@ class SimulatorInterface:
         if not m:
             raise FileNotFoundError(f"Scene config not found: {cfg_path}")
         logger.warning("Scene not found. Downloading now: scene=%s cfg=%s", scene_name, cfg_path)
-        self._download_and_generate_scene(
+        prepare_nurec_scene_data(
             scene_name=scene_name,
-            batch_num=int(m.group(1)),
-            scene_index=int(m.group(2)),
             scene_cfg_dir=cfg_path.parent,
+            nurec_root=self._nurec_data_directory,
         )
-        logger.warning("Scene download completed: scene=%s. Please restart the job on http://www.zjvts.cn/#/job/listr.", scene_name)
-
-    def _download_and_generate_scene(self, scene_name: str, batch_num: int, scene_index: int, scene_cfg_dir: Path) -> None:
-        repo_id = self._NUREC_HF_REPO_ID
-        target_path = self._NUREC_HF_BASE_PATH
-        batch_name = f"Batch{int(batch_num):04d}"
-        token = os.getenv("HF_TOKEN")
-        if not token:
-            raise RuntimeError("Missing HF_TOKEN; cannot auto-download NuRec scene")
-
-        from huggingface_hub import HfApi, hf_hub_download
-
-        api = HfApi()
-        files = api.list_repo_files(repo_id=repo_id, repo_type="dataset", token=token)
-        batch_prefix = f"{target_path}/{batch_name}/"
-        usdz_files = [p for p in files if p.startswith(batch_prefix) and p.endswith(".usdz")]
-        by_uuid: Dict[str, str] = {Path(relpath).stem: relpath for relpath in usdz_files}
-
-        ordered_scene_ids = sorted(by_uuid.keys())
-        if scene_index < 1 or scene_index > len(ordered_scene_ids):
-            raise RuntimeError(
-                f"Scene index out of range for batch {batch_num}: index={scene_index}, total={len(ordered_scene_ids)}"
-            )
-        scene_uuid = ordered_scene_ids[scene_index - 1]
-        relpath = by_uuid[scene_uuid]
-
-        data_root = Path("data")
-        nurec_root = data_root / "nurec"
-        trajectory_root = data_root / "trajectory"
-        nurec_root.mkdir(parents=True, exist_ok=True)
-        trajectory_root.mkdir(parents=True, exist_ok=True)
-        scene_cfg_dir.mkdir(parents=True, exist_ok=True)
-
-        local_usdz = Path(
-            hf_hub_download(
-                repo_id=repo_id,
-                repo_type="dataset",
-                filename=relpath,
-                token=token,
-                local_dir=str(nurec_root),
-            )
-        )
-        scene_root = local_usdz.parent
-        scene_dir = scene_root / scene_uuid
-        with zipfile.ZipFile(local_usdz, "r") as zf:
-            zf.extractall(scene_dir)
-        local_usdz.unlink()
-        generate_corrected_xodr(scene_dir)
-
-        pose_dir = trajectory_root / scene_name
-        export_one_scene(scene_dir, pose_dir)
-
-        cwd_root = Path.cwd()
-        cfg = {
-            "scene_name": scene_name,
-            "scene_uuid": scene_uuid,
-            # Keep generated yaml paths root-relative (e.g. data/...) to avoid fragile ../../ traversal.
-            "scene_root": os.path.relpath(scene_root, cwd_root),
-            "pose_data_path": os.path.relpath(pose_dir, cwd_root),
-            "ego_pose_path": os.path.relpath(pose_dir / "ego_pose.json", cwd_root),
-            "trajectory_path": os.path.relpath(pose_dir / "trajectory.json", cwd_root),
-        }
-        out_yaml = scene_cfg_dir / f"{scene_name}.yaml"
-        out_yaml.write_text(yaml.safe_dump(cfg, sort_keys=False, allow_unicode=False), encoding="utf-8")
+        logger.warning("Scene download completed: scene=%s. Please restart the job on http://42.121.161.25:52023/#/job/listr.", scene_name)
 
     def load_model(self, cfg: Any) -> None:
         rig = json.loads(Path(cfg["rig_trajectories_path"]).read_text(encoding="utf-8"))
