@@ -412,10 +412,30 @@ def main():
 
             metrics_recorder.end_episode(last_info)
             print(f"Episode {episode_index} reward: {reward_sum:.2f}")
-            print(f"Metrics so far: {metrics_recorder.summary()}")
+            metrics_so_far = metrics_recorder.summary()
+            print(
+                "Metrics so far: "
+                f"collision={metrics_so_far.get('collision_ratio', 0.0):.3f}, "
+                f"out_of_road={metrics_so_far.get('out_of_road_ratio', 0.0):.3f}, "
+                f"lag_warn={metrics_so_far.get('lag_warn_ratio', 0.0):.3f}, "
+                f"lag_dist={metrics_so_far.get('avg_lag_distance', 0.0):.3f}, "
+                f"lag_deficit={metrics_so_far.get('avg_lag_deficit', 0.0):.3f}, "
+                f"pos_dev={metrics_so_far.get('avg_position_deviation', 0.0):.3f}, "
+                f"heading_err={metrics_so_far.get('avg_heading_error', 0.0):.3f}"
+            )
 
         print(f"Total reward: {total_reward:.2f}")
-        print(f"Final metrics: {metrics_recorder.summary()}")
+        final_metrics = metrics_recorder.summary()
+        print(
+            "Final metrics: "
+            f"collision={final_metrics.get('collision_ratio', 0.0):.3f}, "
+            f"out_of_road={final_metrics.get('out_of_road_ratio', 0.0):.3f}, "
+            f"lag_warn={final_metrics.get('lag_warn_ratio', 0.0):.3f}, "
+            f"lag_dist={final_metrics.get('avg_lag_distance', 0.0):.3f}, "
+            f"lag_deficit={final_metrics.get('avg_lag_deficit', 0.0):.3f}, "
+            f"pos_dev={final_metrics.get('avg_position_deviation', 0.0):.3f}, "
+            f"heading_err={final_metrics.get('avg_heading_error', 0.0):.3f}"
+        )
         # gaussian_recorder.save_video()
     finally:
         client.close()

@@ -19,6 +19,9 @@ class MetricsRecorder:
         self._position_episode_means: List[float] = []
         self._progress_episode_values: List[float] = []
         self._smoothness_episode_means: List[float] = []
+        self._lag_distance_episode_means: List[float] = []
+        self._lag_deficit_episode_means: List[float] = []
+        self._lag_warn_ratio_episode_values: List[float] = []
 
         self._reset_episode_accumulators()
 
@@ -41,6 +44,13 @@ class MetricsRecorder:
         self._episode_smoothness_count = 0
         self._episode_speed_history: List[float] = []
 
+        self._episode_lag_distance_sum = 0.0
+        self._episode_lag_distance_count = 0
+        self._episode_lag_deficit_sum = 0.0
+        self._episode_lag_deficit_count = 0
+        self._episode_lag_warn_steps = 0
+        self._episode_total_steps = 0
+
     @staticmethod
     def _safe_float(value: Optional[float]) -> Optional[float]:
         if value is None:
@@ -50,13 +60,28 @@ class MetricsRecorder:
         except (TypeError, ValueError):
             return None
 
+    @staticmethod
+    def _reason_is_out_of_road(reason: object) -> bool:
+        if reason is None:
+            return False
+        if hasattr(reason, "name"):
+            try:
+                if str(reason.name).upper() == "OUT_OF_ROAD":
+                    return True
+            except Exception:
+                pass
+        text = str(reason).upper()
+        return "OUT_OF_ROAD" in text or "OUT OF ROAD" in text
+
     def update(self, step_info: Dict) -> None:
         """Update metrics with step_info dict."""
         if not step_info:
             return
 
+        self._episode_total_steps += 1
+
         ttc = self._safe_float(step_info.get("ttc"))
-        if ttc is not None:
+        if ttc is not None and ttc > 0.0:
             self._episode_ttc_sum += ttc
             self._episode_ttc_count += 1
 
@@ -75,6 +100,21 @@ class MetricsRecorder:
             self._episode_progress_sum += progress_ratio
             self._episode_progress_count += 1
 
+        diag = step_info.get("diag") if isinstance(step_info.get("diag"), dict) else {}
+        lag_distance = self._safe_float(diag.get("lag_distance"))
+        if lag_distance is not None:
+            self._episode_lag_distance_sum += lag_distance
+            self._episode_lag_distance_count += 1
+
+        lag_deficit = self._safe_float(diag.get("progress_deficit"))
+        if lag_deficit is not None:
+            self._episode_lag_deficit_sum += lag_deficit
+            self._episode_lag_deficit_count += 1
+
+        lag_warn = self._safe_float(diag.get("lag_warn"))
+        if lag_warn is not None and lag_warn > 0.0:
+            self._episode_lag_warn_steps += 1
+
         ego_speed = self._safe_float(step_info.get("ego_speed"))
         if ego_speed is not None:
             self._episode_speed_history.append(ego_speed)
@@ -91,7 +131,7 @@ class MetricsRecorder:
             self._episode_collision = True
 
         reason = step_info.get("reason")
-        if reason == "out_of_road":
+        if self._reason_is_out_of_road(reason):
             self._episode_out_of_road = True
 
     def end_episode(self, step_info: Optional[Dict] = None) -> None:
@@ -126,6 +166,18 @@ class MetricsRecorder:
             self._smoothness_episode_means.append(
                 self._episode_smoothness_sum / float(self._episode_smoothness_count)
             )
+        if self._episode_lag_distance_count > 0:
+            self._lag_distance_episode_means.append(
+                self._episode_lag_distance_sum / float(self._episode_lag_distance_count)
+            )
+        if self._episode_lag_deficit_count > 0:
+            self._lag_deficit_episode_means.append(
+                self._episode_lag_deficit_sum / float(self._episode_lag_deficit_count)
+            )
+        if self._episode_total_steps > 0:
+            self._lag_warn_ratio_episode_values.append(
+                self._episode_lag_warn_steps / float(self._episode_total_steps)
+            )
 
         self._reset_episode_accumulators()
 
@@ -145,5 +197,8 @@ class MetricsRecorder:
             "avg_position_deviation": self._mean(self._position_episode_means),
             "avg_heading_error": self._mean(self._heading_episode_means),
             "progress_ratio": self._mean(self._progress_episode_values),
+            "avg_lag_distance": self._mean(self._lag_distance_episode_means),
+            "avg_lag_deficit": self._mean(self._lag_deficit_episode_means),
+            "lag_warn_ratio": self._mean(self._lag_warn_ratio_episode_values),
             "smoothness": self._mean(self._smoothness_episode_means),
         }

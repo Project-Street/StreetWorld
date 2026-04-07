@@ -177,7 +177,7 @@ class GaussianFrameRecorder:
             return
 
         font = cv2.FONT_HERSHEY_SIMPLEX
-        font_scale = 0.8
+        font_scale = 2.0
         thickness = 2
         text = str(scene_name)
         text_size = cv2.getTextSize(text, font, font_scale, thickness)[0]
