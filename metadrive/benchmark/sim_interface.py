@@ -6,8 +6,11 @@ import torch
 import os
 import json
 
-from render_essentials import render_frame, load_from_ply
-
+try:
+    from .render_essentials import render_frame, load_from_ply
+except:
+    from render_essentials import render_frame, load_from_ply
+    
 LOGGER = logging.getLogger(__name__)
 
 Xfront2Y = np.array([
