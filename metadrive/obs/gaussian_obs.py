@@ -104,6 +104,7 @@ class GaussianObservation(BaseObservation):
         a different position and pose
         """
         ego_pose = torch.tensor(self.controller.transform).inverse()
+        camera_info = {}
         for cam_name, params in self.params.items():
             extrinsics = params['ego2camera'] @ ego_pose
             ret = self.render_fn(
@@ -114,9 +115,17 @@ class GaussianObservation(BaseObservation):
             )
             self.state[cam_name] = np.roll(self.state[cam_name], -1, axis=0)
             self.state[cam_name][-1] = ret
+            camera_info[cam_name] = {
+                'ego2camera': params['ego2camera'].detach().cpu().numpy().astype(np.float32),
+                'K': params['K'].detach().cpu().numpy().astype(np.float32),
+                'H': params['H'],
+                'W': params['W']
+            }
 
-
-        return self.state
+        return {
+            'camera_info': camera_info,
+            'image': self.state
+        }
 
 
     def destroy(self):

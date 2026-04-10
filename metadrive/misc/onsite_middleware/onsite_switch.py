@@ -43,9 +43,6 @@ from metadrive.utils.logger import get_log_timestamp
 
 logger = logging.getLogger(__name__)
 
-_INT64_MAX = (1 << 63) - 1
-
-
 class TERMINAL_TYPE(Enum):
     SIMULATOR = "simulator"
     TESTEE = "apollo_testee"
@@ -80,7 +77,7 @@ class OnSiteSwitch:
         onsite_dir,
         terminal_type=TERMINAL_TYPE.SIMULATOR,
         image_sizes=None,
-        n_warm_up=10,
+        n_warm_up=20,
     ):
         """
         Initialize OnSite middleware.
@@ -144,6 +141,7 @@ class OnSiteSwitch:
         daemon_dir = self.onsite_dir / "daemon"
         daemon_bin = daemon_dir / "daemon"
         daemon_lib_dir = daemon_dir / "Lib"
+        
         if not daemon_bin.exists():
             logger.info("OnSite daemon not started because binary is missing: %s", daemon_bin)
             raise FileNotFoundError(f"OnSite daemon binary not found: {daemon_bin}")
@@ -153,6 +151,7 @@ class OnSiteSwitch:
             capture_output=True,
             text=True,
         )
+        
         if daemon_query.returncode == 0:
             logger.info(
                 "OnSite daemon already running, skip start. %s",
@@ -260,6 +259,33 @@ class OnSiteSwitch:
                 return f"UNKNOWN_CHASSIS_TYPE ({value})"
         return f"UNKNOWN_TYPE ({value})"
 
+    @staticmethod
+    def _image_debug_meta(py_img):
+        return {
+            "timestamp_sec": float(py_img.timestamp_sec),
+            "camera_timestamp": int(py_img.camera_timestamp),
+            "sequence_num": int(py_img.sequence_num),
+            "measurement_time": float(py_img.measurement_time),
+            "height": int(py_img.height),
+            "width": int(py_img.width),
+            "encoding": str(py_img.encoding),
+            "byte_len": int(np.asarray(py_img.data).nbytes),
+            "camera_pose_in_ego": np.asarray(py_img.camera_pose_in_ego, dtype=np.float64).tolist(),
+            "intrinsic": np.asarray(py_img.intrinsic, dtype=np.float32).tolist(),
+        }
+
+    @classmethod
+    def _vehicle_feedback_debug_payload(cls, feedback):
+        payload = cls._proto_to_dict(feedback)
+        bcm_feedback = dict(payload.get("bcm_feedback") or {})
+        bcm_feedback["acceleration"] = np.asarray(feedback.bcm_feedback.acceleration, dtype=np.float32).tolist()
+        bcm_feedback["vehicle_velocity"] = np.asarray(feedback.bcm_feedback.vehicle_velocity, dtype=np.float32).tolist()
+        bcm_feedback["angular_velocity"] = np.asarray(feedback.bcm_feedback.angular_velocity, dtype=np.float32).tolist()
+        payload["bcm_feedback"] = bcm_feedback
+        payload["command"] = int(feedback.command)
+        payload["vehicle_pose"] = np.asarray(feedback.vehicle_pose, dtype=np.float32).tolist()
+        return payload
+
     def _log_message_debug(self, direction, message_type, payload, enum_scope, channel_op=None, channel_elapsed_ms=None):
         if not logger.isEnabledFor(logging.DEBUG):
             return
@@ -336,12 +362,19 @@ class OnSiteSwitch:
             self._n_warm_up,
             self._image_sizes,
         )
+        warm_camera_params = {
+            name: {
+                "ego2camera": np.eye(4, dtype=np.float64),
+                "K": np.eye(3, dtype=np.float32),
+            }
+            for name in self._image_sizes
+        }
         for _ in range(self._n_warm_up):
             warm_images = {
                 name: rng.integers(0, 256, size=(height, width, 3), dtype=np.uint8)
                 for name, (height, width) in self._image_sizes.items()
             }
-            self.send_images(warm_images, timestamp=-1)
+            self.send_images(warm_images, timestamp=-1, camera_params=warm_camera_params)
 
     def _next_seq(self, message_type) -> int:
         seq = int(self._seq_by_type.get(message_type, 0))
@@ -703,7 +736,12 @@ class OnSiteSwitch:
             feedback = VehicleFeedback()
             feedback.ParseFromString(data)
             self._log_message_debug(
-                "recv", VEHICLE_FEEDBACK, feedback, "chassis", channel_op="get", channel_elapsed_ms=get_ms
+                "recv",
+                VEHICLE_FEEDBACK,
+                self._vehicle_feedback_debug_payload(feedback),
+                "chassis",
+                channel_op="get",
+                channel_elapsed_ms=get_ms,
             )
             return feedback
 
@@ -746,6 +784,8 @@ class OnSiteSwitch:
             list: list[dict], each item contains:
                 - rgb: np.ndarray with shape (H, W, 3) in RGB uint8
                 - camera_timestamp: int
+                - camera_pose_in_ego: np.ndarray with shape (4, 4)
+                - intrinsic: np.ndarray with shape (3, 3)
         """
         images, get_ms = self._timed_get(self.channel_map["camera"].get_image_simple)
         if images is None or len(images) == 0:
@@ -753,9 +793,7 @@ class OnSiteSwitch:
 
         decoded_images = []
         for i, image in enumerate(images):
-            if image.measurement_time == -1:
-                logger.debug("Drop warm-up image: index=%d measurement_time=%s", i, image.measurement_time)
-                continue
+            is_warmup = image.measurement_time == -1 or image.measurement_time > 1e15
             if image.data is None or len(image.data) == 0:
                 logger.warning("Drop empty image payload: index=%d", i)
                 continue
@@ -774,6 +812,9 @@ class OnSiteSwitch:
                 )
                 self._camera_decoders[i] = decoder
             raw_frames = decoder.Decode(packet)
+            if is_warmup:
+                logger.debug("Drop warm-up image after decoder feed: index=%d measurement_time=%s", i, image.measurement_time)
+                continue
             if len(raw_frames) == 0:
                 logger.warning("Failed to decode image packet, empty raw frames: index=%d", i)
                 continue
@@ -786,7 +827,7 @@ class OnSiteSwitch:
                 frame_nv12 = frame_data.reshape(int(image.height * 1.5), int(image.width))
                 frame_rgb = cv2.cvtColor(frame_nv12, cv2.COLOR_YUV2RGB_NV12)
                 camera_timestamp = int(image.camera_timestamp)
-                if camera_timestamp < 0 or camera_timestamp > _INT64_MAX:
+                if camera_timestamp < 0 or camera_timestamp > 1e15:
                     logger.error(
                         "Suspicious camera_timestamp detected: index=%d sequence_num=%s measurement_time=%s camera_timestamp=%s",
                         i,
@@ -794,11 +835,12 @@ class OnSiteSwitch:
                         image.measurement_time,
                         camera_timestamp,
                     )
-                    breakpoint()
                 decoded_images.append(
                     {
                         "rgb": frame_rgb,
                         "camera_timestamp": camera_timestamp,
+                        # "camera_pose_in_ego": np.asarray(image.camera_pose_in_ego, dtype=np.float32).reshape(4, 4),
+                        # "intrinsic": np.asarray(image.intrinsic, dtype=np.float32).reshape(3, 3),
                     }
                 )
 
@@ -811,6 +853,7 @@ class OnSiteSwitch:
             {
                 "image_count": len(images),
                 "decoded_count": len(decoded_images),
+                "images": [self._image_debug_meta(image) for image in images],
             },
             "raw",
             channel_op="get",
@@ -922,7 +965,7 @@ class OnSiteSwitch:
             last_received_feedback: Last received VehicleFeedback (for preserving fields)
         """
         vehicle_state = obs["states"]
-        msg = self._vehicle_state_to_feedback(vehicle_state, current_timestamp, last_received_feedback)
+        msg = self._vehicle_state_to_feedback(obs, vehicle_state, current_timestamp, last_received_feedback)
 
         data = msg.SerializeToString()
         length = len(data)
@@ -930,7 +973,7 @@ class OnSiteSwitch:
         self._log_message_debug(
             "send",
             VEHICLE_FEEDBACK,
-            {**self._proto_to_dict(msg), "ret": ret},
+            {**self._vehicle_feedback_debug_payload(msg), "ret": ret},
             "chassis",
             channel_op="put",
             channel_elapsed_ms=put_ms,
@@ -977,17 +1020,15 @@ class OnSiteSwitch:
         if ret != 0:
             logger.error(f"Failed to send VehicleControl, ret: {ret}")
 
-    def send_images(self, images, timestamp):
+    def send_images(self, images, timestamp, camera_params):
         """
         Send multiple images to OnSite server.
 
         Args:
             images: Dict of camera_name -> numpy array (H, W, 3) in RGB format
             timestamp: Timestamp in seconds
+            camera_params: Dict of camera_name -> {'ego2camera': (4,4), 'K': (3,3)}
         """
-        if not images:
-            raise ValueError("images must be a non-empty dict")
-
         py_images = []
         for camera_name, img in images.items():
             height, width = img.shape[:2]
@@ -1026,21 +1067,16 @@ class OnSiteSwitch:
             py_img.width = width
             py_img.encoding = "h264"
             py_img.data = payload
+            # py_img.camera_pose_in_ego = np.linalg.inv(
+            #     np.asarray(camera_params[camera_name]["ego2camera"], dtype=np.float64)
+            # ).reshape(-1)
+            # py_img.intrinsic = np.asarray(camera_params[camera_name]["K"], dtype=np.float32).reshape(-1)
             py_images.append(py_img)
             self.image_seq += 1
 
         ret, put_ms = self._timed_put(self.channel_map["camera"].put_image_simple, py_images)
         images_meta = [
-            {
-                "timestamp_sec": py_img.timestamp_sec,
-                "camera_timestamp": py_img.camera_timestamp,
-                "sequence_num": py_img.sequence_num,
-                "measurement_time": py_img.measurement_time,
-                "height": py_img.height,
-                "width": py_img.width,
-                "encoding": py_img.encoding,
-                "byte_len": np.asarray(py_img.data).nbytes,
-            }
+            self._image_debug_meta(py_img)
             for py_img in py_images
         ]
         total_byte_len = sum(img_meta["byte_len"] for img_meta in images_meta)
@@ -1195,7 +1231,7 @@ class OnSiteSwitch:
 
         return role
 
-    def _vehicle_state_to_feedback(self, vehicle_state, current_timestamp, last_received_feedback=None):
+    def _vehicle_state_to_feedback(self, obs, vehicle_state, current_timestamp, last_received_feedback=None):
         """
         Convert vehicle state to VehicleFeedback proto message.
 
@@ -1243,6 +1279,17 @@ class OnSiteSwitch:
         feedback.bcm_feedback.fron_right_wheel_speed = self._to_float(vehicle_state['front_right_wheel_speed'])  # m/s
         feedback.bcm_feedback.rear_left_wheel_speed = self._to_float(vehicle_state['rear_left_wheel_speed'])  # m/s
         feedback.bcm_feedback.rear_right_wheel_speed = self._to_float(vehicle_state['rear_right_wheel_speed'])  # m/s
+        feedback.bcm_feedback.acceleration[:] = vehicle_state["acceleration"].tolist()
+        feedback.bcm_feedback.vehicle_velocity[:] = vehicle_state["velocity"].tolist()
+        feedback.bcm_feedback.angular_velocity[:] = [0.0, 0.0, float(vehicle_state["angular_velocity"])]
+        turn_signal = int(obs["navigation"]["turn_signal"]) if "navigation" in obs else 0
+        if turn_signal < 0:
+            feedback.command = 0
+        elif turn_signal > 0:
+            feedback.command = 1
+        else:
+            feedback.command = 2
+        feedback.vehicle_pose[:] = np.asarray(vehicle_state["transform"], dtype=np.float32).reshape(-1).tolist()
 
         # Preserve fields from last received feedback if available
         if last_received_feedback:

@@ -43,7 +43,7 @@ Place `daemon/` and `config/` in `./onsite`.
 ```bash
 
 # For running viewer client in local system only (minimal dependencies for onsite_remote_viewer/viewer_client.py)
-pip install -e ".[viewer]" --no-build-isolation --index-url https://pypi.org/simple
+pip install -e ".[viewer]" --no-build-isolation
 
 # Full stack
 # Install PyTorch with CUDA support (You may visit https://pytorch.org/get-started/previous-versions/ to choose a PyTorch version compatible with your Python and CUDA environment).
@@ -51,16 +51,11 @@ pip install torch==2.4.1 torchvision==0.19.1 torchaudio==2.4.1 --index-url https
 
 pip install "git+https://github.com/NVlabs/trajdata.git@a2a54e5"
 
-pip install /PATH_TO/libmulticastnetwork-1.0.2-cp311-cp311-linux_x86_64.whl
+pip install /PATH_TO/libmulticastnetwork-1.0.2a1-cp311-cp311-linux_x86_64.whl
 pip install /PATH_TO/vts_map-11.2.0.6-cp311-cp311-linux_x86_64.whl
 
-pip install -e ".[full]" --no-build-isolation --index-url https://pypi.org/simple
+pip install -e ".[full]" --no-build-isolation
 ```
-
-### Get Access to NuRec Model
-Register a [HuggingFace](https://huggingface.co/) account.
-Go to the [HuggingFace access token](https://huggingface.co/settings/tokens) page and create a new token.
-Export the token to your environment as `HF_TOKEN`.
 
 ## Quick Start
 
@@ -68,10 +63,11 @@ Export the token to your environment as `HF_TOKEN`.
 
 Ensure these fields are correct in onsite/config/common.yaml
 ```
-multicast.config_center_addr
 multicast.local_ip
 multicast.net_interface_name
-multicast.field_id
+
+daemon.server.account
+daemon.server.password
 ```
 
 2. Launch the simulator:

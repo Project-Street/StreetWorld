@@ -118,6 +118,10 @@ message BodyControlModuleFeedback
     float rear_right_door_angle = 25;
     float vehicle_boot_angle = 26;//行李箱状态
     float vehicle_bonnet_angle = 27;//引擎盖状态
+
+    repeated float acceleration=28; // 3D vehicle acceleration: [x, y, z]
+    repeated float vehicle_velocity=29; // 3D vehicle velocity: [x, y, z]
+    repeated float angular_velocity=30; // 3D vehicle angular velocity: [x, y, z]
 };
 
 message IdealControl
@@ -138,13 +142,6 @@ message VehicleControl
     //数据结构扁平化，20210719，ms9新增
     float speed = 7; //期望速度
     float acceleration = 8; //期望加速度
-      // forklift arms
-    float up_down_pos = 31; //叉齿上下位置
-    float up_down_speed = 35; //叉齿上下速度
-    bool arms_up = 32 [deprecated = false]; //叉齿是否俯仰
-    float yaw_angle = 33; //叉齿左右旋转角度
-    float front_back_pos = 34; //叉齿前后位置
-    float front_back_speed = 36; //叉齿前后速度
 };
 
 message VehicleFeedback
@@ -156,6 +153,9 @@ message VehicleFeedback
     BrakeFeedback brake_feedback=5;
     GearFeedback gear_feedback=6;
     BodyControlModuleFeedback bcm_feedback=7;
+    int32 command = 8;
+    // 4x4 transformation matrix, stored in row-major order (16 elements)
+    repeated float vehicle_pose = 9;
 };
 
 message VehicleRegister

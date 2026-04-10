@@ -68,60 +68,28 @@ class NavigationObservation(BaseObservation, Randomizable):
         self._expert_heading = None
     
     def _get_turn_signal(self):
-        if self._path_xy is None or len(self._path_xy) < 5:
+        if self._path_xy is None or len(self._path_xy) == 0:
             return 0
 
         ego_xy = self._vehicle_xy(self.controller)
         heading_vec = self._ego_heading_vec(self.controller)
+        heading_norm = np.linalg.norm(heading_vec)
+        if heading_norm < 1e-6:
+            return 0
+        heading_vec = heading_vec / heading_norm
         i0 = nearest_front_index(self._path_xy, ego_xy, heading_vec)
         if i0 >= len(self._path_xy):
             return 0
 
-        j = self._first_index_by_arclen(self._path_cumlen, i0, self.early_signal_distance)
-        if j == len(self._path_cumlen) or j == 0:
-            return 0
+        target_xy = self._path_xy[-1]
+        delta_xy = target_xy - ego_xy
+        right_vec = np.array([heading_vec[1], -heading_vec[0]], dtype=np.float32)
+        lateral_offset = float(np.dot(delta_xy, right_vec))
 
-        # Vectorized scan within [i0+1, j-1] using numpy
-        N = len(self._path_xy)
-        k_start = max(i0 + 1, 1)
-        k_end = min(j - 1, N - 2)
-        if k_start > k_end:
-            return 0
-
-        idx = np.arange(k_start, k_end + 1, dtype=np.int32)
-        p = self._path_xy
-        p0 = p[idx - 1]
-        p1 = p[idx]
-        p2 = p[idx + 1]
-
-        v01 = p1 - p0
-        v12 = p2 - p1
-        v02 = p2 - p0
-
-        len01 = np.linalg.norm(v01, axis=1)
-        len12 = np.linalg.norm(v12, axis=1)
-        len02 = np.linalg.norm(v02, axis=1)
-        cross = v01[:, 0] * v12[:, 1] - v01[:, 1] * v12[:, 0]
-        area2 = np.abs(cross)
-
-        eps = 1e-10
-        valid = (len01 >= eps) & (len12 >= eps) & (len02 >= eps)
-        R = np.full_like(len01, np.inf, dtype=np.float32)
-        R[valid] = (len01[valid] * len12[valid] * len02[valid]) / (2 * area2[valid] + eps)
-        meets = valid & (R <= float(self.turn_inradius_threshold))
-
-        c = np.sign(cross * meets.astype(np.float32))
-        n = len(c)
-        if n < 5:
-            return 0
-
-        for k in range(0, n - 4): 
-            sum = np.sum(c[k:k + 5])
-            if sum == 5:
-                return 1
-            elif sum == -5: # 
-                return -1
-
+        if lateral_offset >= 2.0:
+            return -1
+        if lateral_offset <= -2.0:
+            return 1
         return 0
 
     @property
@@ -218,12 +186,7 @@ class NavigationObservation(BaseObservation, Randomizable):
         pos = vehicle.position
         return np.array([float(pos[0]), float(pos[1])], dtype=np.float32)
 
-    @staticmethod
-    def _xy2(p):
-        return float(p[0]), float(p[1])
-
     def _set_path(self, pts):
-        
         pts = np.asarray(pts, dtype=np.float32)
         n = len(pts)
         if n >= 5:
@@ -254,17 +217,11 @@ class NavigationObservation(BaseObservation, Randomizable):
     def _seg_len(points):
         seg = np.linalg.norm(points[1:] - points[:-1], axis=1)
         return seg
-
-    @staticmethod
-    def _first_index_by_arclen(cumlen, i0, ahead_len):
-        target = cumlen[i0] + max(0.0, ahead_len)
-        idx = np.searchsorted(cumlen, target, side="right")
-        return int(idx)
     
     @staticmethod
     def _ego_heading_vec(vehicle):
         h = vehicle.heading  # (cos, sin)
-        return np.array([float(h[0]), float(h[1])], dtype=np.float32)
+        return np.array([h[0], h[1]], dtype=np.float32)
 
     def get_reference_state(self, idx):
         if (
@@ -288,16 +245,7 @@ class NavigationObservation(BaseObservation, Randomizable):
             heading_theta=heading,
             position=position
         )
-
-    @staticmethod
-    def _signed_angle(v1, v2):
-        v1n = v1 / np.linalg.norm(v1)
-        v2n = v2 / np.linalg.norm(v2)
-        dot = np.clip(float(np.dot(v1n, v2n)), -1.0, 1.0)
-        ang = math.acos(dot)
-        cross_z = v1n[0] * v2n[1] - v1n[1] * v2n[0]
-        return ang if cross_z > 0 else -ang
-
+    
     def _concat_centerlines(self, lane_seq, start_xy, start_heading):
         pts = []
         for idx, lane_id in enumerate(lane_seq):

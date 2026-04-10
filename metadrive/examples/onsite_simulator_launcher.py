@@ -14,6 +14,7 @@ import time
 import sys
 import os
 from pathlib import Path
+import numpy as np
 
 from metadrive.misc.onsite_middleware import OnSiteSwitch, OnSiteScenarioEnv, TERMINAL_TYPE, SIM_STATE
 from metadrive.manager.agent_manager import AgentState
@@ -99,7 +100,6 @@ def _extract_image_sizes_from_actor_config(env_config):
     return {name: (cam["H"], cam["W"]) for name, cam in cameras.items()}
 
 
-
 def main_loop(env : OnSiteScenarioEnv, middleware: OnSiteSwitch, save_debug_image=False, none_sleep_s=0.02):
     """
     Main communication loop with OnSite server.
@@ -168,12 +168,14 @@ def main_loop(env : OnSiteScenarioEnv, middleware: OnSiteSwitch, save_debug_imag
         if 'gaussian' in obs:
             timestamp_sec = current_timestamp / 1e6
             images_to_send = {}
-            for camera_name, images in obs['gaussian'].items():
+            camera_metadata = obs['gaussian']['camera_info']
+            for camera_name, images in obs['gaussian']['image'].items():
                 if len(images) > 0:
                     # Get the latest image
                     images_to_send[camera_name] = images[-1]
             if images_to_send:
-                middleware.send_images(images_to_send, timestamp_sec)
+
+                middleware.send_images(images_to_send, timestamp_sec, camera_params=camera_metadata)
 
 
 def main():
