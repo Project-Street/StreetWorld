@@ -123,10 +123,7 @@ class AgentManager(BaseManager):
             return
 
         if self.state == AgentState.ALIVE:
-            if isinstance(self.policy, EnvInputPolicy):
-                action = self.policy.act(action)
-            else:
-                action = self.policy.act(self.last_observation)
+            action = self.policy.act(action=action, observation=self.last_observation)
             
             if isinstance(self.policy, ReplayPolicy):
                 self.controller.move(state_info=action)

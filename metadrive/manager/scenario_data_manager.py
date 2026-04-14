@@ -41,6 +41,10 @@ class ScenarioDataManager(BaseManager):
         # Allow subclasses to set directory differently
         self.directory = self.base_config.get("scene_config_directory")
 
+        self.start_scenario_index = self.base_config.get("start_scenario_index", 0)
+        self.random_scenario = self.base_config.get("random_scenario", True)
+        self.current_scenario_id = self.start_scenario_index - 1
+
         # for multi-worker
         # self._scenarios = {}
 
@@ -73,7 +77,7 @@ class ScenarioDataManager(BaseManager):
     def read_metadata(self, loader):
         self.metadata, self.idx2scene = {}, []
         self.num_scenarios = 0
-        for config_file in os.listdir(self.directory):
+        for config_file in sorted(os.listdir(self.directory)):
             cfg_path = os.path.join(self.directory, config_file)
             scene_name, metadata = self._load_single_scene(cfg_path)
             self.metadata[scene_name] = metadata
@@ -148,12 +152,12 @@ class ScenarioDataManager(BaseManager):
             'timestamp_range': timestamp_range
         }
 
-    def reset(self, scene_id=None):
+    def reset(self, scene_name=None):
         """
         Reset scenario data manager.
 
         Args:
-            scene_id: Scene index (int) to load specific scene.
+            scene_name: Name of the scene to load.
                      If None, randomly select a scene (default behavior).
 
         Raises:
@@ -164,12 +168,13 @@ class ScenarioDataManager(BaseManager):
         #     self._scenarios = {}
 
         # Support explicit scene selection for OnSite integration
-        if scene_id is not None:
-            if not (0 <= scene_id < self.num_scenarios):
-                raise ValueError(f"scene_id {scene_id} out of range [0, {self.num_scenarios})")
-            self.current_scenario_id = scene_id
-        else:
+        if scene_name is not None:
+            self.current_scenario_id = self.idx2scene.index(scene_name)
+        elif self.random_scenario:
             self.current_scenario_id = self.np_random.randint(0, self.num_scenarios)
+        else:
+            self.current_scenario_id = (self.current_scenario_id + 1) % self.num_scenarios
+
         self.current_config = self.base_config.copy()
 
         config_dict=self.current_config["actor_config"]

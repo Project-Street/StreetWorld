@@ -40,12 +40,16 @@ class OnSiteScenarioEnv(ScenarioEnv):
         return super().reset(seed=seed, scene_name=scene_name)
 
     def close(self):
+        super().close()
         self.model.close()
 
     def _update_scene(self):
         """
         In OnSite mode, actor state is controlled by Notify, so skip actor.update_state().
         """
+        if self.step_manager.eposide_step == 0:
+            self.agent_managers["actor"].set_state(AgentState.ALIVE)
+        
         new_object_poses = {}
         for name, mgr in self.agent_managers.items():
             if name != "actor":

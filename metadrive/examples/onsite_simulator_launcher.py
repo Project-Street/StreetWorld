@@ -47,7 +47,11 @@ NOTIFY_TO_STATE = {
 # Global state variables
 sim_state = SIM_STATE.IDLE
 session_id = ""
+scene_name = ""
 actor_id = "simulator"
+last_sent_obs = None
+last_sent_info = None
+last_vehicle_control_seq_no = None
 
 
 def process_notify(middleware, env, none_sleep_s):
@@ -61,7 +65,7 @@ def process_notify(middleware, env, none_sleep_s):
         middleware: OnSiteMiddleware instance
         env: OnSiteScenarioEnv instance
     """
-    global sim_state, session_id
+    global sim_state, session_id, scene_name, last_sent_obs, last_sent_info, last_vehicle_control_seq_no
 
     # Collect all pending Notify messages
     notifies = middleware.recv_all_notifies()
@@ -80,11 +84,26 @@ def process_notify(middleware, env, none_sleep_s):
 
         # Handle session-level notifications
         if notify_type in [NT_ABORT_TEST, NT_FINISH_TEST]:
+            if env.gui is not None:
+                try:
+                    env.gui.flush_episode(env.scene_name)
+                except Exception as e:
+                    pass
             sim_state = SIM_STATE.IDLE
             session_id = ""
+            scene_name = ""
+            last_sent_obs = None
+            last_sent_info = None
+            last_vehicle_control_seq_no = None
             continue
         elif notify_type == NT_START_TEST:
             sim_state = SIM_STATE.STARTED
+            logger.info(f"Reset env with scene_name={scene_name} after START_TEST")
+            obs, info = env.reset(scene_name=scene_name)
+            middleware.configure_rlsl_map(env.config["scene_config_directory"], scene_name)
+            send_current_step_data(middleware, env, obs, info, session_id)
+            last_sent_obs = obs
+            last_sent_info = info
 
         # Actor state is controlled by notify; ignore notifies for other roles.
         if role_id == "actor" or notify_type == NT_START_TEST:
@@ -94,10 +113,37 @@ def process_notify(middleware, env, none_sleep_s):
             logger.debug(f"Ignore notify for non-actor role: role_id={role_id}, type={notify_type}")
 
 
+def send_current_step_data(middleware: OnSiteSwitch, env: OnSiteScenarioEnv, obs, info, session_id: str):
+    current_timestamp = info["relative_timestamp"]
 
-def _extract_image_sizes_from_actor_config(env_config):
-    cameras = env_config["actor_config"]["observer_config"]["gaussian"]["cameras"]
-    return {name: (cam["H"], cam["W"]) for name, cam in cameras.items()}
+    if "states" in obs:
+        middleware.send_pub_role(obs, env.last_received_pub_role, current_timestamp, session_id)
+        middleware.send_vehicle_feedback(obs, current_timestamp, None)
+
+    if "gaussian" in obs:
+        timestamp_sec = current_timestamp / 1e6
+        images_to_send = {}
+        camera_metadata = obs["gaussian"]["camera_info"]
+        for camera_name, images in obs["gaussian"]["image"].items():
+            if len(images) > 0:
+                images_to_send[camera_name] = images[-1]
+        if images_to_send:
+            middleware.send_images(images_to_send, timestamp_sec, camera_params=camera_metadata)
+
+
+def wait_vehicle_control(middleware: OnSiteSwitch, env: OnSiteScenarioEnv, none_sleep_s: float):
+    global sim_state
+
+    while sim_state == SIM_STATE.STARTED:
+        vehicle_control = middleware.recv_vehicle_control()
+        if vehicle_control is not None:
+            return vehicle_control
+        process_notify(middleware, env, none_sleep_s)
+        if sim_state != SIM_STATE.STARTED:
+            return None
+        time.sleep(none_sleep_s)
+
+    return None
 
 
 def main_loop(env : OnSiteScenarioEnv, middleware: OnSiteSwitch, save_debug_image=False, none_sleep_s=0.02):
@@ -113,16 +159,11 @@ def main_loop(env : OnSiteScenarioEnv, middleware: OnSiteSwitch, save_debug_imag
         env: OnSiteScenarioEnv instance
         middleware: OnSiteMiddleware instance
     """
-    global sim_state
+    global sim_state, session_id, scene_name, last_sent_obs, last_sent_info, last_vehicle_control_seq_no
 
     logger.info("Starting main loop")
-    last_loop_time = time.perf_counter()
 
     while True:
-        now = time.perf_counter()
-        loop_ms = (now - last_loop_time) * 1000.0
-        last_loop_time = now
-        logger.info(f"=> => => => Loop => => => => ({loop_ms:.3f} ms)")
         # Phase 1: Process Notify messages (at beginning of each iteration)
         process_notify(middleware, env, none_sleep_s)
 
@@ -131,9 +172,7 @@ def main_loop(env : OnSiteScenarioEnv, middleware: OnSiteSwitch, save_debug_imag
             result = middleware.recv_actor_prepare()
             if result is not None:
                 session_id, _ , _, scene_name = result
-                logger.info(f"Reset env with scene_name={scene_name} parsed from session_id={session_id}")
-                env.reset(scene_name=scene_name)
-                middleware.configure_rlsl_map(env.config["scene_config_directory"], scene_name)
+                logger.info(f"Prepared scene_name={scene_name} parsed from session_id={session_id}")
                 sim_state = SIM_STATE.PREPARED
             time.sleep(0.5)
 
@@ -147,35 +186,25 @@ def main_loop(env : OnSiteScenarioEnv, middleware: OnSiteSwitch, save_debug_imag
             continue
 
         # Phase 4: Main simulation loop
-        # Receive messages from OnSite
-        vehicle_control = middleware.recv_vehicle_control()
-        vehicle_feedback = None
+        # Block until a control message arrives, then execute exactly one step.
+        vehicle_control = wait_vehicle_control(middleware, env, none_sleep_s)
+        if vehicle_control is None:
+            continue
+        action, current_vehicle_control_seq_no = vehicle_control
+        if (
+            current_vehicle_control_seq_no == last_vehicle_control_seq_no and
+            last_sent_obs is not None and
+            last_sent_info is not None
+        ):
+            send_current_step_data(middleware, env, last_sent_obs, last_sent_info, session_id)
+            continue
         session_info = middleware.recv_session_info()  # Only receive, log
 
-        # Execute simulation step
-        action = vehicle_control if vehicle_control else [0.0, 0.0]
         obs, reward, terminated, truncated, info = env.step(action)
-
-        # Use relative timestamp from step_info as send timestamp.
-        current_timestamp = info["relative_timestamp"]
-
-        # Send updated states to OnSite (all from obs)
-        if "states" in obs:
-            middleware.send_pub_role(obs, env.last_received_pub_role, current_timestamp, session_id)
-            middleware.send_vehicle_feedback(obs, current_timestamp, vehicle_feedback)
-
-        # 3. Send images
-        if 'gaussian' in obs:
-            timestamp_sec = current_timestamp / 1e6
-            images_to_send = {}
-            camera_metadata = obs['gaussian']['camera_info']
-            for camera_name, images in obs['gaussian']['image'].items():
-                if len(images) > 0:
-                    # Get the latest image
-                    images_to_send[camera_name] = images[-1]
-            if images_to_send:
-
-                middleware.send_images(images_to_send, timestamp_sec, camera_params=camera_metadata)
+        send_current_step_data(middleware, env, obs, info, session_id)
+        last_sent_obs = obs
+        last_sent_info = info
+        last_vehicle_control_seq_no = current_vehicle_control_seq_no
 
 
 def main():
@@ -202,6 +231,8 @@ def main():
     )
     parser.add_argument('--save-debug-image', action='store_true',
                         help='Save debug images regardless of log level')
+    parser.add_argument('--gui', action='store_true',
+                        help='Enable GUI rendering')
     parser.add_argument('--none_sleep_s', type=float, default=0.02,
                         help='Sleep seconds when recv returns empty')
     parser.add_argument('-l', '--log-level', type=str, default='INFO',
@@ -226,16 +257,15 @@ def main():
         )
         env_config = ONSITE_DEFAULT_CONFIG
         env_config["scene_config_directory"] = args.scene_config_directory
+        env_config["gui"] = args.gui
         env = OnSiteScenarioEnv(model, env_config)
         logger.info("MetaDrive environment initialized successfully")
 
         # Initialize OnSite middleware
         logger.info("Initializing OnSite middleware...")
-        image_sizes = _extract_image_sizes_from_actor_config(env_config)
         middleware = OnSiteSwitch(
             onsite_dir=args.onsite_dir,
             terminal_type=TERMINAL_TYPE.SIMULATOR,
-            image_sizes=image_sizes,
         )
         middleware.start_onsite_daemon()
         logger.info("OnSite middleware initialized successfully")

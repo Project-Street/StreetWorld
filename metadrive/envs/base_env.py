@@ -68,8 +68,20 @@ class BaseEnv(gym.Env):
         self.start_index = 0
 
         self.model = model
+        self.gui = None
 
         self.setup(default_config)
+        if self.config["gui"]:
+            gui_image_key = self.config["gui_image_key"]
+            try:
+                from metadrive.gui.gui import GUI
+
+                self.gui = GUI(image_key=gui_image_key)
+            except Exception as exc:
+                from metadrive.gui.headless_gui import HeadlessGUI
+        
+                self.logger.warning("GUI creation failed, switching to HeadlessGUI: %s", exc)
+                self.gui = HeadlessGUI(image_key=gui_image_key)
 
     # def _post_process_config(self, config):
     #     """Add more special process to merged config"""
@@ -163,11 +175,7 @@ class BaseEnv(gym.Env):
                 self.agent_managers[n].destroy()
                 self.agent_managers.pop(n)
 
-        if scene_name:
-            scene_id = self.data_manager.idx2scene.index(scene_name)
-            self.data_manager.reset(scene_id=scene_id)
-        else:
-            self.data_manager.reset()
+        self.data_manager.reset(scene_name=scene_name)
 
         scenario_data = self.data_manager.get_current_scenario_data()
         self.step_manager.reset(**scenario_data)
@@ -269,7 +277,6 @@ class BaseEnv(gym.Env):
 
     # ===== Run-time =====
     def step(self, actions: Union[Union[np.ndarray, list], Dict[AnyStr, Union[list, np.ndarray]], int]):
-        timer = time.perf_counter()
         for i in range(self.config["decision_repeat"]):
             # simulate or replay
             for manager in self.agent_managers.values():
@@ -280,25 +287,26 @@ class BaseEnv(gym.Env):
             # if "record_manager" in self.managers and i < self.config["decision_repeat"] - 1:
             #     self.record_manager.step()
         self.step_manager.step()
-        print(f"Step function execution time: {(time.perf_counter() - timer) * 1000:.3f} ms")
 
-        timer = time.perf_counter()
         # to get new pose and update gaussian model
         self._update_scene()
-        print(f"Scene update time: {(time.perf_counter() - timer) * 1000:.3f} ms")
 
-        timer = time.perf_counter()
         after_step_infos = {}
         for mgr_n, manager in self.agent_managers.items() :
             new_step_infos = manager.observe()
             after_step_infos[mgr_n] = new_step_infos
-        print(f"Observation collection time: {(time.perf_counter() - timer) * 1000:.3f} ms")
         # Note that we use shallow update for info dict in this function! This will accelerate system.
         # engine_info = merge_dicts(
         #     after_step_infos, allow_new_keys=True, without_copy=True
         # )
         engine_info = after_step_infos
-        return self._get_step_return(actions, collected_obs=engine_info)  # collect observation, reward, termination
+        step_result = self._get_step_return(actions, collected_obs=engine_info)  # collect observation, reward, termination
+        obses, _, terminateds, truncateds, step_infos = step_result
+        if self.gui is not None:
+            self.gui.draw(obs=obses, info=step_infos, action=actions)
+            if terminateds or truncateds:
+                self.gui.flush_episode(self.scene_name)
+        return step_result
 
     def _update_scene(self):
         self._surrounding_pre_collection = {}
@@ -364,7 +372,9 @@ class BaseEnv(gym.Env):
         raise NotImplementedError
     
     def close(self):
-        raise NotImplementedError
+        if self.gui is not None:
+            self.gui.shutdown()
+            self.gui = None
 
     def capture(self, file_name=None):
         if not hasattr(self, "_capture_img"):

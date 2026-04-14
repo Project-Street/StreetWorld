@@ -80,6 +80,7 @@ def main() -> None:
                 if notify.type in (NT_ABORT_TEST, NT_FINISH_TEST):
                     sim_state = SIM_STATE.IDLE
                     session_id, actor_id = "", ""
+                    continue
                 elif notify.type == NT_START_TEST:
                     sim_state = SIM_STATE.STARTED
 
@@ -90,21 +91,23 @@ def main() -> None:
                     sim_state = SIM_STATE.PREPARED
                 time.sleep(0.5)
 
-            if sim_state == SIM_STATE.PREPARED:
+            elif sim_state == SIM_STATE.PREPARED:
                 middleware.send_actor_prepare_result(session_id=session_id, actor_id=actor_id, result=True)
                 time.sleep(0.5)
 
-            images = middleware.recv_image()
-            frame = images[0] if images else None
-            if frame is None and sim_state != SIM_STATE.STARTED:
-                time.sleep(args.none_sleep_s)
-            if frame is None or sim_state != SIM_STATE.STARTED:
-                continue
+            elif sim_state == SIM_STATE.STARTED:
+                ret, images = middleware.recv_image()
+                if ret == 403:
+                    middleware.send_last_vehicle_control()
+                    time.sleep(args.none_sleep_s)
+                if ret != 0:
+                    continue
+                frame = images[0]
 
-            last_image = frame["rgb"]
-            if args.save_debug_image:
-                save_received_image(last_image)
-            middleware.send_vehicle_control(action_state["steering"], action_state["throttle_brake"])
+                last_image = frame["rgb"]
+                if args.save_debug_image:
+                    save_received_image(last_image)
+                middleware.send_vehicle_control(action_state["steering"], action_state["throttle_brake"])
     except KeyboardInterrupt:
         exit_code = 130
         logger.info("Interrupted by user")

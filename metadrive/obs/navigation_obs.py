@@ -4,7 +4,6 @@ import gymnasium as gym
 from trajdata import VectorMap
 from metadrive.obs.observation_base import BaseObservation
 from metadrive.base_class.randomizable import Randomizable
-from metadrive.utils.navigation_utils import nearest_front_index
 
 lane_follow_length = 200.0
 
@@ -15,7 +14,7 @@ class NavigationObservation(BaseObservation, Randomizable):
         BaseObservation.__init__(self, config)
         Randomizable.__init__(self, None)
         self.navigating_type = config.get("navigating_type", "expert_following")  # lane_following, destination_following, expert_following
-        self.early_signal_distance = float(config.get("early_signal_distance", 10.0))  # meters
+        self.looking_ahead_step = int(config.get("looking_ahead_step", 10))
         # New radius-based threshold using triangle inradius (meters). Smaller -> sharper turn.
         # You may tune this based on map scale; ~20m is a moderate default.
         self.turn_inradius_threshold = float(config.get("turn_radius_threshold", 40.0))
@@ -72,17 +71,17 @@ class NavigationObservation(BaseObservation, Randomizable):
             return 0
 
         ego_xy = self._vehicle_xy(self.controller)
-        heading_vec = self._ego_heading_vec(self.controller)
-        heading_norm = np.linalg.norm(heading_vec)
-        if heading_norm < 1e-6:
-            return 0
-        heading_vec = heading_vec / heading_norm
-        i0 = nearest_front_index(self._path_xy, ego_xy, heading_vec)
-        if i0 >= len(self._path_xy):
-            return 0
 
-        target_xy = self._path_xy[-1]
-        delta_xy = target_xy - ego_xy
+        d2 = np.sum((self._path_xy - ego_xy[None, :]) ** 2, axis=1)
+        i0 = int(np.argmin(d2))
+        if i0 == len(self._path_xy):
+            return 0
+        
+        target_idx = min(i0 + self.looking_ahead_step, len(self._path_xy) - 1)
+        nearest_xy = self._path_xy[i0]
+        target_xy = self._path_xy[target_idx]
+        delta_xy = target_xy - nearest_xy
+        heading_vec = self._path_heading_vec(i0)
         right_vec = np.array([heading_vec[1], -heading_vec[0]], dtype=np.float32)
         lateral_offset = float(np.dot(delta_xy, right_vec))
 
@@ -222,6 +221,18 @@ class NavigationObservation(BaseObservation, Randomizable):
     def _ego_heading_vec(vehicle):
         h = vehicle.heading  # (cos, sin)
         return np.array([h[0], h[1]], dtype=np.float32)
+
+    def _path_heading_vec(self, idx):
+        if len(self._path_xy) < 2:
+            raise ValueError("Path must contain at least two points")
+        if idx < len(self._path_xy) - 1:
+            direction = self._path_xy[idx + 1] - self._path_xy[idx]
+        else:
+            direction = self._path_xy[idx] - self._path_xy[idx - 1]
+        norm = np.linalg.norm(direction)
+        if norm < 1e-6:
+            return self._ego_heading_vec(self.controller)
+        return direction / norm
 
     def get_reference_state(self, idx):
         if (

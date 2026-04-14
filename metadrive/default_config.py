@@ -11,6 +11,8 @@ from metadrive.obs.surrounding_obs import SurroundingObservation
 from metadrive.obs.assembly_obs import AssemblyObservation
 from metadrive.obs.observation_base import DefaultObservation
 BASE_DEFAULT_CONFIG = dict(
+    gui=False,
+    gui_image_key="front",
 
     # ===== agent =====
     # Whether randomize the car model for the agent, randomly choosing from 4 types of cars
@@ -38,27 +40,48 @@ BASE_DEFAULT_CONFIG = dict(
                 clip_rgb=False,
                 stack_size=6,
                 cameras={ # an example of selfdefined camera config
-                    'head_front': {
+                    'front_cam': {
                         'offset': [1.65, 0, 1.3], # in ego frame (+x front)
                         'hpr': [0, 0, 0], # orientation
                         'H': 900,
                         'W': 1600,
                         'focal': 2500, # in pixel
                     },
-                    'left_front': {
+                    'front_right_cam': {
+                        'offset': [1.45, -0.8, 1.3], # in ego frame (+x front)
+                        'hpr': [-60, 0, 0], # orientation
+                        'H': 900,
+                        'W': 1600,
+                        'focal': 2500, # in pixel
+                    },
+                    'front_left_cam': {
                         'offset': [1.45, 0.8, 1.3], # in ego frame (+x front)
                         'hpr': [60, 0, 0], # orientation
                         'H': 900,
                         'W': 1600,
                         'focal': 2500, # in pixel
                     },
-                    'right_front': {
-                        'offset': [1.45, -0.8, 1.3], # in ego frame (+x front)
-                        'hpr': [60, 0, 0], # orientation
+                    'back_cam': {
+                        'offset': [-1.65, 0, 1.3], # in ego frame (+x front)
+                        'hpr': [180, 0, 0], # orientation
                         'H': 900,
                         'W': 1600,
                         'focal': 2500, # in pixel
-                    }
+                    },
+                    'back_left_cam': {
+                        'offset': [-1.45, 0.8, 1.3], # in ego frame (+x front)
+                        'hpr': [120, 0, 0], # orientation
+                        'H': 900,
+                        'W': 1600,
+                        'focal': 2500, # in pixel
+                    },
+                    'back_right_cam': {
+                        'offset': [-1.45, -0.8, 1.3],
+                        'hpr': [-120, 0, 0], # orientation
+                        'H': 900,
+                        'W': 1600,
+                        'focal': 2500, # in pixel
+                    },
                 }
             ),
             navigation = dict(
@@ -67,10 +90,6 @@ BASE_DEFAULT_CONFIG = dict(
             ),
             states = dict(
                 observer_class=StateObservation,
-            ),
-            surrounding = dict(
-                observer_class=SurroundingObservation,
-                coordinate_mode="agent",
             )
         ),
         policy=EnvInputPolicy,

@@ -76,7 +76,14 @@ class OnSiteSwitch:
         self,
         onsite_dir,
         terminal_type=TERMINAL_TYPE.SIMULATOR,
-        image_sizes=None,
+        image_sizes={
+            'front_cam': (900, 1600),
+            'front_left_cam': (900, 1600),
+            'front_right_cam': (900, 1600),
+            'back_cam': (900, 1600),
+            'back_left_cam': (900, 1600),
+            'back_right_cam': (900, 1600),
+        },
         n_warm_up=20,
     ):
         """
@@ -107,22 +114,28 @@ class OnSiteSwitch:
         # Sequence counters
         self.image_seq = 0
         self._seq_by_type = {}
-        self._camera_encoders = {}
-        self._camera_decoders = {}
+        self._camera_encoder = None
+        self._camera_decoder = None
         self._image_sizes = image_sizes or {}
         self._n_warm_up = max(0, int(n_warm_up))
         self._vts_map_module = None
         self._rlsl_map = None
         self._rlsl_scene_name = None
 
+
+        self._last_vehicle_control = {
+            "steering": 0.0,
+            "throttle_brake": 0.0,                
+            "seq_no": 0,
+        }
+        
         # Send only this logger to a dedicated file.
         self._init_logger()
 
         # Initialize channels
 
         self.initialize_channels()
-        if self.terminal_type == TERMINAL_TYPE.SIMULATOR:
-            self._setup_camera_encoders_and_warmup()
+        self._warmup_camera()
 
     @staticmethod
     def _load_multicast_config(onsite_dir: Path):
@@ -340,7 +353,7 @@ class OnSiteSwitch:
         elapsed_ms = (time.perf_counter() - t0) * 1000.0
         return ret, elapsed_ms
 
-    def _setup_camera_encoders_and_warmup(self):
+    def _warmup_camera(self):
         if not self._image_sizes:
             return
         enc_config = {
@@ -352,29 +365,43 @@ class OnSiteSwitch:
             "maxbitrate": 5000000,
             "codec": "h264",
         }
-        for name, (height, width) in self._image_sizes.items():
-            self._camera_encoders[name] = nvc.CreateEncoder(width, height, "NV12", True, **enc_config)
+        _, (height, width) = next(iter(self._image_sizes.items()))
+        self._camera_encoder = nvc.CreateEncoder(width, height, "NV12", True, **enc_config)
+        self._camera_decoder = nvc.CreateDecoder(
+            gpuid=0,
+            codec=nvc.cudaVideoCodec.H264,
+            usedevicememory=False,
+        )
         if self._n_warm_up <= 0:
             return
         rng = np.random.default_rng()
         logger.info(
-            "Warming up image encoder with %d batches, sizes=%s",
+            "Warming up image encoder/decoder with %d batches, sizes=%s",
             self._n_warm_up,
             self._image_sizes,
         )
-        warm_camera_params = {
-            name: {
-                "ego2camera": np.eye(4, dtype=np.float64),
-                "K": np.eye(3, dtype=np.float32),
-            }
-            for name in self._image_sizes
-        }
         for _ in range(self._n_warm_up):
-            warm_images = {
-                name: rng.integers(0, 256, size=(height, width, 3), dtype=np.uint8)
-                for name, (height, width) in self._image_sizes.items()
-            }
-            self.send_images(warm_images, timestamp=-1, camera_params=warm_camera_params)
+            for name, (height, width) in self._image_sizes.items():
+                image = rng.integers(0, 256, size=(height, width, 3), dtype=np.uint8)
+                img_bgr = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
+                img_i420 = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2YUV_I420)
+                y = img_i420[:height, :]
+                u = img_i420[height:height + height // 4, :].reshape(-1)
+                v = img_i420[height + height // 4:, :].reshape(-1)
+                uv = np.empty((u.size + v.size,), dtype=u.dtype)
+                uv[0::2] = u
+                uv[1::2] = v
+                img_nv12 = np.concatenate([y.ravel(), uv])
+
+                bitstream = self._camera_encoder.Encode(img_nv12)
+                if bitstream is None or len(bitstream) == 0:
+                    continue
+
+                packet = nvc.PacketData()
+                payload = np.frombuffer(bitstream, dtype=np.uint8)
+                packet.bsl = len(payload)
+                packet.bsl_data = payload.__array_interface__["data"][0]
+                self._camera_decoder.Decode(packet)
 
     def _next_seq(self, message_type) -> int:
         seq = int(self._seq_by_type.get(message_type, 0))
@@ -694,7 +721,7 @@ class OnSiteSwitch:
         Receive VehicleControl message and convert to MetaDrive action.
 
         Returns:
-            list: [steering, throttle_brake] if message received, None otherwise
+            tuple: ([steering, throttle_brake], seq_no) if message received, None otherwise
         """
 
         (ret, msg), get_ms = self._timed_get(self.channel_map["vehiclecontrol"].get)
@@ -711,7 +738,7 @@ class OnSiteSwitch:
 
             # Convert to MetaDrive action
             action = self._vehicle_control_to_action(control)
-            return action
+            return action, int(control.header.seq_no)
 
         self._log_message_debug(
             "recv", msg.type(), {"expected_type": VEHICLE_CONTROL}, "chassis", channel_op="get", channel_elapsed_ms=get_ms
@@ -789,35 +816,24 @@ class OnSiteSwitch:
         """
         images, get_ms = self._timed_get(self.channel_map["camera"].get_image_simple)
         if images is None or len(images) == 0:
-            return None
+            return 401, None
 
         decoded_images = []
         for i, image in enumerate(images):
-            is_warmup = image.measurement_time == -1 or image.measurement_time > 1e15
             if image.data is None or len(image.data) == 0:
                 logger.warning("Drop empty image payload: index=%d", i)
-                continue
+                return 402, None
             # if str(image.encoding).lower() != "h264":
             #     raise ValueError(f"Unsupported image encoding: {image.encoding}, expected h264")
             packet = nvc.PacketData()
             packet.bsl = len(image.data)
             packet.bsl_data = image.data.__array_interface__["data"][0]
-
-            decoder = self._camera_decoders.get(i)
-            if decoder is None:
-                decoder = nvc.CreateDecoder(
-                    gpuid=0,
-                    codec=nvc.cudaVideoCodec.H264,
-                    usedevicememory=False,
-                )
-                self._camera_decoders[i] = decoder
-            raw_frames = decoder.Decode(packet)
-            if is_warmup:
-                logger.debug("Drop warm-up image after decoder feed: index=%d measurement_time=%s", i, image.measurement_time)
-                continue
+            raw_frames = self._camera_decoder.Decode(packet)
             if len(raw_frames) == 0:
-                logger.warning("Failed to decode image packet, empty raw frames: index=%d", i)
-                continue
+                logger.warning("Failed to decode image packet, empty raw frames sequence_num=%d", image.sequence_num)
+                return 403, None
+            else:
+                print(i, len(raw_frames))
             for raw_frame in raw_frames:
                 luma_base_addr = raw_frame.GetPtrToPlane(0)
                 frame_data = np.ctypeslib.as_array(
@@ -827,25 +843,15 @@ class OnSiteSwitch:
                 frame_nv12 = frame_data.reshape(int(image.height * 1.5), int(image.width))
                 frame_rgb = cv2.cvtColor(frame_nv12, cv2.COLOR_YUV2RGB_NV12)
                 camera_timestamp = int(image.camera_timestamp)
-                if camera_timestamp < 0 or camera_timestamp > 1e15:
-                    logger.error(
-                        "Suspicious camera_timestamp detected: index=%d sequence_num=%s measurement_time=%s camera_timestamp=%s",
-                        i,
-                        image.sequence_num,
-                        image.measurement_time,
-                        camera_timestamp,
-                    )
                 decoded_images.append(
                     {
                         "rgb": frame_rgb,
+                        "camera_index": i,
                         "camera_timestamp": camera_timestamp,
-                        # "camera_pose_in_ego": np.asarray(image.camera_pose_in_ego, dtype=np.float32).reshape(4, 4),
-                        # "intrinsic": np.asarray(image.intrinsic, dtype=np.float32).reshape(3, 3),
+                        "camera_pose_in_ego": np.asarray(image.camera_pose_in_ego, dtype=np.float32).reshape(4, 4),
+                        "intrinsic": np.asarray(image.intrinsic, dtype=np.float32).reshape(3, 3),
                     }
                 )
-
-        if len(decoded_images) == 0:
-            return None
 
         self._log_message_debug(
             "recv",
@@ -859,7 +865,7 @@ class OnSiteSwitch:
             channel_op="get",
             channel_elapsed_ms=get_ms,
         )
-        return decoded_images
+        return 0, decoded_images
 
     # ==================== Send Methods ====================
 
@@ -1007,6 +1013,11 @@ class OnSiteSwitch:
             cmd.driving_control.target_accelerator_pedal_position = 0.0
             cmd.brake_control.target_brake_pedal_position = -throttle_brake * 100.0
 
+        self._last_vehicle_control = {
+            "steering": steering,
+            "throttle_brake": throttle_brake,
+            "seq_no": int(cmd.header.seq_no),
+        }
         data = cmd.SerializeToString()
         ret, put_ms = self._timed_put(self.channel_map["vehiclecontrol"].put, VEHICLE_CONTROL, len(data), data)
         self._log_message_debug(
@@ -1020,6 +1031,44 @@ class OnSiteSwitch:
         if ret != 0:
             logger.error(f"Failed to send VehicleControl, ret: {ret}")
 
+    def send_last_vehicle_control(self):
+        cmd = VehicleControl()
+        cmd.header.send_ts = int(time.time() * 1000)
+        cmd.header.sim_ts = int(time.time() * 1000)
+        cmd.header.seq_no = int(self._last_vehicle_control["seq_no"])
+        cmd.steering_control.target_steering_wheel_angle = (
+            float(self._last_vehicle_control["steering"]) * self.MAX_STEERING_RAD
+        )
+
+        throttle_brake = float(self._last_vehicle_control["throttle_brake"])
+        if throttle_brake >= 0:
+            cmd.driving_control.target_accelerator_pedal_position = throttle_brake * 100.0
+            cmd.brake_control.target_brake_pedal_position = 0.0
+        else:
+            cmd.driving_control.target_accelerator_pedal_position = 0.0
+            cmd.brake_control.target_brake_pedal_position = -throttle_brake * 100.0
+
+        data = cmd.SerializeToString()
+        ret, put_ms = self._timed_put(
+            self.channel_map["vehiclecontrol"].put,
+            VEHICLE_CONTROL,
+            len(data),
+            data,
+        )
+        payload = self._proto_to_dict(cmd)
+        payload["ret"] = ret
+        payload["resend"] = True
+        self._log_message_debug(
+            "send",
+            VEHICLE_CONTROL,
+            payload,
+            "chassis",
+            channel_op="put",
+            channel_elapsed_ms=put_ms,
+        )
+        if ret != 0:
+            logger.error(f"Failed to resend last VehicleControl, ret: {ret}")
+
     def send_images(self, images, timestamp, camera_params):
         """
         Send multiple images to OnSite server.
@@ -1032,8 +1081,6 @@ class OnSiteSwitch:
         py_images = []
         for camera_name, img in images.items():
             height, width = img.shape[:2]
-            encoder = self._camera_encoders[camera_name]
-
             img_bgr = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
 
             img_i420 = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2YUV_I420)
@@ -1044,33 +1091,29 @@ class OnSiteSwitch:
             uv[0::2] = u
             uv[1::2] = v
             img_nv12 = np.concatenate([y.ravel(), uv])
-            bitstream = encoder.Encode(img_nv12)
+            bitstream = self._camera_encoder.Encode(img_nv12)
             if bitstream is None or len(bitstream) == 0:
                 logger.warning(
                     "Encoder returned empty bitstream, sending empty payload (height=%d, width=%d)",
                     height,
                     width,
                 )
-                payload = np.frombuffer(b"", dtype=np.uint8)
-            else:
-                payload = np.frombuffer(bitstream, dtype=np.uint8)
+                continue
+            payload = np.frombuffer(bitstream, dtype=np.uint8)
 
             py_img = libMulticastNetwork.PyImage()
             py_img.timestamp_sec = float(timestamp)
-            if timestamp < 0:
-                py_img.camera_timestamp = 0
-            else:
-                py_img.camera_timestamp = int(timestamp * 1e6)
+            py_img.camera_timestamp = int(timestamp * 1e6)
             py_img.measurement_time = float(timestamp)
             py_img.sequence_num = self.image_seq
             py_img.height = height
             py_img.width = width
             py_img.encoding = "h264"
             py_img.data = payload
-            # py_img.camera_pose_in_ego = np.linalg.inv(
-            #     np.asarray(camera_params[camera_name]["ego2camera"], dtype=np.float64)
-            # ).reshape(-1)
-            # py_img.intrinsic = np.asarray(camera_params[camera_name]["K"], dtype=np.float32).reshape(-1)
+            py_img.camera_pose_in_ego = np.linalg.inv(
+                np.asarray(camera_params[camera_name]["ego2camera"], dtype=np.float64)
+            ).reshape(-1)
+            py_img.intrinsic = np.asarray(camera_params[camera_name]["K"], dtype=np.float32).reshape(-1)
             py_images.append(py_img)
             self.image_seq += 1
 
@@ -1283,12 +1326,7 @@ class OnSiteSwitch:
         feedback.bcm_feedback.vehicle_velocity[:] = vehicle_state["velocity"].tolist()
         feedback.bcm_feedback.angular_velocity[:] = [0.0, 0.0, float(vehicle_state["angular_velocity"])]
         turn_signal = int(obs["navigation"]["turn_signal"]) if "navigation" in obs else 0
-        if turn_signal < 0:
-            feedback.command = 0
-        elif turn_signal > 0:
-            feedback.command = 1
-        else:
-            feedback.command = 2
+        feedback.command = turn_signal
         feedback.vehicle_pose[:] = np.asarray(vehicle_state["transform"], dtype=np.float32).reshape(-1).tolist()
 
         # Preserve fields from last received feedback if available

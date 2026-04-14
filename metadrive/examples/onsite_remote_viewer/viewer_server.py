@@ -41,14 +41,8 @@ def run_server_loop(
     sim_state = SIM_STATE.IDLE
     session_id = ""
     actor_id = ""
-    last_loop_time = time.perf_counter()
-    last_image_time = None
-    while True:
-        now = time.perf_counter()
-        loop_ms = (now - last_loop_time) * 1000.0
-        last_loop_time = now
-        logger.debug("Server loop %.3f ms", loop_ms)
 
+    while True:
         notify = middleware.recv_notify()
         if notify is None and sim_state != SIM_STATE.STARTED:
             time.sleep(none_sleep_s)
@@ -57,6 +51,7 @@ def run_server_loop(
             if notify.type in (NT_ABORT_TEST, NT_FINISH_TEST):
                 sim_state = SIM_STATE.IDLE
                 session_id, actor_id = "", ""
+                continue
             elif notify.type == NT_START_TEST:
                 sim_state = SIM_STATE.STARTED
 
@@ -67,45 +62,38 @@ def run_server_loop(
                 sim_state = SIM_STATE.PREPARED
             time.sleep(0.5)
 
-        if sim_state == SIM_STATE.PREPARED:
+        elif sim_state == SIM_STATE.PREPARED:
             middleware.send_actor_prepare_result(session_id=session_id, actor_id=actor_id, result=True)
             time.sleep(0.5)
 
-        images = middleware.recv_image()
-        frame = images[0] if images else None
-        if frame is None and sim_state != SIM_STATE.STARTED:
-            time.sleep(none_sleep_s)
-        if frame is None or sim_state != SIM_STATE.STARTED:
-            continue
+        elif sim_state == SIM_STATE.STARTED:
+            ret, images = middleware.recv_image()
+            if ret == 403:
+                middleware.send_last_vehicle_control()
+                time.sleep(none_sleep_s)
+            if ret != 0:
+                continue
 
-        if last_image_time is None:
-            last_image_time = time.perf_counter()
-        else:
-            image_interval_ms = (time.perf_counter() - last_image_time) * 1000.0
-            print(f"Received image ({image_interval_ms:.3f} ms since last)")
-            last_image_time = time.perf_counter()
+            img = images[0]["rgb"]
+            timestamp_us = int(images[0]["camera_timestamp"])
+            if save_debug_image:
+                save_received_image(img)
 
-        img = frame["rgb"]
-        raw_timestamp = frame.get("camera_timestamp")
-        timestamp_us = int(raw_timestamp)
-        if save_debug_image:
-            save_received_image(img)
+            with state_lock:
+                frame_state["image"] = remote_viewer_pb2.Image(
+                    data=img.tobytes(),
+                    width=img.shape[1],
+                    height=img.shape[0],
+                    channels=img.shape[2],
+                    format="RGB",
+                    timestamp_us=timestamp_us,
+                )
+                steering = float(action_state["steering"])
+                throttle_brake = float(action_state["throttle_brake"])
+                action_state["steering"] = 0.0
+                action_state["throttle_brake"] = 0.0
 
-        with state_lock:
-            frame_state["image"] = remote_viewer_pb2.Image(
-                data=img.tobytes(),
-                width=img.shape[1],
-                height=img.shape[0],
-                channels=img.shape[2],
-                format="RGB",
-                timestamp_us=timestamp_us,
-            )
-            steering = float(action_state["steering"])
-            throttle_brake = float(action_state["throttle_brake"])
-            action_state["steering"] = 0.0
-            action_state["throttle_brake"] = 0.0
-
-        middleware.send_vehicle_control(steering, throttle_brake)
+            middleware.send_vehicle_control(steering, throttle_brake)
 
 
 class OnsiteViewerGrpcServicer(remote_viewer_pb2_grpc.OnsiteViewerServiceServicer):
