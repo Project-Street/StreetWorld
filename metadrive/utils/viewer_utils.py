@@ -15,16 +15,17 @@ import OpenGL.GL as gl
 from metadrive.utils.logger import get_log_timestamp
 
 logger = logging.getLogger(__name__)
-_IMAGE_RECEIVED_DIR = None
+_IMAGE_RECEIVED_DIRS = {}
 
 
 def save_received_image(image: np.ndarray, subdir_prefix: str = "image_received") -> None:
-    global _IMAGE_RECEIVED_DIR
-    if _IMAGE_RECEIVED_DIR is None:
+    global _IMAGE_RECEIVED_DIRS
+    if subdir_prefix not in _IMAGE_RECEIVED_DIRS:
         base_ts = get_log_timestamp()
-        _IMAGE_RECEIVED_DIR = Path("logs") / f"{subdir_prefix}_{base_ts}"
-        _IMAGE_RECEIVED_DIR.mkdir(parents=True, exist_ok=True)
-    out_path = _IMAGE_RECEIVED_DIR / f"{int(time.time() * 1e6)}.png"
+        image_dir = Path("logs") / f"{subdir_prefix}_{base_ts}"
+        image_dir.mkdir(parents=True, exist_ok=True)
+        _IMAGE_RECEIVED_DIRS[subdir_prefix] = image_dir
+    out_path = _IMAGE_RECEIVED_DIRS[subdir_prefix] / f"{int(time.time() * 1e6)}.png"
     try:
         import imageio.v2 as imageio
 

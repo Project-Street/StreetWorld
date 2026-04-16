@@ -74,9 +74,13 @@ class BaseEnv(gym.Env):
         if self.config["gui"]:
             gui_image_key = self.config["gui_image_key"]
             try:
+                camera_config = self.config["actor_config"]["observer_config"]["gaussian"]["cameras"][gui_image_key]
                 from metadrive.gui.gui import GUI
-
-                self.gui = GUI(image_key=gui_image_key)
+                self.gui = GUI(
+                    image_key=gui_image_key,
+                    image_width=int(camera_config["W"]),
+                    image_height=int(camera_config["H"]),
+                )
             except Exception as exc:
                 from metadrive.gui.headless_gui import HeadlessGUI
         

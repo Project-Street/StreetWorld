@@ -84,7 +84,6 @@ class OnSiteSwitch:
             'back_left_cam': (900, 1600),
             'back_right_cam': (900, 1600),
         },
-        n_warm_up=20,
     ):
         """
         Initialize OnSite middleware.
@@ -117,7 +116,6 @@ class OnSiteSwitch:
         self._camera_encoder = None
         self._camera_decoder = None
         self._image_sizes = image_sizes or {}
-        self._n_warm_up = max(0, int(n_warm_up))
         self._vts_map_module = None
         self._rlsl_map = None
         self._rlsl_scene_name = None
@@ -353,55 +351,32 @@ class OnSiteSwitch:
         elapsed_ms = (time.perf_counter() - t0) * 1000.0
         return ret, elapsed_ms
 
+    @staticmethod
+    def _build_camera_encoder_config():
+        return
+    
     def _warmup_camera(self):
-        if not self._image_sizes:
-            return
-        enc_config = {
-            "preset": "P3",
-            "tuning_info": "high_quality",
-            "rc": "vbr",
-            "fps": 10,
-            "bitrate": 5000000,
-            "maxbitrate": 5000000,
-            "codec": "h264",
-        }
         _, (height, width) = next(iter(self._image_sizes.items()))
-        self._camera_encoder = nvc.CreateEncoder(width, height, "NV12", True, **enc_config)
-        self._camera_decoder = nvc.CreateDecoder(
-            gpuid=0,
-            codec=nvc.cudaVideoCodec.H264,
-            usedevicememory=False,
-        )
-        if self._n_warm_up <= 0:
-            return
-        rng = np.random.default_rng()
-        logger.info(
-            "Warming up image encoder/decoder with %d batches, sizes=%s",
-            self._n_warm_up,
-            self._image_sizes,
-        )
-        for _ in range(self._n_warm_up):
-            for name, (height, width) in self._image_sizes.items():
-                image = rng.integers(0, 256, size=(height, width, 3), dtype=np.uint8)
-                img_bgr = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
-                img_i420 = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2YUV_I420)
-                y = img_i420[:height, :]
-                u = img_i420[height:height + height // 4, :].reshape(-1)
-                v = img_i420[height + height // 4:, :].reshape(-1)
-                uv = np.empty((u.size + v.size,), dtype=u.dtype)
-                uv[0::2] = u
-                uv[1::2] = v
-                img_nv12 = np.concatenate([y.ravel(), uv])
-
-                bitstream = self._camera_encoder.Encode(img_nv12)
-                if bitstream is None or len(bitstream) == 0:
-                    continue
-
-                packet = nvc.PacketData()
-                payload = np.frombuffer(bitstream, dtype=np.uint8)
-                packet.bsl = len(payload)
-                packet.bsl_data = payload.__array_interface__["data"][0]
-                self._camera_decoder.Decode(packet)
+        if self.terminal_type == TERMINAL_TYPE.SIMULATOR:
+            enc_config = {
+                "preset": "P3",
+                "tuning_info": "low_latency",
+                "rc": "vbr",
+                "fps": 10,
+                "bitrate": 5000000,
+                "maxbitrate": 5000000,
+                "codec": "h264",
+                "bf": 0,
+                "gop": 1,
+                "repeatspspps": 1,
+            }
+            self._camera_encoder = nvc.CreateEncoder(width, height, "NV12", True, **enc_config)
+        elif self.terminal_type == TERMINAL_TYPE.TESTEE:
+            self._camera_decoder = nvc.CreateDecoder(
+                gpuid=0,
+                codec=nvc.cudaVideoCodec.H264,
+                usedevicememory=False,
+            )
 
     def _next_seq(self, message_type) -> int:
         seq = int(self._seq_by_type.get(message_type, 0))
@@ -820,20 +795,23 @@ class OnSiteSwitch:
 
         decoded_images = []
         for i, image in enumerate(images):
-            if image.data is None or len(image.data) == 0:
-                logger.warning("Drop empty image payload: index=%d", i)
-                return 402, None
+            # if image.data is None or len(image.data) == 0:
+            #     logger.warning("Drop empty image payload: index=%d", i)
+            #     return 402, None
             # if str(image.encoding).lower() != "h264":
             #     raise ValueError(f"Unsupported image encoding: {image.encoding}, expected h264")
             packet = nvc.PacketData()
             packet.bsl = len(image.data)
             packet.bsl_data = image.data.__array_interface__["data"][0]
-            raw_frames = self._camera_decoder.Decode(packet)
+            _ = self._camera_decoder.Decode(packet)
+            flush_packet = nvc.PacketData()
+            flush_packet.bsl = 0
+            flush_packet.bsl_data = 0
+            raw_frames = self._camera_decoder.Decode(flush_packet)
+            
             if len(raw_frames) == 0:
                 logger.warning("Failed to decode image packet, empty raw frames sequence_num=%d", image.sequence_num)
                 return 403, None
-            else:
-                print(i, len(raw_frames))
             for raw_frame in raw_frames:
                 luma_base_addr = raw_frame.GetPtrToPlane(0)
                 frame_data = np.ctypeslib.as_array(
@@ -1091,15 +1069,10 @@ class OnSiteSwitch:
             uv[0::2] = u
             uv[1::2] = v
             img_nv12 = np.concatenate([y.ravel(), uv])
-            bitstream = self._camera_encoder.Encode(img_nv12)
-            if bitstream is None or len(bitstream) == 0:
-                logger.warning(
-                    "Encoder returned empty bitstream, sending empty payload (height=%d, width=%d)",
-                    height,
-                    width,
-                )
-                continue
-            payload = np.frombuffer(bitstream, dtype=np.uint8)
+
+            _ = self._camera_encoder.Encode(img_nv12)
+            flush_bitstream = self._camera_encoder.EndEncode()
+            payload = np.frombuffer(flush_bitstream, dtype=np.uint8)
 
             py_img = libMulticastNetwork.PyImage()
             py_img.timestamp_sec = float(timestamp)
