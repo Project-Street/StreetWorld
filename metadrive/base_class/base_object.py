@@ -10,7 +10,7 @@ from metadrive.base_class.base_runnable import BaseRunnable
 from metadrive.constants import ObjectState
 from metadrive.constants import Semantics
 from metadrive.utils.logger import get_logger
-from metadrive.engine.physics_node import BaseRigidBodyNode, BaseGhostBodyNode
+from metadrive.engine.physics_node import BaseRigidBodyNode
 from metadrive.type import MetaDriveType
 from metadrive.utils.random_utils import random_string
 from metadrive.utils.coordinates_shift import panda_vector, metadrive_vector
@@ -288,7 +288,7 @@ class BaseObject(BaseRunnable, MetaDriveType, ABC):
         super(BaseObject, self).rename(new_name)
         
         physics_node = self.body.getPythonTag(self.body.getName())
-        if isinstance(physics_node, BaseGhostBodyNode) or isinstance(physics_node, BaseRigidBodyNode):
+        if isinstance(physics_node, BaseRigidBodyNode):
             physics_node.rename(new_name)
 
     def random_rename(self):

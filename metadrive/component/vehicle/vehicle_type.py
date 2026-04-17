@@ -6,7 +6,6 @@ from panda3d.core import Material, Vec3, LVecBase4
 from metadrive.component.pg_space import VehicleParameterSpace, ParameterSpace
 from metadrive.component.vehicle.base_vehicle import BaseVehicle
 from metadrive.constants import Semantics
-from metadrive.engine.asset_loader import AssetLoader
 
 
 def get_vehicle_type(length, need_default_vehicle=False, use_bounding_box=False):
@@ -243,87 +242,6 @@ class VaryingDynamicsBoundingBoxVehicle(VaryingDynamicsVehicle):
             heading_theta=heading,
             **kwargs
         )
-
-    def _add_visualization(self):
-        if self.render:
-            path, scale, offset, HPR = self.path
-
-            # PZH: Note that we do not use model_collection as a buffer here.
-            # if path not in BaseVehicle.model_collection:
-
-            # PZH: Load a box model and resize it to the vehicle size
-            car_model = AssetLoader.loader.loadModel(AssetLoader.file_path("models", "box.bam"))
-
-            car_model.setTwoSided(False)
-            BaseVehicle.model_collection[path] = car_model
-            car_model.setScale((self.WIDTH, self.LENGTH, self.HEIGHT))
-            # car_model.setZ(-self.TIRE_RADIUS - self.CHASSIS_TO_WHEEL_AXIS + self.HEIGHT / 2)
-            car_model.setZ(0)
-            # model default, face to y
-            car_model.setHpr(*HPR)
-            car_model.instanceTo(self.origin)
-
-            show_contour = self.config["show_contour"] if "show_contour" in self.config else False
-            if show_contour:
-                # ========== Draw the contour of the bounding box ==========
-                # Draw the bottom of the car first
-                line_seg = LineSegs("bounding_box_contour1")
-                zoffset = car_model.getZ()
-                line_seg.setThickness(2)
-                line_color = [1.0, 0.0, 0.0]
-                out_offset = 0.02
-                w = self.WIDTH / 2 + out_offset
-                l = self.LENGTH / 2 + out_offset
-                h = self.HEIGHT / 2 + out_offset
-                line_seg.moveTo(w, l, h + zoffset)
-                line_seg.drawTo(-w, l, h + zoffset)
-                line_seg.drawTo(-w, l, -h + zoffset)
-                line_seg.drawTo(w, l, -h + zoffset)
-                line_seg.drawTo(w, l, h + zoffset)
-                line_seg.drawTo(-w, l, -h + zoffset)
-                line_seg.moveTo(-w, l, h + zoffset)
-                line_seg.drawTo(w, l, -h + zoffset)
-
-                line_seg.moveTo(w, -l, h + zoffset)
-                line_seg.drawTo(-w, -l, h + zoffset)
-                line_seg.drawTo(-w, -l, -h + zoffset)
-                line_seg.drawTo(w, -l, -h + zoffset)
-                line_seg.drawTo(w, -l, h + zoffset)
-                line_seg.moveTo(-w, -l, 0 + zoffset)
-                line_seg.drawTo(w, -l, 0 + zoffset)
-                line_seg.moveTo(0, -l, h + zoffset)
-                line_seg.drawTo(0, -l, -h + zoffset)
-
-                line_seg.moveTo(w, l, h + zoffset)
-                line_seg.drawTo(w, -l, h + zoffset)
-                line_seg.moveTo(-w, l, h + zoffset)
-                line_seg.drawTo(-w, -l, h + zoffset)
-                line_seg.moveTo(-w, l, -h + zoffset)
-                line_seg.drawTo(-w, -l, -h + zoffset)
-                line_seg.moveTo(w, l, -h + zoffset)
-                line_seg.drawTo(w, -l, -h + zoffset)
-                line_np = NodePath(line_seg.create(True))
-                line_material = Material()
-                line_material.setBaseColor(LVecBase4(*line_color[:3], 1))
-                line_np.setMaterial(line_material, True)
-                line_np.reparentTo(self.origin)
-
-            if self.config["random_color"]:
-                material = Material()
-                material.setBaseColor(
-                    (
-                        self.panda_color[0] * self.MATERIAL_COLOR_COEFF,
-                        self.panda_color[1] * self.MATERIAL_COLOR_COEFF,
-                        self.panda_color[2] * self.MATERIAL_COLOR_COEFF, 0.
-                    )
-                )
-                material.setMetallic(self.MATERIAL_METAL_COEFF)
-                material.setSpecular(self.MATERIAL_SPECULAR_COLOR)
-                material.setRefractiveIndex(1.5)
-                material.setRoughness(self.MATERIAL_ROUGHNESS)
-                material.setShininess(self.MATERIAL_SHININESS)
-                material.setTwoside(False)
-                self.origin.setMaterial(material, True)
 
     def _add_wheel(self, pos: Vec3, radius: float, front: bool, left):
         wheel_np = self.origin.attachNewNode("wheel")

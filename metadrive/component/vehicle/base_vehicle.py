@@ -13,7 +13,6 @@ from metadrive.component.pg_space import VehicleParameterSpace, ParameterSpace
 from metadrive.constants import CamMask, get_color_palette
 from metadrive.constants import MetaDriveType, CollisionGroup
 from metadrive.constants import Semantics
-from metadrive.engine.asset_loader import AssetLoader
 from metadrive.utils.logger import get_logger
 from metadrive.engine.physics_node import BaseRigidBodyNode
 from metadrive.utils.config import Config

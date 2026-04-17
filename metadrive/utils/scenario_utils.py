@@ -8,7 +8,6 @@ import numpy as np
 import torch
 from matplotlib.pyplot import figure
 
-from metadrive.component.static_object.traffic_object import TrafficCone, TrafficBarrier
 from metadrive.component.traffic_participants.cyclist import Cyclist
 from metadrive.component.traffic_participants.pedestrian import Pedestrian
 from metadrive.component.vehicle.base_vehicle import BaseVehicle
@@ -55,10 +54,6 @@ def get_type_from_class(obj_class):
         return MetaDriveType.PEDESTRIAN
     elif issubclass(obj_class, Cyclist) or obj_class is Cyclist:
         return MetaDriveType.CYCLIST
-    elif issubclass(obj_class, TrafficBarrier) or obj_class is TrafficBarrier:
-        return MetaDriveType.TRAFFIC_BARRIER
-    elif issubclass(obj_class, TrafficCone) or obj_class is TrafficCone:
-        return MetaDriveType.TRAFFIC_CONE
     else:
         return MetaDriveType.OTHER
 

@@ -8,7 +8,6 @@ import numpy as np
 import math
 
 from metadrive.manager.agent_manager import AgentState
-from metadrive.engine.asset_loader import AssetLoader
 from metadrive.envs.base_env import BaseEnv
 from metadrive.manager.agent_manager import AgentManager
 from metadrive.obs.assembly_obs import AssemblyObservation
@@ -18,7 +17,6 @@ from metadrive.utils.navigation_utils import nearest_front_index
 
 SCENARIO_ENV_CONFIG = dict(
     # ===== Scenario Config =====
-    data_directory=AssetLoader.file_path("nuscenes", unix_style=False),
     start_scenario_index=0,
 
     # Set num_scenarios=-1 to load all scenarios in the data directory.

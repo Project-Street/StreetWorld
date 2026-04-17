@@ -78,6 +78,7 @@ class StreetStudioScenarioEnv(ScenarioEnv):
 
     def close(self):
         """Close the environment and clean up resources."""
+        super().close()
         if hasattr(self, "engine") and self.engine is not None:
             self.engine.close()
 
