@@ -51,8 +51,8 @@ pip install torch==2.4.1 torchvision==0.19.1 torchaudio==2.4.1 --index-url https
 
 pip install "git+https://github.com/NVlabs/trajdata.git@a2a54e5"
 
-pip install /PATH_TO/libmulticastnetwork-1.0.2a1-cp311-cp311-linux_x86_64.whl
-pip install /PATH_TO/vts_map-11.2.0.6-cp311-cp311-linux_x86_64.whl
+pip install ./onsite/deps/libmulticastnetwork-1.0.2a1-cp311-cp311-linux_x86_64.whl
+pip install ./onsite/deps/vts_map-11.2.0.6-cp311-cp311-linux_x86_64.whl
 
 pip install -e ".[full]" --no-build-isolation
 ```
@@ -73,7 +73,7 @@ daemon.server.password
 2. Launch the simulator:
 
 ```bash
-python metadrive/examples/onsite_simulator_launcher.py \
+python streetworld/examples/onsite_simulator_launcher.py \
   --scene_config_directory configs/nurec \
   --nurec-data-directory data/NuRec
 ```
@@ -81,7 +81,7 @@ python metadrive/examples/onsite_simulator_launcher.py \
 Optional: In default, after submitting a new case on the OnSite platform, the simulator automatically download and caches the data of the case from Aliyun. We provide optional approach that you can download all available NuRec scenes from Aliyun and generate simulator metadata before launch any case, so you do not need to fetch data from Aliyun again each time a new scene starts:
 
 ```bash
-python metadrive/examples/prepare_nurec_scenes.py \
+python streetworld/examples/prepare_nurec_scenes.py \
   --nurec-root data/NuRec
 ``` 
 
@@ -99,7 +99,7 @@ If the daemon is already running, `onsite_simulator_launcher.py` skips starting 
 If the simulator machine has a GUI, launch the local viewer on the same machine:
 
 ```bash
-python metadrive/examples/onsite_viewer.py \
+python streetworld/examples/onsite_viewer.py \
   --width 1600 \
   --height 900
 ```
@@ -109,7 +109,7 @@ python metadrive/examples/onsite_viewer.py \
 If the simulator runs on a headless machine, start the viewer server on the same machine that runs the simulator:
 
 ```bash
-python metadrive/examples/onsite_remote_viewer/viewer_server.py \
+python streetworld/examples/onsite_remote_viewer/viewer_server.py \
   --grpc_host <host ip> \
   --grpc_port <host port>
 ```
@@ -117,7 +117,7 @@ python metadrive/examples/onsite_remote_viewer/viewer_server.py \
 Then launch the viewer client on another machine in the same LAN:
 
 ```bash
-python metadrive/examples/onsite_remote_viewer/viewer_client.py \
+python streetworld/examples/onsite_remote_viewer/viewer_client.py \
   --grpc_host <host ip> \
   --grpc_port <host port> \
   --width 1600 \

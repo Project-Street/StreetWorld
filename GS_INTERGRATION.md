@@ -1,16 +1,16 @@
 # Gaussian Splatting Integration Guide
 
-This guide explains how to integrate your Gaussian splatting algorithm into the GaussianDrive simulator.
+This guide explains how to integrate your Gaussian splatting algorithm into the StreetWorld simulator.
 
 ## Overview
 
-To integrate your Gaussian splatting renderer, you need to implement a **SimulatorInterface** class that acts as a bridge between the MetaDrive simulator and your 3D Gaussian rendering pipeline.
+To integrate your Gaussian splatting renderer, you need to implement a **SimulatorInterface** class that acts as a bridge between the StreetWorld simulator and your 3D Gaussian rendering pipeline.
 
 ## Scene Configuration Structure
 
 Design Idea:
 
-- **All scene configs are located in a single folder** specified by `scene_config_directory` (see examples/drive_in_real_env_server.py)
+- **All scene configs are located in a single folder** specified by `scene_config_directory` (see streetworld/examples/drive_in_real_env_server.py)
 - **Each config file identifies one unique scene** with a unique scene name. The data type and internal is totally defined by your GS algorithm. It 
 - The simulator **automatically discovers scenes** by iterating through all config files in this folder
 - Your interface parses metadata and loads gaussian models by passing the config file of the corresponding scene

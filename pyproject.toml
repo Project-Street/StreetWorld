@@ -3,7 +3,7 @@ requires = ["setuptools>=45"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "metadrive-simulator"
+name = "streetworld"
 description = "StreetWorld is built on MetaDrive, integrating Gaussian splatting rendering and simulation. It discovers scenes automatically from a scene-config directory and supports remote visualization in a client/server mode for interactive driving or RL training."
 readme = { file = "README.md", content-type = "text/markdown" }
 authors = [
@@ -63,10 +63,10 @@ full = [
 ]
 
 [tool.setuptools.packages.find]
-include = ["metadrive", "metadrive.*"]
+include = ["streetworld", "streetworld.*"]
 
 [tool.setuptools.package-dir]
-"metadrive" = "metadrive"
+"streetworld" = "streetworld"
 
 [tool.setuptools.package-data]
-"metadrive" = ["*", "**/*"]
+"streetworld" = ["*", "**/*"]
