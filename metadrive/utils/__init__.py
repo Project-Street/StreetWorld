@@ -1,1 +1,0 @@
-"""MetaDrive utility package."""
