@@ -271,6 +271,7 @@ def main():
         with Live(
             get_renderable=lambda: build_launcher_renderable(top_bar_state.snapshot(), log_path),
             console=console,
+            screen=True,
             refresh_per_second=8,
             vertical_overflow="crop",
         ) as live:

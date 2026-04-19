@@ -8,7 +8,7 @@
 
 import argparse
 import logging
-import os
+import sys
 import time
 
 from streetworld.utils.viewer_utils import GlfwImageViewer, save_received_image
@@ -29,7 +29,7 @@ class OnSiteViewer(GlfwImageViewer):
         super().__init__(height=height, width=width, window_title="OnSite Viewer")
 
 
-def main() -> None:
+def main() -> int:
     parser = argparse.ArgumentParser(description="OnSite viewer (local render + local action)")
     parser.add_argument("--onsite_dir", type=str, default="onsite", help="OnSite workspace directory")
     parser.add_argument(
@@ -52,21 +52,23 @@ def main() -> None:
 
     setup_entrypoint_logging(args.log_level)
 
-    viewer = OnSiteViewer(height=args.height, width=args.width)
-    controller = KeyboardController(viewer.window)
-    middleware = OnSiteSwitch(
-        onsite_dir=args.onsite_dir,
-        terminal_type=TERMINAL_TYPE.TESTEE,
-    )
-
-    sim_state = SIM_STATE.IDLE
-    session_id = ""
-    actor_id = ""
-    last_image = None
-    action_state = {"steering": 0.0, "throttle_brake": 0.0}
-    exit_code = 0
+    viewer = None
+    middleware = None
 
     try:
+        viewer = OnSiteViewer(height=args.height, width=args.width)
+        controller = KeyboardController(viewer.window)
+        middleware = OnSiteSwitch(
+            onsite_dir=args.onsite_dir,
+            terminal_type=TERMINAL_TYPE.TESTEE,
+        )
+
+        sim_state = SIM_STATE.IDLE
+        session_id = ""
+        actor_id = ""
+        last_image = None
+        action_state = {"steering": 0.0, "throttle_brake": 0.0}
+
         while viewer.is_running():
             viewer.render(last_image)
             steering, throttle_brake = controller.process_input()
@@ -109,16 +111,16 @@ def main() -> None:
                     save_received_image(last_image)
                 middleware.send_vehicle_control(action_state["steering"], action_state["throttle_brake"])
     except KeyboardInterrupt:
-        exit_code = 130
         logger.info("Interrupted by user")
-    except BaseException:
-        exit_code = 1
-        logger.exception("Unhandled exception in OnSite viewer")
+        return 130
     finally:
-        middleware.close()
-        viewer.shutdown()
-        os._exit(exit_code)
+        if middleware is not None:
+            middleware.close()
+        if viewer is not None:
+            viewer.shutdown()
+
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

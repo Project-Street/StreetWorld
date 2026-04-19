@@ -140,8 +140,7 @@ class OnSiteSwitch:
         env["LD_LIBRARY_PATH"] = f"{daemon_lib_dir}:{ld_library_path}" if ld_library_path else str(daemon_lib_dir)
         
         from streetworld.utils.utils import set_parent_death_signal   
-        self._daemon_proc = subprocess.Popen(
-            [str(daemon_bin)],
+        popen_kwargs = dict(
             cwd=str(daemon_dir),
             env=env,
             stdin=subprocess.DEVNULL,
@@ -150,6 +149,12 @@ class OnSiteSwitch:
             preexec_fn=set_parent_death_signal,
             start_new_session=True,
         )
+        try:
+            self._daemon_proc = subprocess.Popen([str(daemon_bin)], **popen_kwargs)
+        except PermissionError:
+            logger.warning("OnSite daemon missing execute permission, running chmod +x and retrying: %s", daemon_bin)
+            os.chmod(daemon_bin, daemon_bin.stat().st_mode | 0o111)
+            self._daemon_proc = subprocess.Popen([str(daemon_bin)], **popen_kwargs)
         time.sleep(2)
         if self._daemon_proc.poll() is None:
             logger.info("Started OnSite daemon process pid=%s via %s", self._daemon_proc.pid, daemon_bin)

@@ -132,7 +132,7 @@ class Viewer:
         # Setting up the window
         glfw.make_context_current(window)
         glfw.swap_interval(False)  # disable vsync
-        glfw.set_input_mode(window, glfw.CURSOR, glfw.CURSOR_DISABLED)
+        glfw.set_input_mode(window, glfw.CURSOR, glfw.CURSOR_NORMAL)
 
         # TODO: set icon
         # icon = load_image(self.icon_file)

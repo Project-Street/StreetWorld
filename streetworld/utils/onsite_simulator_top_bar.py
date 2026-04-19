@@ -94,6 +94,7 @@ class LauncherTopBarState:
         self.state_text = state_text
 
     def push_preparing_message(self, message: str):
+        self.preparing_progress = None
         self.preparing_messages.append(str(message))
         if len(self.preparing_messages) > 5:
             self.preparing_messages = self.preparing_messages[-5:]

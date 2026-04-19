@@ -79,6 +79,7 @@ class GUI:
         self._window_created = True
         glfw.make_context_current(self.window)
         glfw.swap_interval(False)
+        glfw.set_input_mode(self.window, glfw.CURSOR, glfw.CURSOR_NORMAL)
 
     def _init_imgui(self) -> None:
         imgui.create_context()

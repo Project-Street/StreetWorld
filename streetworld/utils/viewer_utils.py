@@ -207,7 +207,7 @@ class GlfwImageViewer:
 
         glfw.make_context_current(window)
         glfw.swap_interval(False)
-        glfw.set_input_mode(window, glfw.CURSOR, glfw.CURSOR_DISABLED)
+        glfw.set_input_mode(window, glfw.CURSOR, glfw.CURSOR_NORMAL)
         self.window = window
 
     def _init_opengl(self) -> None:
