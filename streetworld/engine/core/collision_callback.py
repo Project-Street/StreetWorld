@@ -1,5 +1,4 @@
 from streetworld.constants import MetaDriveType
-from streetworld.utils.utils import get_object_from_node
 
 
 def collision_callback(contact):

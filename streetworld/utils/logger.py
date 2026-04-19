@@ -47,27 +47,37 @@ class DuplicateFilter(object):
 
 
 class CustomFormatter(logging.Formatter):
-    grey = "\x1b[38;20m"
-    yellow = "\x1b[33;20m"
-    red = "\x1b[31;20m"
-    bold_red = "\x1b[31;1m"
+    grey = "\x1b[90m"
+    blue = "\x1b[94m"
+    yellow = "\x1b[93m"
+    red = "\x1b[31m"
     reset = "\x1b[0m"
-    # format = "[%(levelname)s] %(message)s (%(name)s %(filename)s:%(lineno)d)"
-    format = "[%(levelname)s] %(message)s (%(filename)s:%(lineno)d)"
-    simple_format = "[%(levelname)s] %(message)s"
-
-    FORMATS = {
-        logging.DEBUG: grey + format + reset,
-        logging.INFO: grey + simple_format + reset,
-        logging.WARNING: yellow + format + reset,
-        logging.ERROR: red + format + reset,
-        logging.CRITICAL: bold_red + format + reset
-    }
+    base_format = "[%(asctime)s] %(level_title)s: %(message)s"
+    date_format = "%Y-%m-%d %H:%M:%S"
 
     def format(self, record):
-        log_fmt = self.FORMATS.get(record.levelno)
-        formatter = logging.Formatter(log_fmt)
+        record.level_title = record.levelname.title()
+        if record.levelno == logging.INFO:
+            log_format = self.grey + self.base_format + self.reset
+        elif record.levelno == logging.DEBUG:
+            log_format = self.blue + self.base_format + self.reset
+        elif record.levelno == logging.WARNING:
+            log_format = self.yellow + self.base_format + self.reset
+        elif record.levelno == logging.ERROR:
+            log_format = self.red + self.base_format + self.reset
+        else:
+            log_format = self.base_format
+        formatter = logging.Formatter(log_format, datefmt=self.date_format)
         return formatter.format(record)
+
+
+class PlainFormatter(logging.Formatter):
+    def __init__(self):
+        super().__init__(fmt=CustomFormatter.base_format, datefmt=CustomFormatter.date_format)
+
+    def format(self, record):
+        record.level_title = record.levelname.title()
+        return super().format(record)
 
 
 def get_logger():
@@ -92,6 +102,27 @@ def get_logger():
         logger.addFilter(dup_filter)
         global_logger = logger
     return global_logger
+
+
+def configure_root_logger(level=logging.INFO, handler=None):
+    root_logger = logging.getLogger()
+    root_logger.handlers.clear()
+    active_handler = handler or logging.StreamHandler()
+    if handler is None:
+        active_handler.setFormatter(CustomFormatter())
+    root_logger.addHandler(active_handler)
+    root_logger.setLevel(level)
+    return root_logger
+
+
+def resolve_log_level(level_name: str) -> int:
+    return getattr(logging, str(level_name).upper(), logging.INFO)
+
+
+def setup_entrypoint_logging(level_name: str) -> int:
+    resolved_level = resolve_log_level(level_name)
+    configure_root_logger(resolved_level)
+    return resolved_level
 
 
 def set_propagate(propagate=False):

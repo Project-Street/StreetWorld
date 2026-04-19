@@ -46,7 +46,6 @@ class DummyObservation(BaseObservation):
     """
     def __init__(self, config=None):
         super(DummyObservation, self).__init__(config)
-        logger.warning("You are using DummyObservation which doesn't collect information from the environment.")
 
     @property
     def observation_space(self):

@@ -3,7 +3,9 @@ Simplified console utilities for StreetWorld.
 Extracted and simplified from EasyDrive's console_utils module.
 """
 
+import os
 import sys
+from contextlib import contextmanager
 
 # Try to import rich for better console output
 try:
@@ -47,6 +49,28 @@ def log(*stuff, **kwargs):
     _log_with_rich(*stuff, **kwargs)
 
 
+@contextmanager
+def suppress_process_output():
+    sys.stdout.flush()
+    sys.stderr.flush()
+
+    devnull_fd = os.open(os.devnull, os.O_WRONLY)
+    stdout_fd = os.dup(1)
+    stderr_fd = os.dup(2)
+    try:
+        os.dup2(devnull_fd, 1)
+        os.dup2(devnull_fd, 2)
+        yield
+    finally:
+        sys.stdout.flush()
+        sys.stderr.flush()
+        os.dup2(stdout_fd, 1)
+        os.dup2(stderr_fd, 2)
+        os.close(stdout_fd)
+        os.close(stderr_fd)
+        os.close(devnull_fd)
+
+
 # Color functions using rich markup
 def red(string: str) -> str:
     """Format string in red bold."""
@@ -86,6 +110,7 @@ def magenta(string: str) -> str:
 # Export all functions for `from console_utils import *`
 __all__ = [
     'log',
+    'suppress_process_output',
     'red',
     'blue',
     'cyan',

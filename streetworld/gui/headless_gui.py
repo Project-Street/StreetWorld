@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+import logging
 from pathlib import Path
 from typing import Any, Sequence
 
@@ -13,6 +14,8 @@ from matplotlib.figure import Figure
 from streetworld.utils.image_to_video import image_list_to_video
 
 matplotlib.use("Agg")
+
+logger = logging.getLogger(__name__)
 
 def extract_gui_payload(obs: Any, info: Any, action: Sequence[float], image_key: str):
     if len(action) != 2:
@@ -161,6 +164,7 @@ class HeadlessGUI:
             current_time = datetime.now().strftime("%Y%m%d_%H%M%S")
             output_path = self.output_dir / f"{current_time}_{scene_name}.mp4"
             image_list_to_video(str(output_path), self.episode_frames, code="mp4v")
+            logger.info("Flushed headless GUI episode for scene %s to %s.", scene_name, output_path)
         self.episode_frames.clear()
         self.timestamp_history.clear()
         self.speed_history.clear()

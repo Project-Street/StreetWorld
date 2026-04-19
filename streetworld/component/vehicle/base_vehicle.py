@@ -19,7 +19,6 @@ from streetworld.utils.config import Config
 from streetworld.utils.math import safe_clip_for_small_array, Vector
 from streetworld.utils.math import get_vertical_vector, norm, clip
 from streetworld.utils.math import wrap_to_pi
-from streetworld.utils.utils import get_object_from_node
 import torch
 logger = get_logger()
 

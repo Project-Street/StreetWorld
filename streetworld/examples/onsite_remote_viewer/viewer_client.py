@@ -17,6 +17,7 @@ except ImportError as exc:  # pragma: no cover - runtime dependency
     raise ImportError("grpcio is required for viewer_client.py") from exc
 
 from streetworld.utils.viewer_utils import GlfwImageViewer, save_received_image
+from streetworld.utils.logger import configure_root_logger
 from streetworld.viewer.manual_controller import KeyboardController
 from streetworld.utils.remote_viewer_proto import remote_viewer_pb2, remote_viewer_pb2_grpc
 
@@ -148,7 +149,7 @@ def main() -> None:
     parser.add_argument("--log_level", type=str, default="INFO")
     args = parser.parse_args()
 
-    logging.basicConfig(level=getattr(logging, args.log_level.upper(), logging.INFO), force=True)
+    configure_root_logger(getattr(logging, args.log_level.upper(), logging.INFO))
 
     max_bytes = 2048 * 2048 * 3
     logger.info("Using gRPC max message bytes: %d", max_bytes)

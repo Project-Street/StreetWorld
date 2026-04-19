@@ -8,37 +8,32 @@ from typing import List
 import requests
 
 prepare_nurec_scene_data = None
-_NUREC_SCENE_API_BASE = None
-_NUREC_SCENE_API_KEY = None
+load_nurec_api_key = None
 
 
 def prepare_all_remote_nurec_scenes(
     nurec_root: Path | str,
     scene_cfg_dir: Path | str = Path("configs/nurec"),
     trajectory_root: Path | str = Path("data/trajectory"),
-    api_base: str | None = None,
-    api_key: str | None = None,
+    onsite_dir: Path | str = Path("onsite"),
 ) -> List[Path]:
-    global prepare_nurec_scene_data, _NUREC_SCENE_API_BASE, _NUREC_SCENE_API_KEY
+    global prepare_nurec_scene_data, load_nurec_api_key
     if prepare_nurec_scene_data is None:
         from streetworld.misc.nurec_interface.nurec_parser import (
-            _NUREC_SCENE_API_BASE as parser_api_base,
-            _NUREC_SCENE_API_KEY as parser_api_key,
             prepare_nurec_scene_data as parser_prepare_nurec_scene_data,
         )
 
         prepare_nurec_scene_data = parser_prepare_nurec_scene_data
-        _NUREC_SCENE_API_BASE = parser_api_base
-        _NUREC_SCENE_API_KEY = parser_api_key
+    if load_nurec_api_key is None:
+        from streetworld.misc.nurec_interface.nurec_parser import (
+            load_nurec_api_key as parser_load_nurec_api_key,
+        )
 
-    if api_base is None:
-        api_base = _NUREC_SCENE_API_BASE
-    if api_key is None:
-        api_key = _NUREC_SCENE_API_KEY
+        load_nurec_api_key = parser_load_nurec_api_key
 
-    api_base = api_base.rstrip("/")
+    api_key = load_nurec_api_key(onsite_dir)
     headers = {"X-API-Key": api_key}
-    response = requests.get(f"{api_base}/api/scenes", headers=headers, timeout=10)
+    response = requests.get("http://101.201.109.161:8000/api/scenes", headers=headers, timeout=10)
     response.raise_for_status()
     data = response.json()
     items = data.get("items")
@@ -55,8 +50,7 @@ def prepare_all_remote_nurec_scenes(
                 scene_cfg_dir=Path(scene_cfg_dir),
                 nurec_root=Path(nurec_root),
                 trajectory_root=Path(trajectory_root),
-                api_base=api_base,
-                api_key=api_key,
+                onsite_dir=Path(onsite_dir),
             )
         )
     return out_yamls

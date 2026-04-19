@@ -10,17 +10,25 @@ This script implements the complete communication flow with OnSite server:
 
 import argparse
 import logging
-import time
 import sys
+import time
+import traceback
 import os
 from pathlib import Path
-import numpy as np
+
+from rich.console import Console
+from rich.live import Live
 
 from streetworld.misc.onsite_middleware import OnSiteSwitch, OnSiteScenarioEnv, TERMINAL_TYPE, SIM_STATE
 from streetworld.manager.agent_manager import AgentState
 from streetworld.misc.nurec_interface.simulator_interface import SimulatorInterface
 from streetworld.onstite_config import ONSITE_DEFAULT_CONFIG
-from streetworld.utils.logger import get_log_timestamp
+from streetworld.utils.logger import PlainFormatter, configure_root_logger, get_log_timestamp, resolve_log_level
+from streetworld.utils.onsite_simulator_top_bar import (
+    LauncherTopBarState,
+    build_launcher_renderable,
+    update_top_bar_runtime,
+)
 
 # Import proto enums for Notify types
 from streetworld.misc.onsite_middleware.onsite_proto.main.proto.enums_pb2 import (
@@ -29,7 +37,6 @@ from streetworld.misc.onsite_middleware.onsite_proto.main.proto.enums_pb2 import
     NT_PAUSE_TEST
 )
 
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # NotifyType -> AgentState mapping
@@ -49,12 +56,21 @@ sim_state = SIM_STATE.IDLE
 session_id = ""
 scene_name = ""
 actor_id = "simulator"
-last_sent_obs = None
-last_sent_info = None
-last_vehicle_control_seq_no = None
 
 
-def process_notify(middleware, env, none_sleep_s):
+def setup_launcher_logging(level_name: str) -> str:
+    log_dir = Path("logs")
+    log_dir.mkdir(parents=True, exist_ok=True)
+    shared_ts = os.environ.get("ONSITE_LOG_TS") or get_log_timestamp()
+    os.environ["ONSITE_LOG_TS"] = shared_ts
+    log_path = log_dir / f"simulator_{shared_ts}.logs"
+    handler = logging.FileHandler(log_path, encoding="utf-8")
+    handler.setFormatter(PlainFormatter())
+    configure_root_logger(resolve_log_level(level_name), handler=handler)
+    return str(log_path)
+
+
+def process_notify(middleware, env, none_sleep_s, top_bar_state: LauncherTopBarState):
     """
     Process Notify messages from OnSite server.
 
@@ -65,7 +81,7 @@ def process_notify(middleware, env, none_sleep_s):
         middleware: OnSiteMiddleware instance
         env: OnSiteScenarioEnv instance
     """
-    global sim_state, session_id, scene_name, last_sent_obs, last_sent_info, last_vehicle_control_seq_no
+    global sim_state, session_id, scene_name
 
     # Collect all pending Notify messages
     notifies = middleware.recv_all_notifies()
@@ -77,40 +93,33 @@ def process_notify(middleware, env, none_sleep_s):
         notify_type = notify.type
 
         mapped_state = NOTIFY_TO_STATE.get(notify_type)
-        logger.info(f"Received Notify: type={mapped_state}, role_id={role_id}")
 
         if mapped_state is None:
             continue
 
         # Handle session-level notifications
         if notify_type in [NT_ABORT_TEST, NT_FINISH_TEST]:
-            if env.gui is not None:
-                try:
-                    env.gui.flush_episode(env.scene_name)
-                except Exception as e:
-                    pass
+            if sim_state == SIM_STATE.STARTED and scene_name:
+                logger.info(f"Ending simulation for scene {scene_name}.")
+                if env.gui is not None:
+                    env.gui.flush_episode(scene_name)
+            top_bar_state.mark_finished("FINISHED" if notify_type == NT_FINISH_TEST else "ABORTED")
             sim_state = SIM_STATE.IDLE
             session_id = ""
             scene_name = ""
-            last_sent_obs = None
-            last_sent_info = None
-            last_vehicle_control_seq_no = None
             continue
         elif notify_type == NT_START_TEST:
             sim_state = SIM_STATE.STARTED
-            logger.info(f"Reset env with scene_name={scene_name} after START_TEST")
             obs, info = env.reset(scene_name=scene_name)
+            logger.info(f"Start simulation for session_id={session_id}, scene_name={scene_name}")
+            top_bar_state.mark_simulation_started()
+            update_top_bar_runtime(top_bar_state, info, None, obs, sim_state.name)
             middleware.configure_rlsl_map(env.config["scene_config_directory"], scene_name)
             send_current_step_data(middleware, env, obs, info, session_id)
-            last_sent_obs = obs
-            last_sent_info = info
 
         # Actor state is controlled by notify; ignore notifies for other roles.
-        if role_id == "actor" or notify_type == NT_START_TEST:
+        if notify_type == NT_START_TEST:
             env.agent_managers["actor"].set_state(mapped_state)
-            logger.info(f"Agent actor state updated to {mapped_state}")
-        else:
-            logger.debug(f"Ignore notify for non-actor role: role_id={role_id}, type={notify_type}")
 
 
 def send_current_step_data(middleware: OnSiteSwitch, env: OnSiteScenarioEnv, obs, info, session_id: str):
@@ -131,14 +140,19 @@ def send_current_step_data(middleware: OnSiteSwitch, env: OnSiteScenarioEnv, obs
             middleware.send_images(images_to_send, timestamp_sec, camera_params=camera_metadata)
 
 
-def wait_vehicle_control(middleware: OnSiteSwitch, env: OnSiteScenarioEnv, none_sleep_s: float):
+def wait_vehicle_control(
+    middleware: OnSiteSwitch,
+    env: OnSiteScenarioEnv,
+    none_sleep_s: float,
+    top_bar_state: LauncherTopBarState,
+):
     global sim_state
 
     while sim_state == SIM_STATE.STARTED:
         vehicle_control = middleware.recv_vehicle_control()
         if vehicle_control is not None:
             return vehicle_control
-        process_notify(middleware, env, none_sleep_s)
+        process_notify(middleware, env, none_sleep_s, top_bar_state)
         if sim_state != SIM_STATE.STARTED:
             return None
         time.sleep(none_sleep_s)
@@ -146,7 +160,13 @@ def wait_vehicle_control(middleware: OnSiteSwitch, env: OnSiteScenarioEnv, none_
     return None
 
 
-def main_loop(env : OnSiteScenarioEnv, middleware: OnSiteSwitch, save_debug_image=False, none_sleep_s=0.02):
+def main_loop(
+    env: OnSiteScenarioEnv,
+    middleware: OnSiteSwitch,
+    top_bar_state: LauncherTopBarState,
+    save_debug_image=False,
+    none_sleep_s=0.02,
+):
     """
     Main communication loop with OnSite server.
 
@@ -159,21 +179,21 @@ def main_loop(env : OnSiteScenarioEnv, middleware: OnSiteSwitch, save_debug_imag
         env: OnSiteScenarioEnv instance
         middleware: OnSiteMiddleware instance
     """
-    global sim_state, session_id, scene_name, last_sent_obs, last_sent_info, last_vehicle_control_seq_no
+    global sim_state, session_id, scene_name
 
     logger.info("Starting main loop")
 
     while True:
         # Phase 1: Process Notify messages (at beginning of each iteration)
-        process_notify(middleware, env, none_sleep_s)
+        process_notify(middleware, env, none_sleep_s, top_bar_state)
 
         # Phase 2: Wait for ActorPrepare
         if sim_state == SIM_STATE.IDLE:
             result = middleware.recv_actor_prepare()
             if result is not None:
                 session_id, _ , _, scene_name = result
-                logger.info(f"Prepared scene_name={scene_name} parsed from session_id={session_id}")
                 sim_state = SIM_STATE.PREPARED
+                top_bar_state.mark_actor_prepared(session_id, scene_name)
             time.sleep(0.5)
 
         # Phase 3: Send ActorPrepareResult and SubRole
@@ -187,24 +207,16 @@ def main_loop(env : OnSiteScenarioEnv, middleware: OnSiteSwitch, save_debug_imag
 
         # Phase 4: Main simulation loop
         # Block until a control message arrives, then execute exactly one step.
-        vehicle_control = wait_vehicle_control(middleware, env, none_sleep_s)
+        vehicle_control = wait_vehicle_control(middleware, env, none_sleep_s, top_bar_state)
         if vehicle_control is None:
             continue
         action, current_vehicle_control_seq_no = vehicle_control
-        if (
-            current_vehicle_control_seq_no == last_vehicle_control_seq_no and
-            last_sent_obs is not None and
-            last_sent_info is not None
-        ):
-            send_current_step_data(middleware, env, last_sent_obs, last_sent_info, session_id)
-            continue
+
         session_info = middleware.recv_session_info()  # Only receive, log
 
         obs, reward, terminated, truncated, info = env.step(action)
+        update_top_bar_runtime(top_bar_state, info, action, obs, sim_state.name)
         send_current_step_data(middleware, env, obs, info, session_id)
-        last_sent_obs = obs
-        last_sent_info = info
-        last_vehicle_control_seq_no = current_vehicle_control_seq_no
 
 
 def main():
@@ -235,10 +247,19 @@ def main():
                         help='Enable GUI rendering')
     parser.add_argument('--none_sleep_s', type=float, default=0.02,
                         help='Sleep seconds when recv returns empty')
-    parser.add_argument('-l', '--log-level', type=str, default='INFO',
+    parser.add_argument('--log-level', dest="log_level", type=str, default='INFO',
                         help='Logging level, e.g. DEBUG/INFO/WARNING/ERROR')
     args = parser.parse_args()
-    logging.getLogger().setLevel(getattr(logging, args.log_level.upper(), logging.INFO))
+    console = Console()
+    log_path = setup_launcher_logging(args.log_level)
+
+    top_bar_state = LauncherTopBarState(
+        grpc_host=args.grpc_host,
+        grpc_port=args.grpc_port,
+        onsite_dir=args.onsite_dir,
+        scene_config_directory=args.scene_config_directory,
+        gui=args.gui,
+    )
 
     model = None
     env = None
@@ -247,42 +268,65 @@ def main():
     exit_code = 0
 
     try:
-        # Initialize environment
-        logger.info("Initializing StreetWorld environment...")
-        model = SimulatorInterface(
-            grpc_host=args.grpc_host,
-            grpc_port=args.grpc_port,
-            camera_model_type="pinhole",
-            nurec_data_directory=args.nurec_data_directory,
-        )
-        env_config = ONSITE_DEFAULT_CONFIG
-        env_config["scene_config_directory"] = args.scene_config_directory
-        env_config["gui"] = args.gui
-        env = OnSiteScenarioEnv(model, env_config)
-        logger.info("StreetWorld environment initialized successfully")
+        with Live(
+            get_renderable=lambda: build_launcher_renderable(top_bar_state.snapshot(), log_path),
+            console=console,
+            refresh_per_second=8,
+            vertical_overflow="crop",
+        ) as live:
+            # Initialize environment
+            model = SimulatorInterface(
+                grpc_host=args.grpc_host,
+                grpc_port=args.grpc_port,
+                camera_model_type="pinhole",
+                nurec_data_directory=args.nurec_data_directory,
+                ui_update=lambda message, ephemeral=False: (
+                    top_bar_state.set_preparing_progress(message)
+                    if ephemeral else
+                    top_bar_state.push_preparing_message(message)
+                ),
+            )
+            top_bar_state.mark_renderer_interface_ready()
+            env_config = ONSITE_DEFAULT_CONFIG
+            env_config["scene_config_directory"] = args.scene_config_directory
+            env_config["gui"] = args.gui
+            env = OnSiteScenarioEnv(model, env_config)
+            top_bar_state.mark_scenario_env_ready()
 
-        # Initialize OnSite middleware
-        logger.info("Initializing OnSite middleware...")
-        middleware = OnSiteSwitch(
-            onsite_dir=args.onsite_dir,
-            terminal_type=TERMINAL_TYPE.SIMULATOR,
-        )
-        middleware.start_onsite_daemon()
-        logger.info("OnSite middleware initialized successfully")
+            # Initialize OnSite middleware
+            middleware = OnSiteSwitch(
+                onsite_dir=args.onsite_dir,
+                terminal_type=TERMINAL_TYPE.SIMULATOR,
+            )
+            top_bar_state.mark_onsite_switch_ready()
+            middleware.start_onsite_daemon()
+            top_bar_state.mark_onsite_daemon_ready()
 
-        # Run main loop
-        main_loop(env, middleware, save_debug_image=args.save_debug_image, none_sleep_s=args.none_sleep_s)
+            # Run main loop
+            main_loop(
+                env,
+                middleware,
+                top_bar_state,
+                save_debug_image=args.save_debug_image,
+                none_sleep_s=args.none_sleep_s,
+            )
     except KeyboardInterrupt:
         exit_code = 130
+        top_bar_state.mark_finished("INTERRUPTED")
         logger.info("Interrupted by user")
     except BaseException:
         exit_code = 1
         logger.exception("Unhandled exception in OnSite simulator launcher")
+        traceback.print_exc()
+        print(f"Logs saved to {log_path}", file=sys.stderr)
+        sys.stderr.flush()
     finally:
         if env is not None:
             env.close()
         if middleware is not None:
             middleware.close()
+        sys.stdout.flush()
+        sys.stderr.flush()
         os._exit(exit_code)
 
 

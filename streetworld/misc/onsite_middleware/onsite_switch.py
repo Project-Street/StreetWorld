@@ -30,18 +30,14 @@ from streetworld.utils.trajectory import matrix_to_quaternion
 from streetworld.misc.onsite_middleware.onsite_proto.chassis.proto.chassis_messages_pb2 import VehicleFeedback, VehicleControl
 from streetworld.misc.onsite_middleware.onsite_proto.chassis.proto.chassis_enums_pb2 import VEHICLE_FEEDBACK, VEHICLE_CONTROL
 from streetworld.misc.onsite_middleware.onsite_proto.chassis.proto import chassis_enums_pb2
-from streetworld.misc.onsite_middleware.onsite_proto.main.proto.messages_pb2 import (
-    PubRole, SubRole, Notify, ActorPrepare, ActorPrepareResult, SessionInfo
-)
-from streetworld.misc.onsite_middleware.onsite_proto.main.proto.enums_pb2 import (
-    MT_PUBROLE, MT_SUBROLE, MT_NOTIFY, MT_SESSIONINFO,
-    MT_ACTOR_PREPARE, MT_ACTOR_PREPARE_RESULT,
-    NT_ABORT_TEST, NT_START_TEST, NT_FINISH_TEST, NT_DESTROY_ROLE
-)
+from streetworld.misc.onsite_middleware.onsite_proto.main.proto.messages_pb2 import PubRole, SubRole, Notify, ActorPrepare, ActorPrepareResult, SessionInfo
+from streetworld.misc.onsite_middleware.onsite_proto.main.proto.enums_pb2 import MT_PUBROLE, MT_SUBROLE, MT_NOTIFY, MT_SESSIONINFO, MT_ACTOR_PREPARE, MT_ACTOR_PREPARE_RESULT, NT_ABORT_TEST, NT_START_TEST, NT_FINISH_TEST, NT_DESTROY_ROLE
 from streetworld.misc.onsite_middleware.onsite_proto.main.proto import enums_pb2
+from streetworld.utils.console_utils import suppress_process_output
 from streetworld.utils.logger import get_log_timestamp
 
 logger = logging.getLogger(__name__)
+
 
 class TERMINAL_TYPE(Enum):
     SIMULATOR = "simulator"
@@ -100,12 +96,6 @@ class OnSiteSwitch:
             raise TypeError("terminal_type must be TERMINAL_TYPE enum")
         self.terminal_type = terminal_type
 
-        multicast = self._load_multicast_config(self.onsite_dir)
-        self.config_center = multicast["config_center_addr"]
-        self.field_id = multicast["field_id"]
-        self.net_interface = multicast["net_interface_name"]
-        self.local_ip = multicast["local_ip"]
-
         # Channel references
         self.channels = None
         self.channel_map = {}
@@ -118,14 +108,7 @@ class OnSiteSwitch:
         self._image_sizes = image_sizes or {}
         self._vts_map_module = None
         self._rlsl_map = None
-        self._rlsl_scene_name = None
-
-
-        self._last_vehicle_control = {
-            "steering": 0.0,
-            "throttle_brake": 0.0,                
-            "seq_no": 0,
-        }
+        
         
         # Send only this logger to a dedicated file.
         self._init_logger()
@@ -134,19 +117,6 @@ class OnSiteSwitch:
 
         self.initialize_channels()
         self._warmup_camera()
-
-    @staticmethod
-    def _load_multicast_config(onsite_dir: Path):
-        cfg_path = onsite_dir / "config" / "common.yaml"
-        if not cfg_path.exists():
-            raise FileNotFoundError(f"OnSite config not found: {cfg_path}")
-        cfg = yaml.safe_load(cfg_path.read_text(encoding="utf-8")) or {}
-        multicast = cfg.get("multicast") or {}
-        required = ("config_center_addr", "local_ip", "net_interface_name", "field_id")
-        missing = [k for k in required if not multicast.get(k)]
-        if missing:
-            raise ValueError(f"Missing multicast config keys in {cfg_path}: {missing}")
-        return multicast
 
     def start_onsite_daemon(self):
         daemon_dir = self.onsite_dir / "daemon"
@@ -157,26 +127,19 @@ class OnSiteSwitch:
             logger.info("OnSite daemon not started because binary is missing: %s", daemon_bin)
             raise FileNotFoundError(f"OnSite daemon binary not found: {daemon_bin}")
 
-        daemon_query = subprocess.run(
-            ["pgrep", "-a", "-x", daemon_bin.name],
-            capture_output=True,
-            text=True,
-        )
+        daemon_query = subprocess.run(["pgrep", "-a", "-x", daemon_bin.name], capture_output=True, text=True)
         
         if daemon_query.returncode == 0:
-            logger.info(
-                "OnSite daemon already running, skip start. %s",
-                daemon_query.stdout.splitlines()[0].strip(),
-            )
+            logger.info("OnSite daemon already running, skip start. %s", daemon_query.stdout.splitlines()[0].strip())
             return
         if daemon_query.returncode != 1:
             raise RuntimeError(f"Failed to query existing daemon process: {daemon_query.stderr.strip()}")
 
         env = os.environ.copy()
         ld_library_path = env.get("LD_LIBRARY_PATH", "")
-        env["LD_LIBRARY_PATH"] = (
-            f"{daemon_lib_dir}:{ld_library_path}" if ld_library_path else str(daemon_lib_dir)
-        )
+        env["LD_LIBRARY_PATH"] = f"{daemon_lib_dir}:{ld_library_path}" if ld_library_path else str(daemon_lib_dir)
+        
+        from streetworld.utils.utils import set_parent_death_signal   
         self._daemon_proc = subprocess.Popen(
             [str(daemon_bin)],
             cwd=str(daemon_dir),
@@ -184,38 +147,28 @@ class OnSiteSwitch:
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
+            preexec_fn=set_parent_death_signal,
             start_new_session=True,
         )
-        time.sleep(3)
+        time.sleep(2)
         if self._daemon_proc.poll() is None:
             logger.info("Started OnSite daemon process pid=%s via %s", self._daemon_proc.pid, daemon_bin)
             return
-        logger.info(
-            "OnSite daemon was not started successfully; pid=%s exited early with code=%s",
-            self._daemon_proc.pid,
-            self._daemon_proc.returncode,
-        )
+        logger.info("OnSite daemon was not started successfully; pid=%s exited early with code=%s", self._daemon_proc.pid, self._daemon_proc.returncode)
 
     def _init_logger(self):
         # Follow root logger level (set by entrypoint --log-level).
         logger.setLevel(logging.NOTSET)
-        ts = get_log_timestamp()
+        ts = os.environ.get("ONSITE_LOG_TS") or get_log_timestamp()
         self.log_ts = ts
         # Share timestamp with other modules (e.g., onsite_integration).
-        try:
-            import os
-            os.environ["ONSITE_LOG_TS"] = ts
-        except Exception:
-            logger.exception("Failed to set ONSITE_LOG_TS")
+        os.environ["ONSITE_LOG_TS"] = ts
         log_dir = Path("logs")
         log_dir.mkdir(parents=True, exist_ok=True)
         log_file = log_dir / f"{self.terminal_type.value}_{ts}.logs"
         handler = logging.FileHandler(log_file, encoding="utf-8")
         handler.setLevel(logging.DEBUG)
-        handler.setFormatter(logging.Formatter(
-            fmt="%(asctime)s %(levelname)s %(name)s: %(message)s",
-            datefmt="%Y-%m-%d %H:%M:%S",
-        ))
+        handler.setFormatter(logging.Formatter(fmt="%(asctime)s %(levelname)s %(name)s: %(message)s", datefmt="%Y-%m-%d %H:%M:%S"))
         handler.addFilter(lambda record: record.name == __name__)
         if not any(isinstance(h, logging.FileHandler) and getattr(h, "baseFilename", "") == str(log_file)
                    for h in logger.handlers):
@@ -235,12 +188,7 @@ class OnSiteSwitch:
 
     @staticmethod
     def _proto_to_dict(message):
-        return MessageToDict(
-            message,
-            preserving_proto_field_name=True,
-            use_integers_for_enums=False,
-            including_default_value_fields=True
-        )
+        return MessageToDict(message, preserving_proto_field_name=True, use_integers_for_enums=False, including_default_value_fields=True)
 
     @classmethod
     def _normalize_debug_payload(cls, value):
@@ -317,14 +265,7 @@ class OnSiteSwitch:
         if channel_op and channel_elapsed_ms is not None:
             channel_key = f"channel_{channel_op}_ms"
             channel_value = f"{float(channel_elapsed_ms):.3f}"
-        logger.debug(
-            "%s %s=%s type=%s dict=%s",
-            direction,
-            channel_key,
-            self._color_blue(channel_value),
-            self._color_green(self._format_type_name(message_type, enum_scope)),
-            self._color_purple(payload_text),
-        )
+        logger.debug("%s %s=%s type=%s dict=%s", direction, channel_key, self._color_blue(channel_value), self._color_green(self._format_type_name(message_type, enum_scope)), self._color_purple(payload_text))
 
     @staticmethod
     def _timed_get(get_fn, *args):
@@ -372,11 +313,7 @@ class OnSiteSwitch:
             }
             self._camera_encoder = nvc.CreateEncoder(width, height, "NV12", True, **enc_config)
         elif self.terminal_type == TERMINAL_TYPE.TESTEE:
-            self._camera_decoder = nvc.CreateDecoder(
-                gpuid=0,
-                codec=nvc.cudaVideoCodec.H264,
-                usedevicememory=False,
-            )
+            self._camera_decoder = nvc.CreateDecoder(gpuid=0, codec=nvc.cudaVideoCodec.H264, usedevicememory=False)
 
     def _next_seq(self, message_type) -> int:
         seq = int(self._seq_by_type.get(message_type, 0))
@@ -448,35 +385,23 @@ class OnSiteSwitch:
         Raises:
             RuntimeError: If channel creation fails
         """
+        cfg_path = self.onsite_dir / "config" / "common.yaml"
+        cfg = yaml.safe_load(cfg_path.read_text(encoding="utf-8")) or {}
+        multicast = cfg["multicast"]
+
         param = libMulticastNetwork.CreateChannelsParam()
-        param.config_center_addr = self.config_center
-        param.local_ip = self.local_ip
-        param.net_interface_name = self.net_interface
-        param.field_id = self.field_id
+        param.config_center_addr = multicast["config_center_addr"]
+        param.local_ip = multicast["local_ip"]
+        param.net_interface_name = multicast["net_interface_name"]
+        param.field_id = multicast["field_id"]
         param.log_level = 1  # 1-info, 2-warning, 3-error
         param.client_name = self.terminal_type.value
         param.recv_self_msg = False
-        logger.info(
-            "OnSite create_channels param=%s",
-            {
-                "config_center_addr": param.config_center_addr,
-                "local_ip": param.local_ip,
-                "net_interface_name": param.net_interface_name,
-                "field_id": param.field_id,
-                "log_level": param.log_level,
-                "client_name": param.client_name,
-                "recv_self_msg": param.recv_self_msg,
-            },
-        )
 
         self.channels = libMulticastNetwork.ChannelPtrVector()
-        try:
-            ret = libMulticastNetwork.create_channels(param, self.channels)
-
-            if ret:
-                raise RuntimeError(f"ret is not zero, {ret}.")
-        except Exception as e:
-            raise RuntimeError(f"Exception while creating channels: {e}") from e
+        ret = libMulticastNetwork.create_channels(param, self.channels)
+        if ret:
+            raise RuntimeError(f"ret is not zero, {ret}.")
 
         # Build channel map.
         # NOTE: Avoid iterating ChannelPtrVector directly. Some pybind11 bindings
@@ -485,10 +410,7 @@ class OnSiteSwitch:
         count = len(self.channels)
         for i in range(count):
             c = self.channels[i]
-            logger.info(f"Created channel: {c.name()}, id: {c.id()}")
             self.channel_map[c.name()] = c
-
-        logger.info("OnSite middleware initialized successfully")
 
     def close(self):
         """Close all channels and cleanup resources."""
@@ -542,18 +464,16 @@ class OnSiteSwitch:
 
             # Parse brief_data if available
             brief_data = None
-            if prepare_msg.archive_info.brief_data:
-                try:
-                    brief_data = json.loads(prepare_msg.archive_info.brief_data)
-                except json.JSONDecodeError as e:
-                    logger.warning(f"Failed to parse brief_data: {e}")
+            # if prepare_msg.archive_info.brief_data:
+            #     try:
+            #         brief_data = json.loads(prepare_msg.archive_info.brief_data)
+            #     except json.JSONDecodeError as e:
+            #         logger.warning(f"Failed to parse brief_data: {e}")
 
             logger.info(f"Received ActorPrepare: session={session_id}, actor={actor_id}")
             return (session_id, actor_id, brief_data, scene_name)
 
-        self._log_message_debug(
-            "recv", msg.type(), {"expected_type": MT_ACTOR_PREPARE}, "main", channel_op="get", channel_elapsed_ms=get_ms
-        )
+        self._log_message_debug("recv", msg.type(), {"expected_type": MT_ACTOR_PREPARE}, "main", channel_op="get", channel_elapsed_ms=get_ms)
         return None
 
     def configure_rlsl_map(self, scene_config_directory, scene_name):
@@ -565,7 +485,7 @@ class OnSiteSwitch:
             scene_name: Scene name, yaml file is "<scene_name>.yaml".
         """
 
-        if self._rlsl_map is not None and self._rlsl_scene_name == scene_name:
+        if self._rlsl_map:
             return
 
         cfg_dir = Path(scene_config_directory).expanduser()
@@ -580,53 +500,33 @@ class OnSiteSwitch:
             scene_root_path = (Path.cwd() / scene_root_path).resolve()
 
         xodr_path = scene_root_path / str(scene_uuid) / "corrected_map.xodr"
-        if not xodr_path.exists():
-            logger.warning("RLSL xodr not found: %s", xodr_path)
-            self._rlsl_map = None
-            self._rlsl_scene_name = None
-            return
 
-        if self._vts_map_module is None:
-            try:
-                import vts_map  # pylint: disable=import-outside-toplevel
-                self._vts_map_module = vts_map
-            except Exception as e:
-                logger.warning("Cannot import vts_map, disable RLSL map lookup: %s", e)
-                self._rlsl_map = None
-                self._rlsl_scene_name = None
-                return
+        import vts_map  # pylint: disable=import-outside-toplevel
+        self._vts_map_module = vts_map
 
-        try:
-            m = self._vts_map_module.Map()
-            handle = 0
+        m = self._vts_map_module.Map()
+        handle = 0
+        with suppress_process_output():
             m.load(str(xodr_path), handle)
-            self._rlsl_map = m
-            self._rlsl_scene_name = scene_name
-            logger.info("Configured RLSL xodr map for scene=%s from %s", scene_name, xodr_path)
-        except Exception as e:
-            logger.warning("Failed to load RLSL xodr map from %s: %s", xodr_path, e)
-            self._rlsl_map = None
-            self._rlsl_scene_name = None
+        self._rlsl_map = m
+        logger.info("Configured RLSL xodr map for scene=%s from %s", scene_name, xodr_path)
+
 
     def _build_rlsl_from_position(self, position) -> Optional[dict]:
         if self._rlsl_map is None or self._vts_map_module is None:
             return None
 
-        try:
-            px, py, pz = self._to_vec3(position)
-            xyz = self._vts_map_module.XYZ(px, py, pz)
-            slz = self._vts_map_module.SLZ()
-            self._rlsl_map.find_slz_global(xyz, slz)
-            return {
-                "road_id": str(slz.lane_id.road_id),
-                "lane_id": int(slz.lane_id.local_id),
-                "s": float(slz.s),
-                "l": float(slz.l),
-                "z": float(slz.z),
-            }
-        except Exception:
-            logger.debug("Failed to build RLSL from position=%s", position, exc_info=True)
-            return None
+        px, py, pz = self._to_vec3(position)
+        xyz = self._vts_map_module.XYZ(px, py, pz)
+        slz = self._vts_map_module.SLZ()
+        self._rlsl_map.find_slz_global(xyz, slz)
+        return {
+            "road_id": str(slz.lane_id.road_id),
+            "lane_id": int(slz.lane_id.local_id),
+            "s": float(slz.s),
+            "l": float(slz.l),
+            "z": float(slz.z),
+        }
 
     def recv_notify(self):
         """
@@ -644,11 +544,14 @@ class OnSiteSwitch:
             notify = Notify()
             notify.ParseFromString(data)
             self._log_message_debug("recv", MT_NOTIFY, notify, "main", channel_op="get", channel_elapsed_ms=get_ms)
+            try:
+                notify_type_name = enums_pb2.NotifyType.Name(notify.type)
+            except ValueError:
+                notify_type_name = f"UNKNOWN_NOTIFY_TYPE ({notify.type})"
+            logger.info("Received Notify: type=%s role_id=%s", notify_type_name, notify.role_id)
             return notify
 
-        self._log_message_debug(
-            "recv", msg.type(), {"expected_type": MT_NOTIFY}, "main", channel_op="get", channel_elapsed_ms=get_ms
-        )
+        self._log_message_debug("recv", msg.type(), {"expected_type": MT_NOTIFY}, "main", channel_op="get", channel_elapsed_ms=get_ms)
         return None
 
     def recv_all_notifies(self):
@@ -664,8 +567,6 @@ class OnSiteSwitch:
             if notify is None:
                 break
             notifies.append(notify)
-        if notifies:
-            logger.debug("OnSite RX notify batch size=%d", len(notifies))
         return notifies
 
     def recv_pub_role(self):
@@ -686,10 +587,6 @@ class OnSiteSwitch:
             self._log_message_debug("recv", MT_PUBROLE, pub_role, "main", channel_op="get", channel_elapsed_ms=get_ms)
             return pub_role
 
-        self._log_message_debug(
-            "recv", msg.type(), {"expected_type": MT_PUBROLE}, "main", channel_op="get", channel_elapsed_ms=get_ms
-        )
-        return None
 
     def recv_vehicle_control(self):
         """
@@ -707,17 +604,13 @@ class OnSiteSwitch:
             data = libMulticastNetwork.getMessageData(msg)
             control = VehicleControl()
             control.ParseFromString(data)
-            self._log_message_debug(
-                "recv", VEHICLE_CONTROL, control, "chassis", channel_op="get", channel_elapsed_ms=get_ms
-            )
+            self._log_message_debug("recv", VEHICLE_CONTROL, control, "chassis", channel_op="get", channel_elapsed_ms=get_ms)
 
             # Convert to StreetWorld action
             action = self._vehicle_control_to_action(control)
             return action, int(control.header.seq_no)
 
-        self._log_message_debug(
-            "recv", msg.type(), {"expected_type": VEHICLE_CONTROL}, "chassis", channel_op="get", channel_elapsed_ms=get_ms
-        )
+        self._log_message_debug("recv", msg.type(), {"expected_type": VEHICLE_CONTROL}, "chassis", channel_op="get", channel_elapsed_ms=get_ms)
         return None
 
     def recv_vehicle_feedback(self):
@@ -737,19 +630,10 @@ class OnSiteSwitch:
             data = libMulticastNetwork.getMessageData(msg)
             feedback = VehicleFeedback()
             feedback.ParseFromString(data)
-            self._log_message_debug(
-                "recv",
-                VEHICLE_FEEDBACK,
-                self._vehicle_feedback_debug_payload(feedback),
-                "chassis",
-                channel_op="get",
-                channel_elapsed_ms=get_ms,
-            )
+            self._log_message_debug("recv", VEHICLE_FEEDBACK, self._vehicle_feedback_debug_payload(feedback), "chassis", channel_op="get", channel_elapsed_ms=get_ms)
             return feedback
 
-        self._log_message_debug(
-            "recv", msg.type(), {"expected_type": VEHICLE_FEEDBACK}, "chassis", channel_op="get", channel_elapsed_ms=get_ms
-        )
+        self._log_message_debug("recv", msg.type(), {"expected_type": VEHICLE_FEEDBACK}, "chassis", channel_op="get", channel_elapsed_ms=get_ms)
         return None
 
     def recv_session_info(self):
@@ -768,14 +652,10 @@ class OnSiteSwitch:
             data = libMulticastNetwork.getMessageData(msg)
             session_info = SessionInfo()
             session_info.ParseFromString(data)
-            self._log_message_debug(
-                "recv", MT_SESSIONINFO, session_info, "main", channel_op="get", channel_elapsed_ms=get_ms
-            )
+            self._log_message_debug("recv", MT_SESSIONINFO, session_info, "main", channel_op="get", channel_elapsed_ms=get_ms)
             return session_info
 
-        self._log_message_debug(
-            "recv", msg.type(), {"expected_type": MT_SESSIONINFO}, "main", channel_op="get", channel_elapsed_ms=get_ms
-        )
+        self._log_message_debug("recv", msg.type(), {"expected_type": MT_SESSIONINFO}, "main", channel_op="get", channel_elapsed_ms=get_ms)
         return None
 
     def recv_image(self):
@@ -814,35 +694,19 @@ class OnSiteSwitch:
                 return 403, None
             for raw_frame in raw_frames:
                 luma_base_addr = raw_frame.GetPtrToPlane(0)
-                frame_data = np.ctypeslib.as_array(
-                    C.cast(luma_base_addr, C.POINTER(C.c_uint8)),
-                    shape=(raw_frame.framesize(),),
-                )
+                frame_data = np.ctypeslib.as_array(C.cast(luma_base_addr, C.POINTER(C.c_uint8)), shape=(raw_frame.framesize(),))
                 frame_nv12 = frame_data.reshape(int(image.height * 1.5), int(image.width))
                 frame_rgb = cv2.cvtColor(frame_nv12, cv2.COLOR_YUV2RGB_NV12)
                 camera_timestamp = int(image.camera_timestamp)
-                decoded_images.append(
-                    {
-                        "rgb": frame_rgb,
-                        "camera_index": i,
-                        "camera_timestamp": camera_timestamp,
-                        "camera_pose_in_ego": np.asarray(image.camera_pose_in_ego, dtype=np.float32).reshape(4, 4),
-                        "intrinsic": np.asarray(image.intrinsic, dtype=np.float32).reshape(3, 3),
-                    }
-                )
+                decoded_images.append({
+                    "rgb": frame_rgb,
+                    "camera_index": i,
+                    "camera_timestamp": camera_timestamp,
+                    "camera_pose_in_ego": np.asarray(image.camera_pose_in_ego, dtype=np.float32).reshape(4, 4),
+                    "intrinsic": np.asarray(image.intrinsic, dtype=np.float32).reshape(3, 3),
+                })
 
-        self._log_message_debug(
-            "recv",
-            "image_batch",
-            {
-                "image_count": len(images),
-                "decoded_count": len(decoded_images),
-                "images": [self._image_debug_meta(image) for image in images],
-            },
-            "raw",
-            channel_op="get",
-            channel_elapsed_ms=get_ms,
-        )
+        self._log_message_debug("recv", "image_batch", {"image_count": len(images), "decoded_count": len(decoded_images), "images": [self._image_debug_meta(image) for image in images]}, "raw", channel_op="get", channel_elapsed_ms=get_ms)
         return 0, decoded_images
 
     # ==================== Send Methods ====================
@@ -864,19 +728,10 @@ class OnSiteSwitch:
         data = msg.SerializeToString()
         length = len(data)
         ret, put_ms = self._timed_put(self.channel_map["prepare"].put, MT_ACTOR_PREPARE_RESULT, length, data)
-        self._log_message_debug(
-            "send",
-            MT_ACTOR_PREPARE_RESULT,
-            {**self._proto_to_dict(msg), "ret": ret},
-            "main",
-            channel_op="put",
-            channel_elapsed_ms=put_ms,
-        )
+        self._log_message_debug("send", MT_ACTOR_PREPARE_RESULT, {**self._proto_to_dict(msg), "ret": ret}, "main", channel_op="put", channel_elapsed_ms=put_ms)
 
         if ret != 0:
             logger.error(f"Failed to send ActorPrepareResult, ret: {ret}")
-        else:
-            logger.info(f"Sent ActorPrepareResult: session={session_id}, result={result}")
 
     def send_sub_role(self, session_id):
         """
@@ -893,14 +748,10 @@ class OnSiteSwitch:
         data = msg.SerializeToString()
         length = len(data)
         ret, put_ms = self._timed_put(self.channel_map["pubrole_encrypt"].put, MT_SUBROLE, length, data)
-        self._log_message_debug(
-            "send", MT_SUBROLE, {**self._proto_to_dict(msg), "ret": ret}, "main", channel_op="put", channel_elapsed_ms=put_ms
-        )
+        self._log_message_debug("send", MT_SUBROLE, {**self._proto_to_dict(msg), "ret": ret}, "main", channel_op="put", channel_elapsed_ms=put_ms)
 
         if ret != 0:
             logger.error(f"Failed to send SubRole, ret: {ret}")
-        else:
-            logger.info(f"Sent SubRole: session={session_id}")
 
     def send_pub_role(self, obs, last_received_pub_role, current_timestamp, session_id=""):
         """
@@ -923,21 +774,18 @@ class OnSiteSwitch:
         msg.header.seq_no = pub_role_seq
     
         for role_id, state in role_states.items():
-            role = self._agent_state_to_single_role(
-                role_id, state, last_received_pub_role, current_timestamp, pub_role_seq
-            )
+            role = self._agent_state_to_single_role(role_id, state, last_received_pub_role, current_timestamp, pub_role_seq)
             msg.s_roles.append(role)
 
         data = msg.SerializeToString()
         ret, put_ms = self._timed_put(self.channel_map["pubrole"].put, MT_PUBROLE, len(data), data)
         data_enc = self._pubrole_encrypt(data)
         ret_enc, put_enc_ms = self._timed_put(self.channel_map["pubrole_encrypt"].put, MT_PUBROLE, len(data_enc), data_enc)
-        self._log_message_debug(
-            "send", MT_PUBROLE, {**self._proto_to_dict(msg), "ret": [ret, ret_enc]}, "main", channel_op="put", channel_elapsed_ms=put_ms + put_enc_ms
-        )
+        self._log_message_debug("send", MT_PUBROLE, {**self._proto_to_dict(msg), "ret": [ret, ret_enc]}, "main", channel_op="put", channel_elapsed_ms=put_ms + put_enc_ms)
 
         if ret != 0:
             logger.error(f"Failed to send PubRole, ret: {ret}")
+
 
     def send_vehicle_feedback(self, obs, current_timestamp, last_received_feedback=None):
         """
@@ -954,14 +802,7 @@ class OnSiteSwitch:
         data = msg.SerializeToString()
         length = len(data)
         ret, put_ms = self._timed_put(self.channel_map["vehiclecontrol"].put, VEHICLE_FEEDBACK, length, data)
-        self._log_message_debug(
-            "send",
-            VEHICLE_FEEDBACK,
-            {**self._vehicle_feedback_debug_payload(msg), "ret": ret},
-            "chassis",
-            channel_op="put",
-            channel_elapsed_ms=put_ms,
-        )
+        self._log_message_debug("send", VEHICLE_FEEDBACK, {**self._vehicle_feedback_debug_payload(msg), "ret": ret}, "chassis", channel_op="put", channel_elapsed_ms=put_ms)
 
         if ret != 0:
             logger.error(f"Failed to send VehicleFeedback, ret: {ret}")
@@ -991,61 +832,12 @@ class OnSiteSwitch:
             cmd.driving_control.target_accelerator_pedal_position = 0.0
             cmd.brake_control.target_brake_pedal_position = -throttle_brake * 100.0
 
-        self._last_vehicle_control = {
-            "steering": steering,
-            "throttle_brake": throttle_brake,
-            "seq_no": int(cmd.header.seq_no),
-        }
+
         data = cmd.SerializeToString()
         ret, put_ms = self._timed_put(self.channel_map["vehiclecontrol"].put, VEHICLE_CONTROL, len(data), data)
-        self._log_message_debug(
-            "send",
-            VEHICLE_CONTROL,
-            {**self._proto_to_dict(cmd), "ret": ret},
-            "chassis",
-            channel_op="put",
-            channel_elapsed_ms=put_ms,
-        )
+        self._log_message_debug("send", VEHICLE_CONTROL, {**self._proto_to_dict(cmd), "ret": ret}, "chassis", channel_op="put", channel_elapsed_ms=put_ms)
         if ret != 0:
             logger.error(f"Failed to send VehicleControl, ret: {ret}")
-
-    def send_last_vehicle_control(self):
-        cmd = VehicleControl()
-        cmd.header.send_ts = int(time.time() * 1000)
-        cmd.header.sim_ts = int(time.time() * 1000)
-        cmd.header.seq_no = int(self._last_vehicle_control["seq_no"])
-        cmd.steering_control.target_steering_wheel_angle = (
-            float(self._last_vehicle_control["steering"]) * self.MAX_STEERING_RAD
-        )
-
-        throttle_brake = float(self._last_vehicle_control["throttle_brake"])
-        if throttle_brake >= 0:
-            cmd.driving_control.target_accelerator_pedal_position = throttle_brake * 100.0
-            cmd.brake_control.target_brake_pedal_position = 0.0
-        else:
-            cmd.driving_control.target_accelerator_pedal_position = 0.0
-            cmd.brake_control.target_brake_pedal_position = -throttle_brake * 100.0
-
-        data = cmd.SerializeToString()
-        ret, put_ms = self._timed_put(
-            self.channel_map["vehiclecontrol"].put,
-            VEHICLE_CONTROL,
-            len(data),
-            data,
-        )
-        payload = self._proto_to_dict(cmd)
-        payload["ret"] = ret
-        payload["resend"] = True
-        self._log_message_debug(
-            "send",
-            VEHICLE_CONTROL,
-            payload,
-            "chassis",
-            channel_op="put",
-            channel_elapsed_ms=put_ms,
-        )
-        if ret != 0:
-            logger.error(f"Failed to resend last VehicleControl, ret: {ret}")
 
     def send_images(self, images, timestamp, camera_params):
         """
@@ -1083,9 +875,7 @@ class OnSiteSwitch:
             py_img.width = width
             py_img.encoding = "h264"
             py_img.data = payload
-            py_img.camera_pose_in_ego = np.linalg.inv(
-                np.asarray(camera_params[camera_name]["ego2camera"], dtype=np.float64)
-            ).reshape(-1)
+            py_img.camera_pose_in_ego = np.linalg.inv(np.asarray(camera_params[camera_name]["ego2camera"], dtype=np.float64)).reshape(-1)
             py_img.intrinsic = np.asarray(camera_params[camera_name]["K"], dtype=np.float32).reshape(-1)
             py_images.append(py_img)
             self.image_seq += 1
@@ -1096,14 +886,7 @@ class OnSiteSwitch:
             for py_img in py_images
         ]
         total_byte_len = sum(img_meta["byte_len"] for img_meta in images_meta)
-        self._log_message_debug(
-            "send",
-            "image_batch",
-            {"image_count": len(py_images), "images": images_meta, "total_byte_len": total_byte_len, "ret": ret},
-            "raw",
-            channel_op="put",
-            channel_elapsed_ms=put_ms,
-        )
+        self._log_message_debug("send", "image_batch", {"image_count": len(py_images), "images": images_meta, "total_byte_len": total_byte_len, "ret": ret}, "raw", channel_op="put", channel_elapsed_ms=put_ms)
         if ret != 0:
             logger.error(f"Failed to send images, ret: {ret}")
 
@@ -1196,9 +979,7 @@ class OnSiteSwitch:
         heading = self._to_float(state['heading_theta'])
         cos_h = float(np.cos(heading))
         sin_h = float(np.sin(heading))
-        rotation = torch.tensor(
-            [[[cos_h, -sin_h, 0.0], [sin_h, cos_h, 0.0], [0.0, 0.0, 1.0]]], dtype=torch.float32
-        )
+        rotation = torch.tensor([[[cos_h, -sin_h, 0.0], [sin_h, cos_h, 0.0], [0.0, 0.0, 1.0]]], dtype=torch.float32)
         quat_wxyz = matrix_to_quaternion(rotation)[0]
         role.box.rotation.x = float(quat_wxyz[1])
         role.box.rotation.y = float(quat_wxyz[2])
@@ -1270,12 +1051,8 @@ class OnSiteSwitch:
         # Steering feedback
         feedback.steering_feedback.steering_wheel_angle = self._to_float(vehicle_state['steering_wheel_angle'])
         feedback.steering_feedback.steering_wheel_speed = self._to_float(vehicle_state['steering_wheel_speed'])
-        feedback.steering_feedback.left_directive_wheel_angle = self._to_float(
-            vehicle_state['left_directive_wheel_angle']
-        )
-        feedback.steering_feedback.right_directive_wheel_angle = self._to_float(
-            vehicle_state['right_directive_wheel_angle']
-        )
+        feedback.steering_feedback.left_directive_wheel_angle = self._to_float(vehicle_state['left_directive_wheel_angle'])
+        feedback.steering_feedback.right_directive_wheel_angle = self._to_float(vehicle_state['right_directive_wheel_angle'])
 
         # Driving feedback
         throttle_brake = self._to_float(vehicle_state['throttle_brake'])
@@ -1288,9 +1065,7 @@ class OnSiteSwitch:
         vel = np.asarray(vehicle_state["velocity"], dtype=np.float64).reshape(-1)
         vehicle_speed = np.linalg.norm(vel[:2]) if vel.size >= 2 else 0.0
         feedback.bcm_feedback.vehicle_speed = float(vehicle_speed)  # m/s
-        feedback.bcm_feedback.longitudinal_acceleration = self._to_float(
-            vehicle_state['longitudinal_acceleration']
-        )
+        feedback.bcm_feedback.longitudinal_acceleration = self._to_float(vehicle_state['longitudinal_acceleration'])
         feedback.bcm_feedback.front_left_wheel_speed = self._to_float(vehicle_state['front_left_wheel_speed'])  # m/s
         feedback.bcm_feedback.fron_right_wheel_speed = self._to_float(vehicle_state['front_right_wheel_speed'])  # m/s
         feedback.bcm_feedback.rear_left_wheel_speed = self._to_float(vehicle_state['rear_left_wheel_speed'])  # m/s

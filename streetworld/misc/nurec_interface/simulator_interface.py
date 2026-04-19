@@ -8,7 +8,7 @@ import socket
 import subprocess
 import time
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Callable, Dict, Optional, Tuple
 
 import numpy as np
 import yaml
@@ -36,6 +36,7 @@ class SimulatorInterface:
         resolution_scale: float = 1.0,
         camera_model_type: str = "ftheta",
         nurec_data_directory: str | Path = "data/NuRec",
+        ui_update: Callable[[str], None] | None = None,
     ) -> None:
         self.zNear = zNear
         self.zFar = zFar
@@ -43,6 +44,7 @@ class SimulatorInterface:
         self._grpc_host = str(grpc_host)
         self._grpc_port = int(grpc_port)
         self._nurec_data_directory = Path(nurec_data_directory)
+        self._ui_update = ui_update
         self._local_server_proc: Optional[subprocess.Popen] = None
         self._simple_nurec_log_fp = None
 
@@ -56,6 +58,14 @@ class SimulatorInterface:
         self._grpc = NurecGrpcClient(host=grpc_host, port=grpc_port, timeout_s=grpc_timeout_s)
         self._cached_ts: Optional[int] = None
         self._scene_model: Optional[Dict[str, Any]] = None
+
+    def _push_ui_message(self, message: str) -> None:
+        if self._ui_update is not None:
+            self._ui_update(str(message))
+
+    def _set_ui_progress(self, message: str) -> None:
+        if self._ui_update is not None:
+            self._ui_update(str(message), ephemeral=True)
 
     @staticmethod
     def _is_loopback_host(host: str) -> bool:
@@ -120,7 +130,7 @@ class SimulatorInterface:
         self, cfg_path: str | Path
     ) -> Tuple[str, Any, list[int], Dict[str, Dict[str, Any]], Dict[int, list[list[float]]], Dict[str, Dict[str, Any]], Optional[str]]:
         cfg_path = Path(cfg_path)
-        self._ensure_scene_config(cfg_path)
+        self.ensure_scene_config(cfg_path)
         cfg = self._load_cfg(cfg_path)
         rig = json.loads(Path(cfg["rig_trajectories_path"]).read_text(encoding="utf-8"))
         camera_params, _ = parse_camera_params(rig, resolution_scale=self.resolution_scale)
@@ -143,7 +153,6 @@ class SimulatorInterface:
                 "type": obj.get("type", "vehicle"),
             }
         bk_ground_model_path = None
-        print(f"loaded {cfg['scene_name']}.")
         return (
             cfg["scene_name"],
             cfg,
@@ -154,20 +163,23 @@ class SimulatorInterface:
             bk_ground_model_path,
         )
 
-    def _ensure_scene_config(self, cfg_path: Path) -> None:
+    def ensure_scene_config(self, cfg_path: Path) -> None:
         if cfg_path.exists():
             return
         scene_name = cfg_path.stem
         m = re.fullmatch(r"(\d+)_(\d+)", scene_name)
-        if not m:
-            raise FileNotFoundError(f"Scene config not found: {cfg_path}")
-        logger.warning("Scene not found. Downloading now: scene=%s cfg=%s", scene_name, cfg_path)
+        self._push_ui_message(f"Scene not found. Downloading now: scene={scene_name} cfg={cfg_path}")
         prepare_nurec_scene_data(
             scene_name=scene_name,
             scene_cfg_dir=cfg_path.parent,
             nurec_root=self._nurec_data_directory,
+            progress_callback=self._set_ui_progress,
+            message_callback=self._push_ui_message,
         )
-        logger.warning("Scene download completed: scene=%s. Please restart the job on http://42.121.161.25:52023/#/job/listr.", scene_name)
+        self._push_ui_message(
+            f"Scene download completed: scene={scene_name}. If the simulation did not start, please restart the job on "
+            "http://42.121.161.25:52023/#/job/listr."
+        )
 
     def load_model(self, cfg: Any) -> None:
         rig = json.loads(Path(cfg["rig_trajectories_path"]).read_text(encoding="utf-8"))

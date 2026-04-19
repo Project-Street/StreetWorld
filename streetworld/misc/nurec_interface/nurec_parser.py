@@ -6,8 +6,8 @@ import logging
 import os
 import re
 import zipfile
-from pathlib import Path
 from collections import defaultdict
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
@@ -18,9 +18,6 @@ import yaml
 from streetworld.utils.trajectory import build_rotation
 
 logger = logging.getLogger(__name__)
-
-_NUREC_SCENE_API_BASE = os.getenv("NUREC_SCENE_API_BASE", "http://101.201.109.161:8000")
-_NUREC_SCENE_API_KEY = os.getenv("NUREC_SCENE_API_KEY", "tj2026onsite-track4")
 
 _XODR_HEADER_TAG_RE = re.compile(r"<header\b[^>]*>", re.IGNORECASE | re.DOTALL)
 _XODR_ATTR_RE = re.compile(r'([A-Za-z_][A-Za-z0-9_]*)="([^"]*)"')
@@ -42,6 +39,15 @@ _XODR_MONTH_MAP = {
     "Dec": 12,
 }
 _XODR_ZERO_SCI = "0.0000000000000000e+00"
+
+
+def load_nurec_api_key(onsite_dir: Path | str = Path("onsite")) -> str:
+    cfg_path = Path(onsite_dir) / "config" / "common.yaml"
+    cfg = yaml.safe_load(cfg_path.read_text(encoding="utf-8")) or {}
+    api_key = cfg["daemon"]["server"]["account"]
+    if not isinstance(api_key, str) or not api_key:
+        raise ValueError(f"daemon.server.account must be a non-empty string: {cfg_path}")
+    return api_key
 
 
 def _load_json(path: Path | str) -> Dict[str, Any]:
@@ -421,21 +427,38 @@ def prepare_nurec_scene_data(
     scene_cfg_dir: Path | str,
     nurec_root: Path | str = Path("data/NuRec"),
     trajectory_root: Path | str = Path("data/trajectory"),
-    api_base: str = _NUREC_SCENE_API_BASE,
-    api_key: str = _NUREC_SCENE_API_KEY,
+    onsite_dir: Path | str = Path("onsite"),
+    progress_callback=None,
+    message_callback=None,
 ) -> Path:
+    def emit_message(message: str) -> None:
+        if message_callback is not None:
+            message_callback(str(message))
+
+    def emit_progress(message: str) -> None:
+        if progress_callback is not None:
+            progress_callback(str(message))
+
     scene_cfg_dir = Path(scene_cfg_dir)
     nurec_root = Path(nurec_root)
     trajectory_root = Path(trajectory_root)
     scene_id = scene_name
     batch_name = parse_scene_batch_name(scene_name)
-    api_base = api_base.rstrip("/")
+    api_key = load_nurec_api_key(onsite_dir)
     headers = {"X-API-Key": api_key}
 
-    meta_resp = requests.get(f"{api_base}/api/scenes/{scene_id}/meta", headers=headers, timeout=10)
+    meta_resp = requests.get(
+        f"http://101.201.109.161:8000/api/scenes/{scene_id}/meta",
+        headers=headers,
+        timeout=10,
+    )
     meta_resp.raise_for_status()
 
-    download_resp = requests.post(f"{api_base}/api/scenes/{scene_id}/download", headers=headers, timeout=10)
+    download_resp = requests.post(
+        f"http://101.201.109.161:8000/api/scenes/{scene_id}/download",
+        headers=headers,
+        timeout=10,
+    )
     download_resp.raise_for_status()
     download_data = download_resp.json()
 
@@ -448,7 +471,6 @@ def prepare_nurec_scene_data(
     scene_cfg_dir.mkdir(parents=True, exist_ok=True)
 
     total_size = int(download_data.get("size") or 0)
-    print(f"Downloading scene {scene_name} -> {local_usdz}")
     with requests.get(download_data["download_url"], stream=True, timeout=60) as resp:
         resp.raise_for_status()
         if total_size <= 0:
@@ -463,21 +485,10 @@ def prepare_nurec_scene_data(
                     continue
                 f.write(chunk)
                 downloaded += len(chunk)
-                if total_size > 0:
-                    percent = downloaded / total_size * 100.0
-                    print(
-                        f"\rDownloading {scene_name}: {percent:.1f}% ({downloaded}/{total_size})",
-                        end="",
-                        flush=True,
-                    )
-                else:
-                    print(
-                        f"\rDownloading {scene_name}: {downloaded} bytes",
-                        end="",
-                        flush=True,
-                    )
-    print()
+                percent = downloaded / total_size * 100.0
+                emit_progress(f"Downloading {scene_name}: {percent:.1f}%")
 
+    emit_message("Parsing ...")
     scene_dir.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(local_usdz, "r") as zf:
         _safe_extract_all(zf, scene_dir)

@@ -51,7 +51,7 @@ full = [
     "dill==0.4.0",
     "pyarrow==22.0.0",
     "nvdiffrast @ git+https://github.com/NVlabs/nvdiffrast.git@253ac4f",
-    "simple-nurec-viewer @ git+https://github.com/Project-Street/simple-nurec-viewer.git@9dbff84f",
+    "simple-nurec-viewer @ git+https://github.com/Project-Street/simple-nurec-viewer.git@05260cf0",
     "websockets<14",
     "grpcio==1.50.0",
     "grpcio-tools==1.50.0",

@@ -6,9 +6,18 @@ import sys
 import time
 import socket
 import numpy as np
-from panda3d.bullet import BulletBodyNode
 
-from streetworld.constants import MetaDriveType
+import ctypes as C
+import signal
+
+def set_parent_death_signal():
+    libc = C.CDLL("libc.so.6", use_errno=True)
+    pr_set_pdeathsig = 1
+    if libc.prctl(pr_set_pdeathsig, signal.SIGTERM) != 0:
+        err = C.get_errno()
+        raise OSError(err, os.strerror(err))
+    if os.getppid() == 1:
+        os.kill(os.getpid(), signal.SIGTERM)
 
 
 def is_port_occupied(port, host='127.0.0.1'):
@@ -186,34 +195,6 @@ def deprecation_warning(old, new, error=False) -> None:
     else:
         logger = logging.getLogger(__name__)
         logger.warning("DeprecationWarning: " + msg + " This will raise an error in the future!")
-
-
-def get_object_from_node(node: BulletBodyNode):
-    """
-    Use this api to get the python object from bullet RayCast/SweepTest/CollisionCallback result
-    """
-    if node.getPythonTag(node.getName()) is None:
-        return None
-    from streetworld.engine.engine_utils import get_object
-    from streetworld.engine.engine_utils import get_engine
-    ret = node.getPythonTag(node.getName()).base_object_name
-    is_road = MetaDriveType.is_lane(node.getPythonTag(node.getName()).type_name)
-    if is_road:
-        return get_engine().current_map.road_network.get_lane(ret)
-    else:
-        return get_object(ret)[ret]
-
-
-def is_map_related_instance(obj):
-    from streetworld.component.block.base_block import BaseBlock
-    from streetworld.component.map.base_map import BaseMap
-    return True if isinstance(obj, BaseBlock) or isinstance(obj, BaseMap) else False
-
-
-def is_map_related_class(object_class):
-    from streetworld.component.block.base_block import BaseBlock
-    from streetworld.component.map.base_map import BaseMap
-    return True if issubclass(object_class, BaseBlock) or issubclass(object_class, BaseMap) else False
 
 
 def dict_recursive_remove_array(d):

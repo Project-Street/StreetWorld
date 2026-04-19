@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ctypes
+import logging
 import platform
 from typing import Any, Sequence
 
@@ -10,6 +11,9 @@ import OpenGL.GL as gl
 from imgui_bundle import imgui
 
 from streetworld.gui.headless_gui import compose_gui_frame, extract_gui_payload
+
+
+logger = logging.getLogger(__name__)
 
 
 class GUI:
@@ -184,6 +188,7 @@ class GUI:
         glfw.swap_buffers(self.window)
 
     def flush_episode(self, scene_name: str) -> None:
+        logger.info("Flushing GUI episode for scene %s.", scene_name)
         self.timestamp_history.clear()
         self.speed_history.clear()
         self.angular_velocity_history.clear()

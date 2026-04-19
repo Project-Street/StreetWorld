@@ -25,6 +25,7 @@ from streetworld.misc.onsite_middleware.onsite_proto.main.proto.enums_pb2 import
     NT_FINISH_TEST,
     NT_START_TEST,
 )
+from streetworld.utils.logger import setup_entrypoint_logging
 from streetworld.utils.remote_viewer_proto import remote_viewer_pb2, remote_viewer_pb2_grpc
 
 logger = logging.getLogger("onsite_viewer_server")
@@ -47,7 +48,6 @@ def run_server_loop(
         if notify is None and sim_state != SIM_STATE.STARTED:
             time.sleep(none_sleep_s)
         elif notify is not None:
-            logger.info(f"Received Notify: type={notify.type} role_id={notify.role_id}")
             if notify.type in (NT_ABORT_TEST, NT_FINISH_TEST):
                 sim_state = SIM_STATE.IDLE
                 session_id, actor_id = "", ""
@@ -141,10 +141,10 @@ def main() -> None:
         action="store_true",
         help="Save debug images regardless of log level",
     )
-    parser.add_argument("--log_level", type=str, default="INFO")
+    parser.add_argument("--log-level", dest="log_level", type=str, default="INFO")
     args = parser.parse_args()
 
-    logging.basicConfig(level=getattr(logging, args.log_level.upper(), logging.INFO), force=True)
+    setup_entrypoint_logging(args.log_level)
 
     action_state = {"steering": 0.0, "throttle_brake": 0.0}
     frame_state = {"image": None}

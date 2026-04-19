@@ -35,7 +35,7 @@ class OnSiteScenarioEnv(ScenarioEnv):
     def reset(self, seed=None, scene_name=None):
         if scene_name and scene_name not in self.data_manager.idx2scene:
             cfg_path = Path(self.config["scene_config_directory"]) / f"{scene_name}.yaml"
-            self.model._ensure_scene_config(cfg_path)
+            self.model.ensure_scene_config(cfg_path)
             self.data_manager.hotload_scenario(str(cfg_path))
         return super().reset(seed=seed, scene_name=scene_name)
 
