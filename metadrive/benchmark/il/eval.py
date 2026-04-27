@@ -5,6 +5,7 @@ from pathlib import Path
 
 import numpy as np
 import torch
+from tqdm.auto import tqdm
 from torch.utils.data import DataLoader
 
 from metadrive.benchmark.il.dataset import ILSceneDataset, collate_list, split_records
@@ -88,17 +89,42 @@ def main() -> None:
     ades = []
     fdes = []
     with torch.no_grad():
-        for batch in loader:
+        eval_iter = tqdm(loader, desc="Evaluating", dynamic_ncols=True)
+        for batch in eval_iter:
             for sample in batch:
                 if args.model == "uniad":
+                    warmup_obs = sample.get("warmup_obs", [])
+                    warmup_info = sample.get("warmup_info", [])
+                    if len(warmup_obs) == len(warmup_info) and len(warmup_obs) > 0:
+                        for wo, wi in zip(warmup_obs, warmup_info):
+                            warmup_sample = {
+                                "obs": wo,
+                                "info": wi,
+                            }
+                            warmup_raw = build_uniad_input(warmup_sample, cameras=set(wo.keys()))
+                            _ = predict_uniad_traj(model, warmup_raw)
                     raw = build_uniad_input(sample, cameras=set(sample["obs"].keys()))
                     pred = predict_uniad_traj(model, raw)
+                    print(f"pred: {pred}, target: {sample['target_xy']}, mask: {sample['target_mask']}")
                 else:
+                    warmup_obs = sample.get("warmup_obs", [])
+                    warmup_info = sample.get("warmup_info", [])
+                    if len(warmup_obs) == len(warmup_info) and len(warmup_obs) > 0:
+                        for wo, wi in zip(warmup_obs, warmup_info):
+                            warmup_sample = {
+                                "obs": wo,
+                                "info": wi,
+                            }
+                            warmup_raw = build_vad_input(warmup_sample)
+                            _ = predict_vad_traj(model, warmup_raw)
                     raw = build_vad_input(sample)
                     pred, _ = predict_vad_traj(model, raw)
+                    print(f"pred: {pred}, target: {sample['target_xy']}, mask: {sample['target_mask']}")
                 ade, fde = compute_sample_metrics(pred, sample["target_xy"], sample["target_mask"])
                 ades.append(ade)
                 fdes.append(fde)
+            if ades:
+                eval_iter.set_postfix(ade=f"{float(np.mean(ades)):.3f}", fde=f"{float(np.mean(fdes)):.3f}")
 
     print(f"Eval samples: {len(ades)}")
     print(f"ADE: {float(np.mean(ades) if ades else 0.0):.6f}")

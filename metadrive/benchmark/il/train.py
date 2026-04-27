@@ -45,6 +45,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--ad-root", type=str, required=True)
     parser.add_argument("--config", type=str, required=True)
     parser.add_argument("--checkpoint", type=str, required=True)
+    parser.add_argument(
+        "--resume-from",
+        type=str,
+        default="",
+        help="Optional IL training checkpoint to resume from (restores model/optimizer/epoch).",
+    )
     parser.add_argument("--epochs", type=int, default=5)
     parser.add_argument("--batch-size", type=int, default=2)
     parser.add_argument("--workers", type=int, default=2)
@@ -151,11 +157,11 @@ def compute_losses(pred_xy: torch.Tensor, target_xy: torch.Tensor, mask: torch.T
     if valid.any():
         ade = l2[valid].mean()
         fde = l2[valid][-1]
-        loss = ade
+        loss = ade + 0.3 * fde
     else:
         ade = torch.zeros((), device=pred.device, dtype=pred.dtype)
         fde = torch.zeros((), device=pred.device, dtype=pred.dtype)
-        loss = ade
+        loss = ade + 0.3 * fde
     return loss, ade, fde
 
 
@@ -193,6 +199,32 @@ def make_model(cfg: ILConfig, device: torch.device):
     if trainable <= 0:
         raise RuntimeError("No trainable parameters selected for planning-only IL")
     return model, trainable
+
+
+def load_resume_checkpoint(
+    model,
+    optimizer: torch.optim.Optimizer,
+    resume_path: Path,
+    device: torch.device,
+) -> Tuple[int, int, float]:
+    if not resume_path.exists():
+        raise FileNotFoundError(f"Resume checkpoint not found: {resume_path}")
+
+    ckpt = torch.load(str(resume_path), map_location=device, weights_only=False)
+    if not isinstance(ckpt, dict):
+        raise TypeError(f"Resume checkpoint should be a dict, got: {type(ckpt)}")
+    if "model_state_dict" not in ckpt:
+        raise KeyError("Resume checkpoint missing 'model_state_dict'")
+
+    unwrap_model(model).load_state_dict(ckpt["model_state_dict"], strict=True)
+
+    if "optimizer_state_dict" in ckpt and isinstance(ckpt["optimizer_state_dict"], dict):
+        optimizer.load_state_dict(ckpt["optimizer_state_dict"])
+
+    next_epoch = int(ckpt.get("epoch", 0))
+    global_step = int(ckpt.get("global_step", 0))
+    best_val = float(ckpt.get("best_val", float("inf")))
+    return next_epoch, global_step, best_val
 
 
 def batch_forward(
@@ -382,12 +414,27 @@ def main() -> None:
     params = [p for p in model.parameters() if p.requires_grad]
     optimizer = torch.optim.AdamW(params, lr=cfg.lr, weight_decay=cfg.weight_decay)
 
+    start_epoch = 0
+    best_val = float("inf")
+    global_step = 0
+    resume_from = str(args.resume_from).strip()
+    if resume_from:
+        start_epoch, global_step, best_val = load_resume_checkpoint(
+            model=model,
+            optimizer=optimizer,
+            resume_path=Path(resume_from),
+            device=device,
+        )
+        if rank == 0:
+            print(
+                f"[il] resumed from {resume_from} "
+                f"(start_epoch={start_epoch}, global_step={global_step}, best_val={best_val:.6f})"
+            )
+
     if rank == 0:
         print(f"[il] model={cfg.model_type} trainable_params={trainable} train_samples={len(train_dataset)} val_samples={len(val_dataset)}")
 
-    best_val = float("inf")
-    global_step = 0
-    for epoch in range(cfg.epochs):
+    for epoch in range(start_epoch, cfg.epochs):
         if train_sampler is not None:
             train_sampler.set_epoch(epoch)
 
@@ -440,6 +487,8 @@ def main() -> None:
             torch.save(
                 {
                     "epoch": epoch + 1,
+                    "global_step": global_step,
+                    "best_val": best_val,
                     "model_state_dict": unwrap_model(model).state_dict(),
                     "optimizer_state_dict": optimizer.state_dict(),
                     "config": vars(cfg),

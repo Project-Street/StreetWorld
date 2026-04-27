@@ -1,11 +1,20 @@
 from __future__ import annotations
 
 import math
+import json
+import os
 from typing import Tuple
 
 import numpy as np
 
 import numpy as np
+
+INTENT_UNKNOWN = 0
+INTENT_GO_STRAIGHT = 1
+INTENT_GO_LEFT = 2
+INTENT_GO_RIGHT = 3
+
+_INTENT_LOOKUP_CACHE: dict[tuple[str, str], dict[str, int] | None] = {}
 
 def nearest_front_index(path, xy, heading_vec):
     rel = path - xy[None, :]
@@ -104,6 +113,60 @@ def turn_signal_from_path(
     return 0
 
 
+def _intent_id_to_turn_signal(intent_id: int) -> int:
+    intent_id = int(intent_id)
+    if intent_id == INTENT_GO_LEFT:
+        return 1
+    if intent_id == INTENT_GO_RIGHT:
+        return -1
+    if intent_id in (INTENT_UNKNOWN, INTENT_GO_STRAIGHT):
+        return 0
+    return 0
+
+
+def _load_scene_intent_lookup(scene_name: str, intent_data_dir: str) -> dict[str, int] | None:
+    cache_key = (str(scene_name), str(intent_data_dir))
+    if cache_key in _INTENT_LOOKUP_CACHE:
+        return _INTENT_LOOKUP_CACHE[cache_key]
+
+    intent_file = os.path.join(intent_data_dir, f"{scene_name}.json")
+    if not os.path.isfile(intent_file):
+        _INTENT_LOOKUP_CACHE[cache_key] = None
+        return None
+
+    try:
+        with open(intent_file, "r", encoding="utf-8") as f:
+            payload = json.load(f)
+    except Exception:
+        _INTENT_LOOKUP_CACHE[cache_key] = None
+        return None
+
+    lookup: dict[str, int] = {}
+    for frame in payload.get("frames", []):
+        frame_id = str(frame.get("frame_id", "")).zfill(3)
+        intent = frame.get("intent", {}) or {}
+        lookup[frame_id] = int(intent.get("id", INTENT_UNKNOWN))
+    _INTENT_LOOKUP_CACHE[cache_key] = lookup
+    return lookup
+
+
+def turn_signal_from_intent(
+    scene_name: str | None,
+    timestamp_us: int | None,
+    intent_data_dir: str,
+) -> int | None:
+    if not scene_name or timestamp_us is None:
+        return None
+    lookup = _load_scene_intent_lookup(str(scene_name), str(intent_data_dir))
+    if not lookup:
+        return None
+    frame_id = int(timestamp_us) // 100_000
+    frame_key = f"{frame_id:03d}"
+    if frame_key not in lookup:
+        return None
+    return _intent_id_to_turn_signal(lookup[frame_key])
+
+
 def turn_signal_to_command(turn_signal: int) -> int:
     sign = int(np.sign(float(turn_signal)))
     mapping = {-1: 0, 0: 2, 1: 1}
@@ -116,20 +179,31 @@ def derive_command_from_pose(
     ego_yaw: float,
     early_signal_distance: float = 10.0,
     turn_inradius_threshold: float = 15.0,
+    scene_name: str | None = None,
+    timestamp_us: int | None = None,
+    intent_data_dir: str = "data/WOD-E2E-train-intents",
 ) -> Tuple[int, int]:
-    heading = np.array([math.cos(ego_yaw), math.sin(ego_yaw)], dtype=np.float32)
-    turn_signal = turn_signal_from_path(
-        path_xy=path_xy,
-        ego_xy=ego_xy,
-        heading_vec=heading,
-        early_signal_distance=early_signal_distance,
-        turn_inradius_threshold=turn_inradius_threshold,
+    turn_signal = turn_signal_from_intent(
+        scene_name=scene_name,
+        timestamp_us=timestamp_us,
+        intent_data_dir=intent_data_dir,
     )
+    if turn_signal is None:
+        # Deprecated fallback path: geometric turn signal from trajectory curvature.
+        heading = np.array([math.cos(ego_yaw), math.sin(ego_yaw)], dtype=np.float32)
+        turn_signal = turn_signal_from_path(
+            path_xy=path_xy,
+            ego_xy=ego_xy,
+            heading_vec=heading,
+            early_signal_distance=early_signal_distance,
+            turn_inradius_threshold=turn_inradius_threshold,
+        )
     return turn_signal, turn_signal_to_command(turn_signal)
 
 
 __all__ = [
     "derive_command_from_pose",
+    "turn_signal_from_intent",
     "turn_signal_from_path",
     "turn_signal_to_command",
 ]

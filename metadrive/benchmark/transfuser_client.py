@@ -100,13 +100,23 @@ def _world_to_local_point(point_xy: np.ndarray, ego_pos: np.ndarray, ego_yaw: fl
         [np.cos(np.pi / 2.0 + ego_yaw), -np.sin(np.pi / 2.0 + ego_yaw)],
         [np.sin(np.pi / 2.0 + ego_yaw),  np.cos(np.pi / 2.0 + ego_yaw)],
     ], dtype=np.float32)
-    return rot.T.dot(local_point)
+    res = rot.T.dot(local_point)
+    res[0] = -res[0]
+    return res
 
 
 def _path_to_target_point(path_xy: np.ndarray, ego_pos: np.ndarray, ego_yaw: float, lookahead: float) -> Optional[np.ndarray]:
     if path_xy is None or path_xy.shape[0] == 0:
         return None
-    target_xy = path_xy[-1]
+    # Find the point on the path that is approximately `lookahead` distance from the ego position
+    diffs = path_xy - ego_pos[:2]
+    dists = np.linalg.norm(diffs, axis=1)
+    if np.all(dists < 1e-3):
+        return _world_to_local_point(path_xy[-1], ego_pos, ego_yaw)
+    idx = np.searchsorted(dists, lookahead)
+    if idx >= len(path_xy):
+        idx = len(path_xy) - 1
+    target_xy = path_xy[idx]
     return _world_to_local_point(target_xy, ego_pos, ego_yaw)
 
 
@@ -121,7 +131,7 @@ def _normalize_plan_traj(plan_traj: np.ndarray) -> Optional[np.ndarray]:
     if traj.ndim != 2 or traj.shape[1] < 2:
         return None
     converted_traj = np.zeros_like(traj, dtype=np.float32)
-    converted_traj[:, 0] = -traj[:, 1]
+    converted_traj[:, 0] = traj[:, 1]
     converted_traj[:, 1] = traj[:, 0]
     traj = converted_traj
     print(traj)
@@ -170,6 +180,7 @@ def _load_transfuser(model_dir: Path, checkpoint: str, device: str):
     net.load_state_dict(state_dict, strict=False)
     net.to(device)
     net.eval()
+    net.pred_len = 20
     return net, config
 
 
@@ -200,6 +211,64 @@ class TransFuserClient(GrpcClient):
         self.lookahead = float(lookahead)
         self.lateral = float(lateral)
 
+    def _dump_transfuser_predictions(
+        self,
+        debug_dir: str,
+        step_idx: int,
+        rgb_tensor,
+        lidar_bev_tensor,
+        target_point_image_tensor,
+        velocity_tensor,
+        num_points,
+    ) -> None:
+        import torch
+        import torch.nn.functional as F
+
+        if not debug_dir or step_idx < 0:
+            return
+
+        os.makedirs(debug_dir, exist_ok=True)
+
+        with torch.no_grad():
+            lidar_model_input = lidar_bev_tensor
+            if self.config.use_point_pillars:
+                lidar_model_input = self.model.point_pillar_net(lidar_model_input, num_points)
+                lidar_model_input = torch.rot90(lidar_model_input, -1, dims=(2, 3))
+
+            if self.config.use_target_point_image:
+                lidar_model_input = torch.cat((lidar_model_input, target_point_image_tensor), dim=1)
+
+            if self.model.backbone in ("transFuser", "late_fusion", "latentTF"):
+                features, image_features_grid, _ = self.model._model(rgb_tensor, lidar_model_input, velocity_tensor)
+            elif self.model.backbone == "geometric_fusion":
+                print("Skipping prediction dump for geometric_fusion backbone (requires correspondences).")
+                return
+            else:
+                print(f"Skipping prediction dump for unsupported backbone: {self.model.backbone}")
+                return
+
+            pred_bev = self.model.pred_bev(features[0])
+            pred_bev = F.interpolate(
+                pred_bev,
+                (self.config.bev_resolution_height, self.config.bev_resolution_width),
+                mode="bilinear",
+                align_corners=True,
+            )
+            bev_idx = pred_bev[0].argmax(dim=0).detach().cpu().numpy().astype(np.uint8)
+            bev_scale = max(1, pred_bev.shape[1] - 1)
+            bev_vis = (bev_idx.astype(np.float32) * (255.0 / float(bev_scale))).astype(np.uint8)
+            bev_path = os.path.join(debug_dir, f"bev_pred_{step_idx:06d}.png")
+            cv2.imwrite(bev_path, bev_vis)
+
+            if hasattr(self.model, "seg_decoder"):
+                pred_semantic = self.model.seg_decoder(image_features_grid)
+                semantic_idx = pred_semantic[0].argmax(dim=0).detach().cpu().numpy().astype(np.int32)
+                palette = np.asarray(self.config.classes_list, dtype=np.uint8)
+                semantic_idx = np.clip(semantic_idx, 0, palette.shape[0] - 1)
+                semantic_vis = palette[semantic_idx]
+                semantic_path = os.path.join(debug_dir, f"semantic_pred_{step_idx:06d}.png")
+                cv2.imwrite(semantic_path, semantic_vis)
+
     def run_transfuser_inference(
         self,
         obs_img: Dict,
@@ -217,7 +286,11 @@ class TransFuserClient(GrpcClient):
             rgb_list.append(obs_img[cam_name][0])
 
         rgb_concat = np.concatenate(rgb_list, axis=1)
+        print(f"rgb_concat shape: {rgb_concat.shape}, dtype: {rgb_concat.dtype}")
+        # Resize first 
+        # rgb_concat = cv2.resize(rgb_concat, (self.config.img_resolution[1], self.config.img_resolution[0]))
         rgb_cropped = crop_image_cv2(rgb_concat, crop=self.config.img_resolution, crop_shift=0)
+        print(f"img_res: {self.config.img_resolution}, rgb_cropped shape: {rgb_cropped.shape}, dtype: {rgb_cropped.dtype}")
         rgb_tensor = torch.from_numpy(rgb_cropped).unsqueeze(0).to(self.device, dtype=torch.float32)
 
         lidar_points_list = []
@@ -277,6 +350,14 @@ class TransFuserClient(GrpcClient):
         
         target_point_image = draw_target_point(target_point)
 
+        if debug_dir and step_idx >= 0:
+            os.makedirs(debug_dir, exist_ok=True)
+
+            rgb_vis = np.clip(rgb_cropped[0], 0, 255).astype(np.uint8)
+            rgb_vis = cv2.cvtColor(rgb_vis, cv2.COLOR_RGB2BGR)
+            rgb_path = os.path.join(debug_dir, f"rgb_cropped_{step_idx:06d}.png")
+            cv2.imwrite(rgb_path, rgb_vis)
+
         if debug_dir and step_idx >= 0 and (not use_point_pillars) and lidar_bev is not None:
             os.makedirs(debug_dir, exist_ok=True)
             lidar_img = np.zeros((lidar_bev.shape[1], lidar_bev.shape[2], 3), dtype=np.uint8)
@@ -293,6 +374,7 @@ class TransFuserClient(GrpcClient):
         target_point_image_tensor = torch.from_numpy(target_point_image).unsqueeze(0).to(self.device, dtype=torch.float32)
 
         speed = float(obs_info.get("ego_velo", 0.0))
+        print(f"speed: {speed:.2f} m/s, target_point: {target_point_tensor}, command: {command}")
         velocity_tensor = torch.tensor([[speed]], dtype=torch.float32, device=self.device)
 
         with torch.no_grad():
@@ -303,8 +385,24 @@ class TransFuserClient(GrpcClient):
                 target_point_image_tensor,
                 velocity_tensor,
                 num_points=num_points,
+                debug=True,
+                save_path=debug_dir
             )
+            pred_wp[:, :, 0] = pred_wp[:, :, 0] + 1.3
             steer, throttle, brake = self.model.control_pid(pred_wp, velocity_tensor, is_stuck=False)
+            print(f"Steering output: steer={steer}, throttle={throttle}, brake={brake}")
+
+        if debug_dir and step_idx >= 0:
+            self._dump_transfuser_predictions(
+                debug_dir=debug_dir,
+                step_idx=step_idx,
+                rgb_tensor=rgb_tensor,
+                lidar_bev_tensor=lidar_bev_tensor,
+                target_point_image_tensor=target_point_image_tensor,
+                velocity_tensor=velocity_tensor,
+                num_points=num_points,
+            )
+
         return float(steer), float(throttle), float(brake), pred_wp.detach().cpu().numpy()
 
 
@@ -317,11 +415,11 @@ def main():
     parser.add_argument("--model-dir", type=str, default="/home/guojiarui/river/models/transfuser/model_ckpt/models_2022/transfuser")
     parser.add_argument("--checkpoint", type=str, default="")
     parser.add_argument("--device", type=str, default="cuda:0")
-    parser.add_argument("--cameras", type=str, default="camera_0,camera_1,camera_2")
+    parser.add_argument("--cameras", type=str, default="camera_2_tfuse,camera_0_tfuse,camera_1_tfuse")
     parser.add_argument("--depth-cameras", type=str, default="camera_0,camera_1,camera_2")
     parser.add_argument("--depth-stride", type=int, default=4)
     parser.add_argument("--depth-max-m", type=float, default=1000.0)
-    parser.add_argument("--lookahead", type=float, default=8.0)
+    parser.add_argument("--lookahead", type=float, default=20.0)
     parser.add_argument("--lateral", type=float, default=3.0)
     parser.add_argument("--debug-dir", type=str, default="")
     parser.add_argument("--gaussian-video", type=str, default="./driving_transfuser.mp4")
@@ -375,7 +473,7 @@ def main():
                 step_idx=0,
             )
             gaussian_recorder.update_frame((obs_img, obs_info), _normalize_plan_traj(pred_wp))
-            acc, steer = traj2control(_normalize_plan_traj(pred_wp), obs_info, horizon=2.0, control_dt=0.5)
+            acc, steer = traj2control(_normalize_plan_traj(pred_wp), obs_info, horizon=0.4, control_dt=0.1)
             action = [steer, acc]
 
             print(f"Initial action: steer={steer:.4f}, throttle={action[1]:.4f}, brake={brake:.4f}")
@@ -399,8 +497,8 @@ def main():
                     step_idx=step,
                 )
                 
-                # gaussian_recorder.update_frame((obs_img, obs_info), _normalize_plan_traj(pred_wp))
-                acc, steer = traj2control(_normalize_plan_traj(pred_wp), obs_info, horizon=2.0, control_dt=0.5)
+                gaussian_recorder.update_frame((obs_img, obs_info), _normalize_plan_traj(pred_wp))
+                acc, steer = traj2control(_normalize_plan_traj(pred_wp), obs_info, horizon=2.0, control_dt=0.1)
                 action = [steer, acc]
             
                 if step % 1 == 0:
@@ -421,7 +519,8 @@ def main():
                 f"lag_dist={metrics_so_far.get('avg_lag_distance', 0.0):.3f}, "
                 f"lag_deficit={metrics_so_far.get('avg_lag_deficit', 0.0):.3f}, "
                 f"pos_dev={metrics_so_far.get('avg_position_deviation', 0.0):.3f}, "
-                f"heading_err={metrics_so_far.get('avg_heading_error', 0.0):.3f}"
+                f"heading_err={metrics_so_far.get('avg_heading_error', 0.0):.3f}, "
+                f"smoothness={metrics_so_far.get('avg_smoothness', 0.0):.3f}"
             )
 
         print(f"Total reward: {total_reward:.2f}")
@@ -434,9 +533,10 @@ def main():
             f"lag_dist={final_metrics.get('avg_lag_distance', 0.0):.3f}, "
             f"lag_deficit={final_metrics.get('avg_lag_deficit', 0.0):.3f}, "
             f"pos_dev={final_metrics.get('avg_position_deviation', 0.0):.3f}, "
-            f"heading_err={final_metrics.get('avg_heading_error', 0.0):.3f}"
+            f"heading_err={final_metrics.get('avg_heading_error', 0.0):.3f}, "
+            f"smoothness={final_metrics.get('avg_smoothness', 0.0):.3f}"
         )
-        # gaussian_recorder.save_video()
+        gaussian_recorder.save_video()
     finally:
         client.close()
     return 0

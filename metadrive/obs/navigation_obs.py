@@ -1,4 +1,6 @@
 import math
+import json
+import os
 import numpy as np
 import gymnasium as gym
 from trajdata import VectorMap
@@ -7,6 +9,11 @@ from metadrive.base_class.randomizable import Randomizable
 from metadrive.utils.navigation_utils import nearest_front_index
 
 lane_follow_length = 200.0
+
+INTENT_UNKNOWN = 0
+INTENT_GO_STRAIGHT = 1
+INTENT_GO_LEFT = 2
+INTENT_GO_RIGHT = 3
 
 class NavigationObservation(BaseObservation, Randomizable):
     trajdata_map: VectorMap
@@ -19,6 +26,8 @@ class NavigationObservation(BaseObservation, Randomizable):
         # New radius-based threshold using triangle inradius (meters). Smaller -> sharper turn.
         # You may tune this based on map scale; ~20m is a moderate default.
         self.turn_inradius_threshold = float(config.get("turn_radius_threshold", 15.0))
+        self.command_horizon_steps = int(config.get("command_horizon_steps", 6))
+        self.command_lateral_threshold = float(config.get("command_lateral_threshold", 2.0))
         self.controller = None
         self.trajdata_map = None
         self.init_state = None
@@ -29,8 +38,17 @@ class NavigationObservation(BaseObservation, Randomizable):
         self._expert_speed = None
         self._expert_angular_velocity = None
         self._expert_heading = None
+        self._scene_name = None
+        self._intent_lookup = None
+        self._expert_intent_signal = None
+        self.intent_data_dir = str(
+            config.get(
+                "intent_data_dir",
+                os.path.join("/data/users/jrguo", "WOD-E2E-train-intents")
+            )
+        )
 
-    def reset(self, trajdata_map: VectorMap, init_state, state, controller, seed=None, **kwargs):
+    def reset(self, trajdata_map: VectorMap, init_state, state, controller, seed=None, scene_name=None, **kwargs):
         if self.navigating_type in ["lane_following", "destination_following"]:
             assert isinstance(trajdata_map, VectorMap), "trajdata_map must be provided for lane_following or destination_following navigation type."
 
@@ -41,6 +59,8 @@ class NavigationObservation(BaseObservation, Randomizable):
         self.trajdata_map = trajdata_map
         self.init_state = init_state
         self.state = state
+        self._scene_name = self._normalize_scene_name(scene_name)
+        self._intent_lookup = self._load_intent_lookup(self._scene_name)
         self._clear_expert_reference()
 
         if self.navigating_type == "expert_following":
@@ -65,63 +85,136 @@ class NavigationObservation(BaseObservation, Randomizable):
         self._expert_speed = None
         self._expert_angular_velocity = None
         self._expert_heading = None
+        self._expert_intent_signal = None
     
     def _get_turn_signal(self):
+        # signal_from_intent = self._get_turn_signal_from_intent()
+        # if signal_from_intent is not None:
+        #     print(f"Using intent-based turn signal: {signal_from_intent}")
+        #     return signal_from_intent
+        return self._get_turn_signal_deprecated()
+
+    def _get_turn_signal_from_intent(self):
         if self._path_xy is None or len(self._path_xy) < 5:
-            return 0
+            return None
+        if self._expert_intent_signal is None or len(self._expert_intent_signal) == 0:
+            return None
 
         ego_xy = self._vehicle_xy(self.controller)
         heading_vec = self._ego_heading_vec(self.controller)
         i0 = nearest_front_index(self._path_xy, ego_xy, heading_vec)
         if i0 >= len(self._path_xy):
+            return None
+        if i0 >= len(self._expert_intent_signal):
+            i0 = len(self._expert_intent_signal) - 1
+            if i0 < 0:
+                return None
+        return int(self._expert_intent_signal[i0])
+
+    def _get_turn_signal_deprecated(self):
+        if self._path_xy is None or len(self._path_xy) < 2:
             return 0
 
-        j = self._first_index_by_arclen(self._path_cumlen, i0, self.early_signal_distance)
-        if j == len(self._path_cumlen) or j == 0:
+        ego_xy = self._vehicle_xy(self.controller)
+        rel = self._path_xy - ego_xy[None, :]
+        i0 = int(np.argmin(np.sum(rel * rel, axis=1)))
+
+        j = min(i0 + max(1, self.command_horizon_steps), len(self._path_xy) - 1)
+        if j <= i0:
             return 0
 
-        # Vectorized scan within [i0+1, j-1] using numpy
-        N = len(self._path_xy)
-        k_start = max(i0 + 1, 1)
-        k_end = min(j - 1, N - 2)
-        if k_start > k_end:
+        if i0 + 1 < len(self._path_xy):
+            tangent = self._path_xy[i0 + 1] - self._path_xy[i0]
+        elif i0 - 1 >= 0:
+            tangent = self._path_xy[i0] - self._path_xy[i0 - 1]
+        else:
             return 0
-
-        idx = np.arange(k_start, k_end + 1, dtype=np.int32)
-        p = self._path_xy
-        p0 = p[idx - 1]
-        p1 = p[idx]
-        p2 = p[idx + 1]
-
-        v01 = p1 - p0
-        v12 = p2 - p1
-        v02 = p2 - p0
-
-        len01 = np.linalg.norm(v01, axis=1)
-        len12 = np.linalg.norm(v12, axis=1)
-        len02 = np.linalg.norm(v02, axis=1)
-        cross = v01[:, 0] * v12[:, 1] - v01[:, 1] * v12[:, 0]
-        area2 = np.abs(cross)
-
-        eps = 1e-10
-        valid = (len01 >= eps) & (len12 >= eps) & (len02 >= eps)
-        R = np.full_like(len01, np.inf, dtype=np.float32)
-        R[valid] = (len01[valid] * len12[valid] * len02[valid]) / (2 * area2[valid] + eps)
-        meets = valid & (R <= float(self.turn_inradius_threshold))
-
-        c = np.sign(cross * meets.astype(np.float32))
-        n = len(c)
-        if n < 5:
+        tangent_norm = np.linalg.norm(tangent)
+        if tangent_norm < 1e-6:
             return 0
+        tangent = tangent / tangent_norm
 
-        for k in range(0, n - 4): 
-            sum = np.sum(c[k:k + 5])
-            if sum == 5:
-                return 1
-            elif sum == -5: # 
-                return -1
+        anchor_xy = self._path_xy[i0]
+        target_xy = self._path_xy[j]
+        right_vec = np.array([tangent[1], -tangent[0]], dtype=np.float32)
+        lateral = float(np.dot(target_xy - anchor_xy, right_vec))
+
+        if lateral >= self.command_lateral_threshold:
+            return -1
+        if lateral <= -self.command_lateral_threshold:
+            return 1
 
         return 0
+
+    @staticmethod
+    def _intent_id_to_turn_signal(intent_id):
+        intent_id = int(intent_id)
+        if intent_id == INTENT_GO_LEFT:
+            return 1
+        if intent_id == INTENT_GO_RIGHT:
+            return -1
+        if intent_id in (INTENT_UNKNOWN, INTENT_GO_STRAIGHT):
+            return 0
+        return 0
+
+    @staticmethod
+    def _normalize_scene_name(scene_name):
+        if scene_name is None:
+            return None
+        return str(scene_name)
+
+    def _load_intent_lookup(self, scene_name):
+        if not scene_name:
+            return None
+        intent_file = os.path.join(self.intent_data_dir, f"{scene_name}.json")
+        if not os.path.isfile(intent_file):
+            return None
+        try:
+            with open(intent_file, "r", encoding="utf-8") as f:
+                payload = json.load(f)
+        except Exception:
+            return None
+
+        frames = payload.get("frames", [])
+        lookup = {}
+        for frame in frames:
+            frame_id = str(frame.get("frame_id", "")).zfill(3)
+            intent = frame.get("intent", {}) or {}
+            intent_id = int(intent.get("id", INTENT_UNKNOWN))
+            lookup[frame_id] = intent_id
+        return lookup
+
+    def _build_expert_intent_signal(self):
+        if self._path_xy is None:
+            self._expert_intent_signal = None
+            return
+        n = len(self._path_xy)
+        if n == 0:
+            self._expert_intent_signal = np.zeros((0,), dtype=np.int8)
+            return
+        if not self._intent_lookup:
+            self._expert_intent_signal = None
+            return
+
+        signals = []
+        for ts in sorted(self.state.keys()):
+            frame_id = int(ts) // 100000
+            frame_key = f"{frame_id:03d}"
+            intent_id = self._intent_lookup.get(frame_key, INTENT_UNKNOWN)
+            signals.append(self._intent_id_to_turn_signal(intent_id))
+
+        if len(signals) != n:
+            if len(signals) == 0:
+                self._expert_intent_signal = None
+                return
+            x_old = np.linspace(0.0, 1.0, num=len(signals), dtype=np.float32)
+            x_new = np.linspace(0.0, 1.0, num=n, dtype=np.float32)
+            interp = np.interp(x_new, x_old, np.asarray(signals, dtype=np.float32))
+            signals = np.where(interp > 0.5, 1, np.where(interp < -0.5, -1, 0)).astype(np.int8)
+            self._expert_intent_signal = signals
+            return
+
+        self._expert_intent_signal = np.asarray(signals, dtype=np.int8)
 
     @property
     def observation_space(self):
@@ -159,6 +252,7 @@ class NavigationObservation(BaseObservation, Randomizable):
             self._expert_speed = np.asarray(speeds, dtype=np.float32)
             self._expert_angular_velocity = np.asarray(ang_vels, dtype=np.float32)
             self._expert_heading = np.asarray(headings, dtype=np.float32)
+            self._build_expert_intent_signal()
         else:
             self._clear_expert_reference()
 

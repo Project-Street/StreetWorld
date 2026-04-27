@@ -10,7 +10,7 @@ import argparse
 import os
 import re
 from collections import deque
-from typing import Deque, Dict, List, Optional, Tuple
+from typing import Any, Deque, Dict, List, Optional, Tuple
 
 import cv2
 import grpc
@@ -55,12 +55,35 @@ def _command_to_text(command: Optional[int]) -> str:
     return mapping.get(int(command), "unknown") if command is not None else "unknown"
 
 
-def _build_prompt(frame_count: int, frame_interval_s: float, command: Optional[int]) -> str:
+def _format_ego_status(obs_info: Dict[str, Any]) -> str:
+    speed = obs_info.get("ego_speed", obs_info.get("ego_velo", 0.0))
+    steer = obs_info.get("ego_steer", 0.0)
+    yaw = 0.0
+    ego_rot = obs_info.get("ego_rot")
+    if isinstance(ego_rot, (list, tuple, np.ndarray)) and len(ego_rot) >= 3:
+        yaw = float(ego_rot[2])
+
+    if isinstance(speed, (list, tuple, np.ndarray)):
+        speed = float(np.linalg.norm(np.asarray(speed, dtype=np.float32)))
+    else:
+        speed = float(speed)
+
+    return f"speed={speed:.2f} m/s, steer={float(steer):.2f}, yaw={yaw:.2f} rad"
+
+
+def _build_prompt(
+    frame_count: int,
+    frame_interval_s: float,
+    command: Optional[int],
+    obs_info: Dict[str, Any],
+) -> str:
     turn_signal = _command_to_text(command)
+    ego_status = _format_ego_status(obs_info)
     return (
         f"You are driving a car. These are {frame_count} front-camera frames "
         f"spaced {frame_interval_s:.2f}s apart (oldest to newest). "
         f"The navigation turn signal suggests: {turn_signal}. "
+        f"Current ego status: {ego_status}. "
         "Return two numbers only: steer and accel. "
         "Steer in range [-1, 1], accel in range [-1, 1]."
     )
@@ -133,11 +156,16 @@ def main() -> int:
                 frame_paths.append(image_path)
 
                 if step % args.infer_every == 0 and len(frame_paths) >= args.frame_count:
-                    prompt = _build_prompt(args.frame_count, args.frame_interval, obs_info.get("command"))
+                    prompt = _build_prompt(
+                        args.frame_count,
+                        args.frame_interval,
+                        obs_info.get("command"),
+                        obs_info,
+                    )
                     result = openemma.infer(prompt, list(frame_paths))
                     steer, accel = _parse_action(result)
                     action = [steer, accel]
-                    print(f"LLM action: steer={steer:.4f}, accel={accel:.4f}")
+                    print(f"Prompt: {prompt}, LLM action: steer={steer:.4f}, accel={accel:.4f}")
 
                 obs, reward, terminated, truncated, info = client.step(action)
                 last_info = info
@@ -166,7 +194,8 @@ def main() -> int:
                 f"lag_dist={metrics_so_far.get('avg_lag_distance', 0.0):.3f}, "
                 f"lag_deficit={metrics_so_far.get('avg_lag_deficit', 0.0):.3f}, "
                 f"pos_dev={metrics_so_far.get('avg_position_deviation', 0.0):.3f}, "
-                f"heading_err={metrics_so_far.get('avg_heading_error', 0.0):.3f}"
+                f"heading_err={metrics_so_far.get('avg_heading_error', 0.0):.3f}, "
+                f"smoothness={metrics_so_far.get('avg_smoothness', 0.0):.3f}"
             )
         print(f"Total reward: {total_reward:.2f}")
         final_metrics = metrics_recorder.summary()
@@ -178,7 +207,8 @@ def main() -> int:
             f"lag_dist={final_metrics.get('avg_lag_distance', 0.0):.3f}, "
             f"lag_deficit={final_metrics.get('avg_lag_deficit', 0.0):.3f}, "
             f"pos_dev={final_metrics.get('avg_position_deviation', 0.0):.3f}, "
-            f"heading_err={final_metrics.get('avg_heading_error', 0.0):.3f}"
+            f"heading_err={final_metrics.get('avg_heading_error', 0.0):.3f}, "
+            f"smoothness={final_metrics.get('avg_smoothness', 0.0):.3f}"
         )
         print(f"Collision scenes: {collision_scenes}")
     finally:

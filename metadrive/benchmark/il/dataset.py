@@ -64,6 +64,7 @@ class ILSceneDataset(Dataset):
         dt_seconds: float = 0.1,
         early_signal_distance: float = 10.0,
         turn_inradius_threshold: float = 15.0,
+        intent_data_dir: str = "/data/users/jrguo/WOD-E2E-train-intents",
     ):
         self.scenes = list(scenes)
         self.horizon = int(horizon)
@@ -72,6 +73,7 @@ class ILSceneDataset(Dataset):
         self.dt = float(dt_seconds)
         self.early_signal_distance = float(early_signal_distance)
         self.turn_inradius_threshold = float(turn_inradius_threshold)
+        self.intent_data_dir = str(intent_data_dir)
 
         self.scene_path_xy: List[np.ndarray] = []
         self.scene_yaws: List[np.ndarray] = []
@@ -146,6 +148,9 @@ class ILSceneDataset(Dataset):
             ego_yaw=ego_yaw,
             early_signal_distance=self.early_signal_distance,
             turn_inradius_threshold=self.turn_inradius_threshold,
+            scene_name=scene.scene_name,
+            timestamp_us=ts,
+            intent_data_dir=self.intent_data_dir,
         )
         linear_velocity, linear_acceleration, angular_velocity = self._kinematics(scene_idx, frame_idx)
         return {

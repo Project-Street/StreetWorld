@@ -573,7 +573,8 @@ def main():
                 f"lag_dist={metrics_so_far.get('avg_lag_distance', 0.0):.3f}, "
                 f"lag_deficit={metrics_so_far.get('avg_lag_deficit', 0.0):.3f}, "
                 f"pos_dev={metrics_so_far.get('avg_position_deviation', 0.0):.3f}, "
-                f"heading_err={metrics_so_far.get('avg_heading_error', 0.0):.3f}"
+                f"heading_err={metrics_so_far.get('avg_heading_error', 0.0):.3f}, "
+                f"smoothness={metrics_so_far.get('avg_smoothness', 0.0):.3f}"
             )
             # if episode_index >= 3:
             #     break
@@ -587,7 +588,8 @@ def main():
             f"lag_dist={final_metrics.get('avg_lag_distance', 0.0):.3f}, "
             f"lag_deficit={final_metrics.get('avg_lag_deficit', 0.0):.3f}, "
             f"pos_dev={final_metrics.get('avg_position_deviation', 0.0):.3f}, "
-            f"heading_err={final_metrics.get('avg_heading_error', 0.0):.3f}"
+            f"heading_err={final_metrics.get('avg_heading_error', 0.0):.3f}, "
+            f"smoothness={final_metrics.get('avg_smoothness', 0.0):.3f}"
         )
         gaussian_recorder.save_video()
         

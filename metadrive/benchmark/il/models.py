@@ -203,19 +203,22 @@ def predict_vad_traj(
     raw_data: Dict[str, object],
     return_output: bool = False,
 ):
-    vad_output = _run_vad_inference(model, raw_data)
+    model = unwrap_model(model)
+    img = raw_data["img"]
+    img_metas = raw_data["img_metas"][0]
 
-    pts_bbox = vad_output.get("pts_bbox")
-    out_dict: Dict[str, Any] = pts_bbox if isinstance(pts_bbox, dict) else vad_output
-    ego_fut_preds = out_dict.get("ego_fut_preds", None)
-    if ego_fut_preds is None:
-        raise KeyError("VAD output missing ego_fut_preds for planning trajectory decode.")
+    feats = model.extract_feat(img=img, img_metas=img_metas)
+    outs = model.pts_bbox_head(
+        feats,
+        img_metas,
+        prev_bev=None,
+        ego_his_trajs=None,
+        ego_lcf_feat=None,
+    )
 
-    cmd_device = raw_data["ego_fut_cmd"].device
-    if not torch.is_tensor(ego_fut_preds):
-        ego_fut_preds = torch.as_tensor(ego_fut_preds, device=cmd_device, dtype=torch.float32)
-    else:
-        ego_fut_preds = ego_fut_preds.to(device=cmd_device, dtype=torch.float32)
+    ego_fut_preds = outs["ego_fut_preds"]
+    if ego_fut_preds.ndim == 4:
+        ego_fut_preds = ego_fut_preds[0]
     if ego_fut_preds.ndim == 4:
         ego_fut_preds = ego_fut_preds[0]
     if ego_fut_preds.ndim != 3:
@@ -226,6 +229,9 @@ def predict_vad_traj(
     traj = ego_fut_preds[cmd_idx].cumsum(dim=-2)
     if not return_output:
         return traj, cmd_vec
+
+    with torch.no_grad():
+        vad_output = _run_vad_inference(model, raw_data)
 
     if isinstance(vad_output.get("pts_bbox"), dict):
         vad_output["pts_bbox"].setdefault("ego_fut_cmd", cmd_vec)

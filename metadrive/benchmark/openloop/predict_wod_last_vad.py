@@ -293,6 +293,101 @@ def load_scene(scene_dir: Path, camera_source: str, nuscenes_path: Path):
     return obs_img, cam_params, metadata
 
 
+def _series_value(values, idx: int, default: float = 0.0) -> float:
+    if not values:
+        return float(default)
+    idx = max(0, min(idx, len(values) - 1))
+    return float(values[idx])
+
+
+def build_temporal_obs_infos(metadata: dict, cam_params: dict, scene_token: str, temporal_frames: int) -> list[dict]:
+    past_states = metadata.get("past_states", {}) or {}
+    pos_x = list(past_states.get("pos_x") or [])
+    pos_y = list(past_states.get("pos_y") or [])
+    vel_x = list(past_states.get("vel_x") or [])
+    vel_y = list(past_states.get("vel_y") or [])
+    accel_x = list(past_states.get("accel_x") or [])
+    accel_y = list(past_states.get("accel_y") or [])
+
+    intent = metadata.get("intent", {}) or {}
+    intent_id = int(intent.get("id", 0))
+    command = INTENT_TO_COMMAND.get(intent_id, 2)
+
+    n = max(len(pos_x), len(pos_y), len(vel_x), len(vel_y), len(accel_x), len(accel_y), 1)
+    first = max(0, n - temporal_frames)
+    indices = list(range(first, n))
+    while len(indices) < temporal_frames:
+        indices.insert(0, indices[0])
+
+    infos: list[dict] = []
+    dt = 0.25
+    for i, idx in enumerate(indices):
+        prev_idx = indices[max(i - 1, 0)]
+        next_idx = indices[min(i + 1, len(indices) - 1)]
+        dx = _series_value(pos_x, next_idx) - _series_value(pos_x, prev_idx)
+        dy = _series_value(pos_y, next_idx) - _series_value(pos_y, prev_idx)
+        yaw = float(np.arctan2(dy, dx)) if (abs(dx) + abs(dy)) > 1e-6 else 0.0
+
+        infos.append(
+            {
+                "ego_rot": np.array([0.0, 0.0, yaw], dtype=np.float32),
+                "ego_pos": np.array([_series_value(pos_x, idx), _series_value(pos_y, idx), 0.0], dtype=np.float32),
+                "linear_velocity": np.array([_series_value(vel_x, idx), _series_value(vel_y, idx), 0.0], dtype=np.float32),
+                "linear_acceleration": np.array([_series_value(accel_x, idx), _series_value(accel_y, idx), 0.0], dtype=np.float32),
+                "angular_velocity": np.zeros(3, dtype=np.float32),
+                "command": command,
+                "relative_timestamp": float((idx - (n - 1)) * dt),
+                "scene_token": scene_token,
+                "cam_params": cam_params,
+            }
+        )
+    return infos
+
+
+def load_scene_temporal(
+    scene_dir: Path,
+    camera_source: str,
+    nuscenes_path: Path,
+    temporal_frames: int,
+):
+    obs_img_last, cam_params, metadata = load_scene(scene_dir, camera_source, nuscenes_path)
+    temporal_frames = max(1, int(temporal_frames))
+
+    if camera_source != "nuscenes":
+        return [obs_img_last for _ in range(temporal_frames)], cam_params, metadata
+
+    camera_map = CAMERA_MAP_NUSEC
+    nuscenes_root = scene_dir / "nuscenes"
+    frame_dirs = []
+    if nuscenes_root.exists():
+        frame_dirs = sorted([p for p in nuscenes_root.iterdir() if p.is_dir() and p.name.startswith("frame_")])
+
+    if not frame_dirs:
+        return [obs_img_last for _ in range(temporal_frames)], cam_params, metadata
+
+    if len(frame_dirs) >= temporal_frames:
+        frame_dirs = frame_dirs[-temporal_frames:]
+    else:
+        frame_dirs = [frame_dirs[0]] * (temporal_frames - len(frame_dirs)) + frame_dirs
+
+    obs_frames = []
+    for frame_dir in frame_dirs:
+        obs_img = {}
+        for cam_name, cam_id in camera_map:
+            jpg_path = frame_dir / f"{cam_id:04d}.jpg"
+            png_path = frame_dir / f"{cam_id:04d}.png"
+            if jpg_path.exists():
+                image_path = jpg_path
+            elif png_path.exists():
+                image_path = png_path
+            else:
+                raise FileNotFoundError(f"Missing rendered temporal image in {frame_dir} for cam {cam_id:04d}")
+            obs_img[cam_name] = np.array(Image.open(image_path).convert("RGB"))
+        obs_frames.append(obs_img)
+
+    return obs_frames, cam_params, metadata
+
+
 def build_obs_info(metadata: dict, cam_params: dict, frame_name: str) -> dict:
     past_states = metadata.get("past_states", {}) or {}
     vel_x = _last_or_zero(past_states.get("vel_x"))
@@ -416,6 +511,12 @@ def main():
         action="store_true",
         help="Inject LoRA parametrizations into VAD decoders",
     )
+    parser.add_argument(
+        "--temporal_frames",
+        type=int,
+        default=3,
+        help="Number of sequential frames for warm-up (final frame is used for output)",
+    )
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(message)s")
@@ -446,27 +547,41 @@ def main():
     img_norm_cfg = get_vad_img_norm_cfg()
     predictions = []
     for scene_dir in tqdm(scene_dirs):
-        obs_img, cam_params, metadata = load_scene(
+        obs_frames, cam_params, metadata = load_scene_temporal(
             scene_dir,
             args.camera_source,
             Path(args.nuscenes_camera_path),
+            temporal_frames=args.temporal_frames,
         )
         scene_id = metadata.get("scene_id") or scene_dir.name
         frame_id = int(metadata.get("frame_id", 0))
         frame_name = build_frame_name(scene_id, frame_id)
+        scene_token = str(scene_id)
 
-        obs_info = build_obs_info(metadata, cam_params, frame_name)
-        raw_data = parse_vad_obs(obs_img, obs_info, set(), img_norm_cfg)
-        raw_data["img"] = [raw_data["img"]]
+        obs_infos = build_temporal_obs_infos(
+            metadata,
+            cam_params,
+            scene_token=scene_token,
+            temporal_frames=len(obs_frames),
+        )
 
+        last_result = None
+        last_raw_data = None
         with torch.no_grad():
-            result = model(return_loss=False, rescale=True, **raw_data)
+            for obs_img, obs_info in zip(obs_frames, obs_infos):
+                raw_data = parse_vad_obs(obs_img, obs_info, set(), img_norm_cfg)
+                raw_data["img"] = [raw_data["img"]]
+                last_raw_data = raw_data
+                last_result = model(return_loss=False, rescale=True, return_bbox=True, **raw_data)
 
-        pts_bbox = result[0]["pts_bbox"]
+        if last_result is None or last_raw_data is None:
+            raise RuntimeError(f"No inference result produced for scene: {scene_id}")
+
+        pts_bbox = last_result[0]["pts_bbox"]
         plan_traj = decode_ego_future_traj(
             pts_bbox["ego_fut_preds"],
-            ego_fut_cmd=pts_bbox.get("ego_fut_cmd", raw_data.get("ego_fut_cmd")),
-            fallback_cmd=raw_data.get("command"),
+            ego_fut_cmd=pts_bbox.get("ego_fut_cmd", last_raw_data.get("ego_fut_cmd")),
+            fallback_cmd=last_raw_data.get("command"),
             cumulative=True,
         )
 

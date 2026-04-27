@@ -16,6 +16,22 @@ class GaussianFrameRecorder:
         self.fps = fps
         self.frames = []
         self.scene_names = []
+        self.driving_commands = []
+
+    @staticmethod
+    def _command_to_text(command: Any) -> Optional[str]:
+        if command is None:
+            return None
+        try:
+            command_id = int(command)
+        except (TypeError, ValueError):
+            return None
+        mapping = {
+            0: "turn right",
+            1: "turn left",
+            2: "go straight",
+        }
+        return mapping.get(command_id, f"unknown({command_id})")
 
     def update_frame(
         self,
@@ -66,6 +82,8 @@ class GaussianFrameRecorder:
 
         self.frames.append(frame_data)
         self.scene_names.append(scene_name)
+        command_text = self._command_to_text(obs_info.get("command", kwargs.get("command")))
+        self.driving_commands.append(command_text)
         self._on_frame_recorded(
             observation=observation,
             plan_traj=plan_traj,
@@ -173,13 +191,22 @@ class GaussianFrameRecorder:
         scene_name = None
         if frame_idx < len(self.scene_names):
             scene_name = self.scene_names[frame_idx]
-        if not scene_name:
+        command_text = None
+        if frame_idx < len(self.driving_commands):
+            command_text = self.driving_commands[frame_idx]
+
+        if not scene_name and not command_text:
             return
 
         font = cv2.FONT_HERSHEY_SIMPLEX
-        font_scale = 2.0
+        font_scale = 2.3
         thickness = 2
-        text = str(scene_name)
+        if scene_name and command_text:
+            text = f"{scene_name} | cmd: {command_text}"
+        elif scene_name:
+            text = str(scene_name)
+        else:
+            text = f"cmd: {command_text}"
         text_size = cv2.getTextSize(text, font, font_scale, thickness)[0]
         pad_x = 12
         pad_y = 10

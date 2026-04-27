@@ -71,7 +71,7 @@ SCENARIO_ENV_CONFIG = dict(
     reverse_penalty_weight=1.0,
     lag_warn_distance=6.0,
     lag_warn_penalty=0.1,
-    lag_fail_distance=15.0,
+    lag_fail_distance=25.0,
     progress_deviation_weight=0.1,
     progress_match_tolerance=0.2,
     progress_match_decay=2.0,
@@ -236,6 +236,9 @@ class ScenarioEnv(BaseEnv):
         self._last_expert_progress_idx = None
         self._last_signed_lateral_error = None
         self._last_signed_heading_error = None
+        self._position_history = []
+        self._jerk_sum = 0.0
+        self._jerk_count = 0
         self._stall_counter = 0
         self._stall_truncate_flag = False
         self._episode_reward_sums = dict(
@@ -693,6 +696,28 @@ class ScenarioEnv(BaseEnv):
 
         ego_speed = float(vehicle.speed) if vehicle is not None and hasattr(vehicle, "speed") else 0.0
         diag_info["speed"] = ego_speed
+        comfort_reward = 0.0
+        jerk = 0.0
+        step_dt = float(getattr(self.step_manager, "step_size", self.config.get("physics_world_step_size", 1))) * 1e-6
+        if ego_xy is not None:
+            self._position_history.append(np.asarray(ego_xy, dtype=np.float32))
+            if len(self._position_history) > 4:
+                self._position_history.pop(0)
+            if len(self._position_history) == 4:
+                p0, p1, p2, p3 = self._position_history
+                jerk_vec = (p3 - 3.0 * p2 + 3.0 * p1 - p0) / max(step_dt ** 3, 1e-6)
+                jerk = float(np.linalg.norm(jerk_vec))
+                self._jerk_sum += jerk
+                self._jerk_count += 1
+        else:
+            self._position_history = []
+
+        if self._jerk_count > 0:
+            comfort_reward = -(self._jerk_sum / self._jerk_count)
+
+        smoothness = comfort_reward
+        step_info["jerk"] = float(jerk)
+        step_info["avg_jerk"] = float(-comfort_reward)
 
         if valid_path and valid_ego and progress_val is not None:
             if self._last_progress_value is None:
@@ -741,6 +766,7 @@ class ScenarioEnv(BaseEnv):
             "ttc": 0.0,
             "position": position_reward,
             "heading": heading_reward,
+            "comfort_reward": float(comfort_reward),
             "collision": collision_reward + out_of_road_reward,
             "success_bonus": success_bonus,
         }
@@ -760,6 +786,9 @@ class ScenarioEnv(BaseEnv):
         diag_info["expert_progress_time_val"] = expert_progress_time_val if expert_progress_time_val is not None else 0.0
         diag_info["ttc"] = 0.0
         diag_info["stalled"] = 0
+        diag_info["smoothness"] = float(smoothness)
+        diag_info["jerk"] = float(jerk)
+        diag_info["avg_jerk"] = float(-comfort_reward)
 
         if progress_weight > 1e-6 and progress_delta > 0:
             progress_ratio = progress_reward / (progress_weight * progress_delta + 1e-8)
@@ -774,6 +803,7 @@ class ScenarioEnv(BaseEnv):
         step_info["collision_count"] = int(self._episode_counters.get("collision", False))
         step_info["ttc"] = 0.0
         step_info["stalled"] = 0
+        step_info["smoothness"] = float(smoothness)
         diag_info["progress_ratio"] = float(progress_ratio)
 
         self._episode_reward_sums["progress"] += float(progress_reward)

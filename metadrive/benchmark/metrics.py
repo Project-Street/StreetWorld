@@ -91,6 +91,8 @@ class MetricsRecorder:
             self._episode_heading_count += 1
 
         position_deviation = self._safe_float(step_info.get("position_deviation"))
+        if position_deviation > 5.0:  # Cap extreme deviations to avoid skewing the metric
+            position_deviation = 5.0
         if position_deviation is not None:
             self._episode_position_sum += position_deviation
             self._episode_position_count += 1
@@ -115,16 +117,23 @@ class MetricsRecorder:
         if lag_warn is not None and lag_warn > 0.0:
             self._episode_lag_warn_steps += 1
 
-        ego_speed = self._safe_float(step_info.get("ego_speed"))
-        if ego_speed is not None:
-            self._episode_speed_history.append(ego_speed)
-            if len(self._episode_speed_history) > 3:
-                self._episode_speed_history.pop(0)
-            if len(self._episode_speed_history) == 3:
-                v0, v1, v2 = self._episode_speed_history
-                second_derivative = (v2 - 2.0 * v1 + v0) / (self._DT ** 2)
-                self._episode_smoothness_sum += abs(second_derivative)
-                self._episode_smoothness_count += 1
+        smoothness = self._safe_float(step_info.get("smoothness"))
+        if smoothness is None:
+            smoothness = self._safe_float(diag.get("smoothness"))
+        if smoothness is not None:
+            self._episode_smoothness_sum += smoothness
+            self._episode_smoothness_count += 1
+        else:
+            ego_speed = self._safe_float(step_info.get("ego_speed"))
+            if ego_speed is not None:
+                self._episode_speed_history.append(ego_speed)
+                if len(self._episode_speed_history) > 3:
+                    self._episode_speed_history.pop(0)
+                if len(self._episode_speed_history) == 3:
+                    v0, v1, v2 = self._episode_speed_history
+                    second_derivative = (v2 - 2.0 * v1 + v0) / (self._DT ** 2)
+                    self._episode_smoothness_sum += abs(second_derivative)
+                    self._episode_smoothness_count += 1
 
         collision_flag = step_info.get("collision")
         if collision_flag:
@@ -200,5 +209,5 @@ class MetricsRecorder:
             "avg_lag_distance": self._mean(self._lag_distance_episode_means),
             "avg_lag_deficit": self._mean(self._lag_deficit_episode_means),
             "lag_warn_ratio": self._mean(self._lag_warn_ratio_episode_values),
-            "smoothness": self._mean(self._smoothness_episode_means),
+            "avg_smoothness": self._mean(self._smoothness_episode_means),
         }

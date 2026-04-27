@@ -36,6 +36,7 @@ from rl_framework.uniad.traj_parser import traj2control
 from navsim.agents.diffusiondrive.transfuser_agent import TransfuserAgent
 from navsim.agents.diffusiondrive.transfuser_config import TransfuserConfig
 from navsim.agents.diffusiondrive.transfuser_features import TransfuserFeatureBuilder
+from navsim.agents.diffusiondrive.transfuser_callback import semantic_map_to_rgb
 from navsim.common.dataclasses import AgentInput, Camera, Cameras, EgoStatus, Lidar
 
 
@@ -163,6 +164,27 @@ def _save_debug_features(features: Dict[str, "torch.Tensor"], debug_dir: str, st
                 cv2.imwrite(os.path.join(debug_dir, f"lidar_feature_{step_idx:06d}.png"), lidar_img)
 
 
+def _save_debug_predictions(
+    predictions: Dict[str, "torch.Tensor"],
+    config: TransfuserConfig,
+    debug_dir: str,
+    step_idx: int,
+) -> None:
+    if not debug_dir:
+        return
+    os.makedirs(debug_dir, exist_ok=True)
+
+    bev_semantic = predictions.get("bev_semantic_map")
+    if bev_semantic is not None:
+        bev_logits = bev_semantic[0].detach().cpu().numpy()
+        np.save(os.path.join(debug_dir, f"bev_semantic_logits_{step_idx:06d}.npy"), bev_logits)
+
+        bev_idx = bev_logits.argmax(axis=0).astype(np.int64)
+        bev_rgb = semantic_map_to_rgb(bev_idx, config)
+        bev_bgr = cv2.cvtColor(bev_rgb, cv2.COLOR_RGB2BGR)
+        cv2.imwrite(os.path.join(debug_dir, f"bev_semantic_pred_{step_idx:06d}.png"), bev_bgr)
+
+
 class DiffusionDriveClient(GrpcClient):
     def __init__(
         self,
@@ -186,11 +208,13 @@ class DiffusionDriveClient(GrpcClient):
         self.depth_max_m = float(depth_max_m)
 
         config = TransfuserConfig()
+        config.lidar_split_height = -1.0
         if backbone_path:
             config.bkb_path = backbone_path
         if plan_anchor_path:
             config.plan_anchor_path = plan_anchor_path
-
+        self.config = config
+        print(vars(config))
         self.agent = TransfuserAgent(config=config, lr=1e-4, checkpoint_path=checkpoint)
         self.agent.to(self.device)
         self.agent.eval()
@@ -203,6 +227,7 @@ class DiffusionDriveClient(GrpcClient):
             if cam_name not in obs_img:
                 return Camera()
             img = _latest_frame(obs_img[cam_name])
+            img = cv2.resize(img, (1600, 900), interpolation=cv2.INTER_LINEAR)
             if role == "l0":
                 img = _pad_image(img, right=416)
             elif role == "r0":
@@ -287,6 +312,10 @@ class DiffusionDriveClient(GrpcClient):
 
         with torch.no_grad():
             predictions = self.agent.forward(features)
+
+        if debug_dir and step_idx >= 0:
+            _save_debug_predictions(predictions, self.config, debug_dir, step_idx)
+
         traj = predictions["trajectory"][0].detach().cpu().numpy()
         return traj
 
@@ -299,7 +328,7 @@ def main():
     parser.add_argument("--steps", type=int, default=1000)
     parser.add_argument("--checkpoint", type=str, default=str(Path(__file__).resolve().parents[2] / "DiffusionDrive/diffusiondrive_navsim_88p1_PDMS"))
     parser.add_argument("--device", type=str, default="cuda:0")
-    parser.add_argument("--cameras", type=str, default="camera_2,camera_0,camera_1")
+    parser.add_argument("--cameras", type=str, default="camera_2_tfuse,camera_0_tfuse,camera_1_tfuse")
     parser.add_argument("--depth-cameras", type=str, default="camera_2,camera_0,camera_1,camera_3,camera_4,camera_5")
     parser.add_argument("--depth-stride", type=int, default=16)
     parser.add_argument("--depth-max-m", type=float, default=1000.0)
@@ -308,7 +337,7 @@ def main():
     parser.add_argument("--debug-dir", type=str, default="")
     parser.add_argument("--gaussian-video", type=str, default="./driving_diffusiondrive.mp4")
     parser.add_argument("--horizon", type=float, default=4.0)
-    parser.add_argument("--control-dt", type=float, default=0.1)
+    parser.add_argument("--control-dt", type=float, default=0.5)
     args = parser.parse_args()
 
     cameras = [c.strip() for c in args.cameras.split(",") if c.strip()]
@@ -331,7 +360,7 @@ def main():
 
     gaussian_recorder = GaussianFrameRecorder(output_path=args.gaussian_video, fps=10)
     metrics_recorder = MetricsRecorder()
-
+    collision_scenes = set()
     try:
         episode_index = 0
         total_reward = 0.0
@@ -350,7 +379,16 @@ def main():
             episode_index += 1
             obs_img, obs_info, _navigation, _surrounding = unpack_ad_observation(obs)
             print(f"Environment ready. Cameras: {list(obs_img.keys())}")
-
+            w2e = np.linalg.inv(np.array(obs_info["cam_params"]['camera_0']['c2w']) @ np.array(obs_info["cam_params"]['camera_0']['ego2camera']))
+            expert_traj_world = np.array(_navigation['waypoint'])[0:400:50]
+            expert_traj = np.zeros((expert_traj_world.shape[0], 4))
+            expert_traj[:, :2] = expert_traj_world
+            expert_traj[:, 3] = 1.0
+            expert_traj = (w2e @ expert_traj.T).T[:, :2]
+            expert_traj = expert_traj - expert_traj[0, :]
+            expert_traj_norm = np.zeros_like(expert_traj)
+            expert_traj_norm[:, 0] = -expert_traj[:, 1]
+            expert_traj_norm[:, 1] = expert_traj[:, 0]
             plan_traj = client.run_diffusiondrive_inference(
                 obs_img,
                 obs_info,
@@ -370,7 +408,21 @@ def main():
                 obs, reward, terminated, truncated, info = client.step(action)
                 last_info = info
                 obs_img, obs_info, _navigation, _surrounding = unpack_ad_observation(obs)
-
+                w2e = np.linalg.inv(np.array(obs_info["cam_params"]['camera_0']['c2w']) @ np.array(obs_info["cam_params"]['camera_0']['ego2camera']))
+                expert_traj_world = np.array(_navigation['waypoint'])[step*10:step*10+450:50]
+                print(f"Expert world: {expert_traj_world}")
+                if expert_traj_world.shape[0] <= 1:
+                    break
+                expert_traj = np.zeros((expert_traj_world.shape[0], 4))
+                expert_traj[:, :2] = expert_traj_world
+                expert_traj[:, 3] = 1.0
+                expert_traj = (w2e @ expert_traj.T).T[:, :2]
+                expert_traj = (expert_traj - expert_traj[0, :])[1:, :]
+                expert_traj_norm = np.zeros_like(expert_traj)
+                expert_traj_norm[:, 0] = -expert_traj[:, 1]
+                expert_traj_norm[:, 1] = expert_traj[:, 0]
+                print(f"Expert lidar: {expert_traj_norm}")
+                # print(np.array(_navigation['waypoint']).shape, _navigation['waypoint'])
                 print_step_info(info)
                 reward_sum += reward
                 total_reward += reward
@@ -383,7 +435,8 @@ def main():
                     step_idx=step,
                 )
                 plan_traj_lidar = _normalize_plan_traj(plan_traj)
-                # gaussian_recorder.update_frame((obs_img, obs_info), plan_traj_lidar)
+                print(f"Planned: {plan_traj_lidar}")
+                gaussian_recorder.update_frame((obs_img, obs_info), plan_traj_lidar, info["scene_name"])
                 acc, steer = traj2control(plan_traj_lidar, obs_info, horizon=args.horizon, control_dt=args.control_dt)
                 action = [steer, acc]
 
@@ -393,7 +446,9 @@ def main():
                 if terminated or truncated:
                     print(f"Episode finished at step {step}")
                     break
-
+            if last_info['collision']:
+                collision_scenes.add(last_info['scene_name'])
+                print(f"Collision detected in scene: {last_info['scene_name']}")
             metrics_recorder.end_episode(last_info)
             print(f"Episode {episode_index} reward: {reward_sum:.2f}")
             metrics_so_far = metrics_recorder.summary()
@@ -405,10 +460,11 @@ def main():
                 f"lag_dist={metrics_so_far.get('avg_lag_distance', 0.0):.3f}, "
                 f"lag_deficit={metrics_so_far.get('avg_lag_deficit', 0.0):.3f}, "
                 f"pos_dev={metrics_so_far.get('avg_position_deviation', 0.0):.3f}, "
-                f"heading_err={metrics_so_far.get('avg_heading_error', 0.0):.3f}"
+                f"heading_err={metrics_so_far.get('avg_heading_error', 0.0):.3f}, "
+                f"smoothness={metrics_so_far.get('avg_smoothness', 0.0):.3f}"
             )
-            if episode_index >= 20:
-                break
+            # if episode_index >= 20:
+            #     break
             # break
         print(f"Total reward: {total_reward:.2f}")
         final_metrics = metrics_recorder.summary()
@@ -420,7 +476,8 @@ def main():
             f"lag_dist={final_metrics.get('avg_lag_distance', 0.0):.3f}, "
             f"lag_deficit={final_metrics.get('avg_lag_deficit', 0.0):.3f}, "
             f"pos_dev={final_metrics.get('avg_position_deviation', 0.0):.3f}, "
-            f"heading_err={final_metrics.get('avg_heading_error', 0.0):.3f}"
+            f"heading_err={final_metrics.get('avg_heading_error', 0.0):.3f}, "
+            f"smoothness={final_metrics.get('avg_smoothness', 0.0):.3f}"
         )
         print(f"Collision scenes: {collision_scenes}")
         gaussian_recorder.save_video()

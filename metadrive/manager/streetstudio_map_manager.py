@@ -6,8 +6,6 @@ as StreetStudio loads all data (including map) from transforms.json.
 """
 
 from metadrive.manager.scenario_map_manager import ScenarioMapManager
-from metadrive.component.terrain.ground import GroundPlane
-from metadrive.component.terrain.mesh_terrain import MeshTerrain
 
 
 class StreetStudioMapManager(ScenarioMapManager):
@@ -36,7 +34,7 @@ class StreetStudioMapManager(ScenarioMapManager):
         we override this to skip the loader call.
 
         Note: scene_mesh_path (ply_file_path) contains point cloud data and is not used.
-        We always use an infinite ground plane for StreetStudio scenarios.
+        Ground representation is chosen from plane_params.
         """
         self.config = config
         self.current_sdc_route = None
@@ -45,16 +43,8 @@ class StreetStudioMapManager(ScenarioMapManager):
         # Skip vec_map loading (not used in StreetStudio)
         vec_map = None
 
-        # Always use infinite ground plane (ignore scene_mesh_path)
-        plane_params = kwargs['ground_plane']
-        normal = plane_params.get('normal')
-        constant = plane_params.get('constant')
-        self.spawn_object(
-            GroundPlane,
-            physics_world=physics_world,
-            direction=normal,
-            constant=constant,
-            random_seed=self.random_seed
-        )
+        # scene_mesh_path is ignored for StreetStudio. Terrain type is chosen from plane_params.
+        plane_params = kwargs.get('ground_plane', {})
+        self._spawn_ground_from_plane_params(physics_world=physics_world, plane_params=plane_params)
 
         return vec_map
