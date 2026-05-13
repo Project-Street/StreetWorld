@@ -56,6 +56,7 @@ sim_state = SIM_STATE.IDLE
 session_id = ""
 scene_name = ""
 actor_id = "simulator"
+RECV_START_STATE = "RECV_START"
 
 
 def setup_launcher_logging(level_name: str, enable_stderr: bool) -> str:
@@ -82,6 +83,7 @@ def setup_launcher_logging(level_name: str, enable_stderr: bool) -> str:
 
 
 def run_launcher(args, top_bar_state: LauncherTopBarState):
+    model = None
     env = None
     middleware = None
 
@@ -137,8 +139,23 @@ def run_launcher(args, top_bar_state: LauncherTopBarState):
     finally:
         if env is not None:
             env.close()
+        elif model is not None:
+            model.close()
         if middleware is not None:
             middleware.close()
+
+
+def start_simulation(middleware, env, top_bar_state: LauncherTopBarState):
+    global sim_state
+
+    sim_state = SIM_STATE.STARTED
+    obs, info = env.reset(scene_name=scene_name)
+    logger.info(f"Start simulation for session_id={session_id}, scene_name={scene_name}")
+    top_bar_state.mark_simulation_started()
+    update_top_bar_runtime(top_bar_state, info, None, obs, sim_state.name)
+    middleware.configure_rlsl_map(env.config["scene_config_directory"], scene_name)
+    send_current_step_data(middleware, env, obs, info, session_id)
+    env.agent_managers["actor"].set_state(NOTIFY_TO_STATE[NT_START_TEST])
 
 
 def process_notify(middleware, env, none_sleep_s, top_bar_state: LauncherTopBarState):
@@ -146,7 +163,7 @@ def process_notify(middleware, env, none_sleep_s, top_bar_state: LauncherTopBarS
     Process Notify messages from OnSite server.
 
     OnSite sends Notify messages to control agent lifecycle and session state.
-    This function collects all pending Notify messages and updates agent states accordingly.
+    This function processes at most one pending Notify message per loop.
 
     Args:
         middleware: OnSiteMiddleware instance
@@ -154,46 +171,39 @@ def process_notify(middleware, env, none_sleep_s, top_bar_state: LauncherTopBarS
     """
     global sim_state, session_id, scene_name
 
-    # Collect all pending Notify messages
-    notifies = middleware.recv_all_notifies()
-    if not notifies and sim_state != SIM_STATE.STARTED:
+    notify = middleware.recv_notify()
+    if notify is None and sim_state != SIM_STATE.STARTED:
         time.sleep(none_sleep_s)
+        return
 
-    for notify in notifies:
-        role_id = notify.role_id
-        notify_type = notify.type
+    if notify is None:
+        return
 
-        mapped_state = NOTIFY_TO_STATE.get(notify_type)
+    role_id = notify.role_id
+    notify_type = notify.type
 
-        if mapped_state is None:
-            continue
+    mapped_state = NOTIFY_TO_STATE.get(notify_type)
 
-        # Handle session-level notifications
-        if notify_type in [NT_ABORT_TEST, NT_FINISH_TEST]:
-            if sim_state == SIM_STATE.STARTED and scene_name:
-                logger.info(f"Ending simulation for scene {scene_name}.")
-                if env.gui is not None:
-                    env.gui.flush_episode(scene_name)
-            top_bar_state.mark_finished("FINISHED" if notify_type == NT_FINISH_TEST else "ABORTED")
-            sim_state = SIM_STATE.IDLE
-            session_id = ""
-            scene_name = ""
-            continue
-        elif notify_type == NT_START_TEST:
-            if not scene_name:
-                logger.warning(f"Simulator: Received {notify_type} without valid session. Ignoring.")
-                continue
-            sim_state = SIM_STATE.STARTED
-            obs, info = env.reset(scene_name=scene_name)
-            logger.info(f"Start simulation for session_id={session_id}, scene_name={scene_name}")
-            top_bar_state.mark_simulation_started()
-            update_top_bar_runtime(top_bar_state, info, None, obs, sim_state.name)
-            middleware.configure_rlsl_map(env.config["scene_config_directory"], scene_name)
-            send_current_step_data(middleware, env, obs, info, session_id)
+    if mapped_state is None:
+        return
 
-        # Actor state is controlled by notify; ignore notifies for other roles.
-        if notify_type == NT_START_TEST:
-            env.agent_managers["actor"].set_state(mapped_state)
+    # Handle session-level notifications
+    if notify_type in [NT_ABORT_TEST, NT_FINISH_TEST]:
+        if sim_state == SIM_STATE.STARTED and scene_name:
+            logger.info(f"Ending simulation for scene {scene_name}.")
+            if env.gui is not None:
+                env.gui.flush_episode(scene_name)
+        top_bar_state.mark_finished("FINISHED" if notify_type == NT_FINISH_TEST else "ABORTED")
+        sim_state = SIM_STATE.IDLE
+        session_id = ""
+        scene_name = ""
+        return
+    elif notify_type == NT_START_TEST:
+        if not scene_name:
+            logger.warning(f"Simulator: Received {notify_type} before ActorPrepare. Waiting for ActorPrepare.")
+            sim_state = RECV_START_STATE
+            return
+        start_simulation(middleware, env, top_bar_state)
 
 
 def send_current_step_data(middleware: OnSiteSwitch, env: OnSiteScenarioEnv, obs, info, session_id: str):
@@ -261,21 +271,29 @@ def main_loop(
         # Phase 1: Process Notify messages (at beginning of each iteration)
         process_notify(middleware, env, none_sleep_s, top_bar_state)
 
-        # Phase 2: Wait for ActorPrepare, then acknowledge it exactly once.
-        if sim_state == SIM_STATE.IDLE:
+        # Phase 2: Wait for ActorPrepare
+        if sim_state in (SIM_STATE.IDLE, RECV_START_STATE):
+            start_after_prepare = sim_state == RECV_START_STATE
             result = middleware.recv_actor_prepare()
             if result is not None:
                 session_id, _ , _, scene_name = result
-                middleware.send_actor_prepare_result(session_id, actor_id, result=True)
-                middleware.send_sub_role(session_id)
                 sim_state = SIM_STATE.PREPARED
                 top_bar_state.mark_actor_prepared(session_id, scene_name)
+                if start_after_prepare:
+                    start_simulation(middleware, env, top_bar_state)
+                else:
+                    time.sleep(0.5)
+
+        # Phase 3: Send ActorPrepareResult and SubRole
+        if sim_state == SIM_STATE.PREPARED:
+            middleware.send_actor_prepare_result(session_id, actor_id, result=True)
+            middleware.send_sub_role(session_id)
             time.sleep(0.5)
 
         if sim_state != SIM_STATE.STARTED:
             continue
 
-        # Phase 3: Main simulation loop
+        # Phase 4: Main simulation loop
         # Block until a control message arrives, then execute exactly one step.
         vehicle_control = wait_vehicle_control(middleware, env, none_sleep_s, top_bar_state)
         if vehicle_control is None:

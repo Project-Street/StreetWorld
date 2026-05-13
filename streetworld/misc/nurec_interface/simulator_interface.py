@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import json
+import ctypes
 import logging
 import os
 import re
+import signal
 import socket
 import subprocess
 import time
@@ -23,6 +25,18 @@ from streetworld.misc.nurec_interface.nurec_parser import (
 from streetworld.utils.logger import get_log_timestamp
 
 logger = logging.getLogger(__name__)
+
+
+def _bind_child_to_parent(parent_pid: int):
+    def _preexec() -> None:
+        libc = ctypes.CDLL("libc.so.6", use_errno=True)
+        if libc.prctl(1, int(signal.SIGTERM)) != 0:
+            errno = ctypes.get_errno()
+            raise OSError(errno, os.strerror(errno))
+        if os.getppid() != parent_pid:
+            os.kill(os.getpid(), signal.SIGTERM)
+
+    return _preexec
 
 
 class SimulatorInterface:
@@ -46,6 +60,7 @@ class SimulatorInterface:
         self._nurec_data_directory = Path(nurec_data_directory)
         self._ui_update = ui_update
         self._local_server_proc: Optional[subprocess.Popen] = None
+        self._local_server_pgid: Optional[int] = None
         self._simple_nurec_log_fp = None
 
         camera_model_type = str(camera_model_type).lower()
@@ -97,6 +112,7 @@ class SimulatorInterface:
         _simple_nurec_log_path = log_dir / f"simple-nurec_{ts}.log"
         self._simple_nurec_log_fp = _simple_nurec_log_path.open("a", encoding="utf-8", buffering=1)
 
+        parent_pid = os.getpid()
         self._local_server_proc = subprocess.Popen(
             [
                 "simple-nurec",
@@ -108,7 +124,10 @@ class SimulatorInterface:
             ],
             stdout=self._simple_nurec_log_fp,
             stderr=subprocess.STDOUT,
+            start_new_session=True,
+            preexec_fn=_bind_child_to_parent(parent_pid),
         )
+        self._local_server_pgid = os.getpgid(self._local_server_proc.pid)
         logger.info(
             "Started simple-nurec server pid=%s, log=%s",
             self._local_server_proc.pid,
@@ -124,6 +143,7 @@ class SimulatorInterface:
                     f"simple-nurec server exited early (code={self._local_server_proc.returncode})"
                 )
             time.sleep(0.1)
+        self.close()
         raise RuntimeError(f"simple-nurec server did not start listening on {self._grpc_host}:{self._grpc_port} within timeout")
 
     def load_metadata(
@@ -276,13 +296,16 @@ class SimulatorInterface:
 
     def close(self) -> None:
         proc = self._local_server_proc
+        pgid = self._local_server_pgid
         self._local_server_proc = None
+        self._local_server_pgid = None
         if proc is not None and proc.poll() is None:
-            proc.terminate()
+            os.killpg(pgid, signal.SIGTERM)
             try:
                 proc.wait(timeout=3.0)
             except subprocess.TimeoutExpired:
-                proc.kill()
+                os.killpg(pgid, signal.SIGKILL)
+                proc.wait(timeout=3.0)
             logger.info("Stopped simple-nurec server pid=%s", proc.pid)
 
         if self._simple_nurec_log_fp is not None:

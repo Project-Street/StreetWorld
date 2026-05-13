@@ -51,8 +51,10 @@ class OnSiteScenarioEnv(ScenarioEnv):
         return super().reset(seed=seed, scene_name=scene_name)
 
     def close(self):
-        super().close()
-        self.model.close()
+        try:
+            super().close()
+        finally:
+            self.model.close()
 
     def _update_scene(self):
         """

@@ -274,6 +274,31 @@ class OnSiteSwitch:
         elapsed_ms = (time.perf_counter() - t0) * 1000.0
         return ret, elapsed_ms
 
+    def _drain_testee_finish_caches(self):
+        while True:
+            images, image_get_ms = self._timed_get(self.channel_map["camera"].get_image_simple)
+            image_count = 0 if images is None else len(images)
+            self._log_message_debug(
+                "recv",
+                "image_batch",
+                {"drained": True, "image_count": image_count},
+                "raw",
+                channel_op="get",
+                channel_elapsed_ms=image_get_ms,
+            )
+
+            (ret, msg), feedback_get_ms = self._timed_get(self.channel_map["vehiclecontrol"].get)
+            self._log_message_debug(
+                "recv",
+                msg.type() if msg is not None else "vehicle_feedback_empty",
+                {"drained": True, "ret": ret},
+                "chassis",
+                channel_op="get",
+                channel_elapsed_ms=feedback_get_ms,
+            )
+            if image_count == 0 and msg is None:
+                return
+
     @staticmethod
     def _build_camera_encoder_config():
         return
@@ -553,6 +578,8 @@ class OnSiteSwitch:
             except ValueError:
                 notify_type_name = f"UNKNOWN_NOTIFY_TYPE ({notify.type})"
             logger.info("Received Notify: type=%s role_id=%s", notify_type_name, notify.role_id)
+            if self.terminal_type == TERMINAL_TYPE.TESTEE and notify.type in (NT_ABORT_TEST, NT_FINISH_TEST):
+                self._drain_testee_finish_caches()
             return notify
 
         self._log_message_debug("recv", msg.type(), {"expected_type": MT_NOTIFY}, "main", channel_op="get", channel_elapsed_ms=get_ms)

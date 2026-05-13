@@ -1,6 +1,8 @@
 import copy
+import hashlib
 import logging
 import os
+import pickle
 import numpy as np
 import torch
 from streetworld.manager.base_manager import BaseManager
@@ -85,7 +87,32 @@ class ScenarioDataManager(BaseManager):
     def _post_process_config(self, config):
         pass
 
+    def _get_scene_cache_path(self, cfg_path):
+        cache_dir = os.path.join("data", ".cache")
+        os.makedirs(cache_dir, exist_ok=True)
+        abs_cfg_path = os.path.abspath(cfg_path)
+        stat = os.stat(abs_cfg_path)
+        cache_key = json.dumps(
+            {
+                "cfg_path": abs_cfg_path,
+                "cfg_mtime_ns": stat.st_mtime_ns,
+                "cfg_size": stat.st_size,
+                "physics_world_step_size": self.base_config["physics_world_step_size"],
+            },
+            sort_keys=True,
+        )
+        digest = hashlib.sha1(cache_key.encode("utf-8")).hexdigest()
+        scene_name = os.path.splitext(os.path.basename(cfg_path))[0]
+        return os.path.join(cache_dir, f"{scene_name}_{digest}.pkl")
+
     def _load_single_scene(self, cfg_path):
+        cache_path = self._get_scene_cache_path(cfg_path)
+        if os.path.exists(cache_path):
+            with open(cache_path, "rb") as f:
+                scene_name, metadata = pickle.load(f)
+            logger.debug("Loaded scene=%s from cache=%s", scene_name, cache_path)
+            return scene_name, metadata
+
         scene_name, cfg, timestamp_range, camera_params, ego_poses, participants, scene_mesh_path = self.loader(cfg_path)
         metadata = self.restructure_metadata(
             config=cfg,
@@ -95,6 +122,8 @@ class ScenarioDataManager(BaseManager):
             participants=participants,
         )
         metadata["scene_mesh_path"] = scene_mesh_path
+        with open(cache_path, "wb") as f:
+            pickle.dump((scene_name, metadata), f, protocol=pickle.HIGHEST_PROTOCOL)
         logger.debug("Loaded scene=%s from cfg=%s", scene_name, cfg_path)
         return scene_name, metadata
 
