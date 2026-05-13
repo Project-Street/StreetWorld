@@ -1,5 +1,6 @@
 import math
 import numpy as np
+import torch
 from typing import Any, Dict
 
 from streetworld.obs.observation_base import BaseObservation
@@ -17,6 +18,9 @@ class SurroundingObservation(BaseObservation):
     def __init__(self, config):
         super().__init__(config)
         self.coordinate_mode = self.config["coordinate_mode"]
+        self.ignore_dist = self.config.get("ignore_dist")
+        if self.ignore_dist is not None:
+            self.ignore_dist = float(self.ignore_dist)
         self.collector = None
         self.controller = None
 
@@ -37,13 +41,25 @@ class SurroundingObservation(BaseObservation):
         ego_T_inv = np.linalg.inv(ego_T)
         ego_R_inv = ego_T_inv[:3, :3]
         ego_heading = self.controller.heading_theta
+        candidates = [
+            (name, ctrl)
+            for name, ctrl in objs.items()
+            if ctrl["controller"] is not self.controller
+        ]
+        if self.ignore_dist is not None:
+            if candidates:
+                ego_position = torch.as_tensor(self.controller.position, dtype=torch.float32, device="cuda")
+                position_tensor = torch.tensor(
+                    [ctrl["position"] for _, ctrl in candidates],
+                    dtype=torch.float32,
+                    device="cuda",
+                )
+                distance_square = torch.sum((position_tensor - ego_position) ** 2, dim=1)
+                keep_indices = torch.nonzero(distance_square <= self.ignore_dist ** 2).flatten().cpu().tolist()
+                candidates = [candidates[i] for i in keep_indices]
 
         surrounding = {}
-        for name, ctrl in objs.items():
-            controller = ctrl["controller"]
-            if controller is self.controller:
-                continue
-
+        for name, ctrl in candidates:
             if self.coordinate_mode == "agent":
                 transform = ctrl["transform"]
                 transform_out = ego_T_inv @ transform

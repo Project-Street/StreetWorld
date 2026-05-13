@@ -94,6 +94,7 @@ BASE_DEFAULT_CONFIG = dict(
             surrounding = dict(
                 observer_class=SurroundingObservation,
                 coordinate_mode="agent",
+                ignore_dist=None,
             )
         ),
         policy=EnvInputPolicy,
