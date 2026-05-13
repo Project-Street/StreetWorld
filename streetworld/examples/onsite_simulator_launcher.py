@@ -261,25 +261,21 @@ def main_loop(
         # Phase 1: Process Notify messages (at beginning of each iteration)
         process_notify(middleware, env, none_sleep_s, top_bar_state)
 
-        # Phase 2: Wait for ActorPrepare
+        # Phase 2: Wait for ActorPrepare, then acknowledge it exactly once.
         if sim_state == SIM_STATE.IDLE:
             result = middleware.recv_actor_prepare()
             if result is not None:
                 session_id, _ , _, scene_name = result
+                middleware.send_actor_prepare_result(session_id, actor_id, result=True)
+                middleware.send_sub_role(session_id)
                 sim_state = SIM_STATE.PREPARED
                 top_bar_state.mark_actor_prepared(session_id, scene_name)
-            time.sleep(0.5)
-
-        # Phase 3: Send ActorPrepareResult and SubRole
-        if sim_state == SIM_STATE.PREPARED:
-            middleware.send_actor_prepare_result(session_id, actor_id, result=True)
-            middleware.send_sub_role(session_id)
             time.sleep(0.5)
 
         if sim_state != SIM_STATE.STARTED:
             continue
 
-        # Phase 4: Main simulation loop
+        # Phase 3: Main simulation loop
         # Block until a control message arrives, then execute exactly one step.
         vehicle_control = wait_vehicle_control(middleware, env, none_sleep_s, top_bar_state)
         if vehicle_control is None:
