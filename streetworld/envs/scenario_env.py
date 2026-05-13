@@ -18,6 +18,7 @@ from streetworld.utils.navigation_utils import nearest_front_index
 SCENARIO_ENV_CONFIG = dict(
     # ===== Scenario Config =====
     start_scenario_index=0,
+    hotload=False,
 
     # Set num_scenarios=-1 to load all scenarios in the data directory.
     num_scenarios=3,

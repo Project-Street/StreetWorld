@@ -6,7 +6,6 @@ providing helper methods for state synchronization with OnSite server.
 """
 import os
 import logging
-from pathlib import Path
 import torch
 from streetworld.envs.scenario_env import ScenarioEnv
 from streetworld.manager.agent_manager import AgentState
@@ -42,13 +41,6 @@ class OnSiteScenarioEnv(ScenarioEnv):
 
         # Cache for last received PubRole (for preserving fields)
         self.last_received_pub_role = None
-
-    def reset(self, seed=None, scene_name=None):
-        if scene_name and scene_name not in self.data_manager.idx2scene:
-            cfg_path = Path(self.config["scene_config_directory"]) / f"{scene_name}.yaml"
-            self.model.ensure_scene_config(cfg_path)
-            self.data_manager.hotload_scenario(str(cfg_path))
-        return super().reset(seed=seed, scene_name=scene_name)
 
     def close(self):
         try:

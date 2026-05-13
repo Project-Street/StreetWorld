@@ -68,13 +68,17 @@ class ScenarioDataManager(BaseManager):
 
         self.start_scenario_index = self.base_config.get("start_scenario_index", 0)
         self.random_scenario = self.base_config.get("random_scenario", True)
+        self.hotload = bool(self.base_config.get("hotload", False))
         self.current_scenario_id = self.start_scenario_index - 1
 
         # for multi-worker
         # self._scenarios = {}
 
-        # Read summary file first:
-        self.read_metadata(loader)
+        if self.hotload:
+            self.metadata, self.idx2scene = {}, []
+            self.num_scenarios = 0
+        else:
+            self.read_metadata(loader)
         self.base_config["num_scenarios"] = self.num_scenarios
 
         # sort scenario for curriculum training
@@ -106,12 +110,14 @@ class ScenarioDataManager(BaseManager):
         return os.path.join(cache_dir, f"{scene_name}_{digest}.pkl")
 
     def _load_single_scene(self, cfg_path):
-        cache_path = self._get_scene_cache_path(cfg_path)
-        if os.path.exists(cache_path):
-            with open(cache_path, "rb") as f:
-                scene_name, metadata = pickle.load(f)
-            logger.debug("Loaded scene=%s from cache=%s", scene_name, cache_path)
-            return scene_name, metadata
+        cache_path = None
+        if os.path.exists(cfg_path):
+            cache_path = self._get_scene_cache_path(cfg_path)
+            if os.path.exists(cache_path):
+                with open(cache_path, "rb") as f:
+                    scene_name, metadata = pickle.load(f)
+                logger.debug("Loaded scene=%s from cache=%s", scene_name, cache_path)
+                return scene_name, metadata
 
         scene_name, cfg, timestamp_range, camera_params, ego_poses, participants, scene_mesh_path = self.loader(cfg_path)
         metadata = self.restructure_metadata(
@@ -122,8 +128,11 @@ class ScenarioDataManager(BaseManager):
             participants=participants,
         )
         metadata["scene_mesh_path"] = scene_mesh_path
-        with open(cache_path, "wb") as f:
-            pickle.dump((scene_name, metadata), f, protocol=pickle.HIGHEST_PROTOCOL)
+        if cache_path is None and os.path.exists(cfg_path):
+            cache_path = self._get_scene_cache_path(cfg_path)
+        if cache_path is not None:
+            with open(cache_path, "wb") as f:
+                pickle.dump((scene_name, metadata), f, protocol=pickle.HIGHEST_PROTOCOL)
         logger.debug("Loaded scene=%s from cfg=%s", scene_name, cfg_path)
         return scene_name, metadata
 
@@ -222,6 +231,9 @@ class ScenarioDataManager(BaseManager):
 
         # Support explicit scene selection for OnSite integration
         if scene_name is not None:
+            if scene_name not in self.idx2scene and self.hotload:
+                cfg_path = os.path.join(self.directory, f"{scene_name}.yaml")
+                scene_name = self.hotload_scenario(cfg_path)
             self.current_scenario_id = self.idx2scene.index(scene_name)
         elif self.random_scenario:
             self.current_scenario_id = self.np_random.randint(0, self.num_scenarios)
