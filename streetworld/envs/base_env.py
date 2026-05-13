@@ -85,20 +85,31 @@ class BaseEnv(gym.Env):
         if self.config["gui"]:
             gui_image_key = self.config["gui_image_key"]
             gui_mode = self.config.get("gui_mode", "window")
+            video_fps = self.config.get(
+                "gui_video_fps",
+                1e6
+                / (float(self.config["physics_world_step_size"]) * float(self.config["decision_repeat"])),
+            )
             if gui_mode == "video":
                 from streetworld.gui.headless_gui import HeadlessGUI
 
-                self.gui = HeadlessGUI(image_key=gui_image_key)
+                self.gui = HeadlessGUI(image_key=gui_image_key, fps=video_fps)
                 self.logger.debug("BaseEnv video recorder initialized: gui=%s", type(self.gui).__name__)
-            elif gui_mode == "window":
+            elif gui_mode in ("window", "window_video"):
                 camera_config = self.config["actor_config"]["observer_config"]["gaussian"]["cameras"][gui_image_key]
                 try:
                     from streetworld.gui.gui import GUI
-                    self.gui = GUI(
+                    gui = GUI(
                         image_key=gui_image_key,
                         image_width=int(camera_config["W"]),
                         image_height=int(camera_config["H"]),
                     )
+                    if gui_mode == "window_video":
+                        from streetworld.gui.headless_gui import CompositeGUI, HeadlessGUI
+
+                        self.gui = CompositeGUI(gui, HeadlessGUI(image_key=gui_image_key, fps=video_fps))
+                    else:
+                        self.gui = gui
                 except Exception as exc:
                     raise RuntimeError(
                         "GUI mode is not supported on this system. Use --video on a headless host."

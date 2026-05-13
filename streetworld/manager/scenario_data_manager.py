@@ -1,4 +1,5 @@
 import copy
+import logging
 import os
 import numpy as np
 import torch
@@ -9,6 +10,9 @@ from streetworld.utils.trajectory import Trajectory
 import json
 
 from streetworld.default_config import BASE_DEFAULT_CONFIG
+
+logger = logging.getLogger(__name__)
+
 
 class ScenarioDataManager(BaseManager):
     DEFAULT_DATA_BUFFER_SIZE = 100
@@ -91,6 +95,7 @@ class ScenarioDataManager(BaseManager):
             participants=participants,
         )
         metadata["scene_mesh_path"] = scene_mesh_path
+        logger.debug("Loaded scene=%s from cfg=%s", scene_name, cfg_path)
         return scene_name, metadata
 
     def read_metadata(self, loader):

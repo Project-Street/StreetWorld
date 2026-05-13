@@ -32,7 +32,7 @@ class SimulatorInterface:
         zFar: float = 1000.0,
         grpc_host: str = "localhost",
         grpc_port: int = 9001,
-        grpc_timeout_s: float = 60.0,
+        grpc_timeout_s: float = 600.0,
         resolution_scale: float = 1.0,
         camera_model_type: str = "ftheta",
         nurec_data_directory: str | Path = "data/NuRec",

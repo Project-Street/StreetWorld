@@ -65,6 +65,7 @@ class OnSiteSwitch:
     _ANSI_PURPLE = "\033[95m"
     _ANSI_RESET = "\033[0m"
     _PUBROLE_ENCRYPT_KEY = (57, 13, 101, 66, 98, 99, 17, 92, 111, 151)
+    _PUBROLE_EGO_ONLY_TARGET_DISTANCE_M = 12.5
 
     def __init__(
         self,
@@ -106,6 +107,7 @@ class OnSiteSwitch:
         self._image_sizes = image_sizes or {}
         self._vts_map_module = None
         self._rlsl_map = None
+        self._target_position_xodr = None
         # Initialize channels
 
         self.initialize_channels()
@@ -358,6 +360,19 @@ class OnSiteSwitch:
             raise ValueError(f"Invalid archive_id format: {archive_id}")
         return scene_name
 
+    @staticmethod
+    def _extract_target_position_xodr(brief_data, actor_id):
+        testees = brief_data["testees"]
+        matches = [testee for testee in testees if testee["actor_id"] == actor_id]
+        if len(matches) != 1:
+            raise ValueError(f"Expected one testee for actor_id={actor_id}, got {len(matches)}")
+        target_state = matches[0]["target_state"]
+        return (
+            float(target_state["x"]),
+            float(target_state["y"]),
+            float(target_state["z"]),
+        )
+
     def initialize_channels(self):
         """
         Initialize multicast network channels.
@@ -442,15 +457,15 @@ class OnSiteSwitch:
             self.actor_id = actor_id
             scene_name = self.parse_scene_name_from_archive_id(prepare_msg.archive_info.id)
 
-            # Parse brief_data if available
-            brief_data = None
-            # if prepare_msg.archive_info.brief_data:
-            #     try:
-            #         brief_data = json.loads(prepare_msg.archive_info.brief_data)
-            #     except json.JSONDecodeError as e:
-            #         logger.warning(f"Failed to parse brief_data: {e}")
+            brief_data = json.loads(prepare_msg.archive_info.brief_data)
+            self._target_position_xodr = self._extract_target_position_xodr(brief_data, actor_id)
 
-            logger.info(f"Received ActorPrepare: session={session_id}, actor={actor_id}")
+            logger.info(
+                "Received ActorPrepare: session=%s, actor=%s, target_xodr=%s",
+                session_id,
+                actor_id,
+                self._target_position_xodr,
+            )
             return (session_id, actor_id, brief_data, scene_name)
 
         self._log_message_debug("recv", msg.type(), {"expected_type": MT_ACTOR_PREPARE}, "main", channel_op="get", channel_elapsed_ms=get_ms)
@@ -508,6 +523,15 @@ class OnSiteSwitch:
             "z": float(slz.z),
         }
 
+    def _is_actor_near_target_xodr(self, actor_state) -> bool:
+        if self._target_position_xodr is None:
+            raise RuntimeError("Target position is not initialized. recv_actor_prepare() must run before send_pub_role().")
+        # Actor positions sent in PubRole and ActorPrepare.target_state are both in xodr/map coordinates.
+        actor_xyz = np.asarray(self._to_vec3(actor_state["position"]), dtype=np.float64)
+        target_xyz = np.asarray(self._target_position_xodr, dtype=np.float64)
+        distance = float(np.linalg.norm(actor_xyz - target_xyz))
+        return distance <= self._PUBROLE_EGO_ONLY_TARGET_DISTANCE_M
+
     def recv_notify(self):
         """
         Receive Notify message from OnSite server.
@@ -556,7 +580,7 @@ class OnSiteSwitch:
         Returns:
             PubRole: PubRole proto message if received, None otherwise
         """
-        (ret, msg), get_ms = self._timed_get(self.channel_map["pubrole_encrypt"].get)
+        (ret, msg), get_ms = self._timed_get(self.channel_map["pubrole"].get)
         if msg is None or ret < 0:
             return None
 
@@ -744,6 +768,8 @@ class OnSiteSwitch:
             session_id: Current session ID
         """
         role_states = self._extract_role_states_from_obs(obs)
+        if self._is_actor_near_target_xodr(role_states[self.actor_id]):
+            role_states = {self.actor_id: role_states[self.actor_id]}
 
         msg = PubRole()
         msg.session_id = str(session_id)

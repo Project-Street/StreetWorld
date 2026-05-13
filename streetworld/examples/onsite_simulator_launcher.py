@@ -58,16 +58,87 @@ scene_name = ""
 actor_id = "simulator"
 
 
-def setup_launcher_logging(level_name: str) -> str:
+def setup_launcher_logging(level_name: str, enable_stderr: bool) -> str:
     log_dir = Path("logs")
     log_dir.mkdir(parents=True, exist_ok=True)
     shared_ts = os.environ.get("ONSITE_LOG_TS") or get_log_timestamp()
     os.environ["ONSITE_LOG_TS"] = shared_ts
     log_path = log_dir / f"simulator_{shared_ts}.logs"
-    handler = logging.FileHandler(log_path, encoding="utf-8")
-    handler.setFormatter(PlainFormatter())
-    configure_root_logger(resolve_log_level(level_name), handler=handler)
+    handlers = []
+
+    file_handler = logging.FileHandler(log_path, encoding="utf-8")
+    file_handler.setFormatter(PlainFormatter())
+    handlers.append(file_handler)
+
+    if enable_stderr:
+        stderr_handler = logging.StreamHandler()
+        stderr_handler.setFormatter(PlainFormatter())
+        handlers.append(stderr_handler)
+
+    root_logger = configure_root_logger(resolve_log_level(level_name), handler=handlers[0])
+    for handler in handlers[1:]:
+        root_logger.addHandler(handler)
     return str(log_path)
+
+
+def run_launcher(args, top_bar_state: LauncherTopBarState):
+    env = None
+    middleware = None
+
+    if args.gui and args.video:
+        gui_mode = "window_video"
+    elif args.gui:
+        gui_mode = "window"
+    elif args.video:
+        gui_mode = "video"
+    else:
+        gui_mode = "off"
+
+    try:
+        model = SimulatorInterface(
+            grpc_host=args.grpc_host,
+            grpc_port=args.grpc_port,
+            grpc_timeout_s=args.grpc_timeout,
+            camera_model_type="pinhole",
+            nurec_data_directory=args.nurec_data_directory,
+            ui_update=lambda message, ephemeral=False: (
+                top_bar_state.set_preparing_progress(message)
+                if ephemeral else
+                top_bar_state.push_preparing_message(message)
+            ),
+        )
+        top_bar_state.mark_renderer_interface_ready()
+
+        env_config = ONSITE_DEFAULT_CONFIG
+        env_config["scene_config_directory"] = args.scene_config_directory
+        env_config["gui"] = args.gui or args.video
+        env_config["gui_mode"] = gui_mode
+        env_config["gui_video_fps"] = 1e6 / (
+            float(env_config["physics_world_step_size"]) * float(env_config["decision_repeat"])
+        )
+        env = OnSiteScenarioEnv(model, env_config)
+        top_bar_state.mark_scenario_env_ready()
+
+        middleware = OnSiteSwitch(
+            onsite_dir=args.onsite_dir,
+            terminal_type=TERMINAL_TYPE.SIMULATOR,
+        )
+        top_bar_state.mark_onsite_switch_ready()
+        middleware.start_onsite_daemon()
+        top_bar_state.mark_onsite_daemon_ready()
+
+        main_loop(
+            env,
+            middleware,
+            top_bar_state,
+            save_debug_image=args.save_debug_image,
+            none_sleep_s=args.none_sleep_s,
+        )
+    finally:
+        if env is not None:
+            env.close()
+        if middleware is not None:
+            middleware.close()
 
 
 def process_notify(middleware, env, none_sleep_s, top_bar_state: LauncherTopBarState):
@@ -238,6 +309,8 @@ def main():
                         help='gRPC server host for NuRec renderer')
     parser.add_argument('--grpc-port', type=int, default=9001,
                         help='gRPC server port for NuRec renderer')
+    parser.add_argument('--grpc-timeout', type=float, default=600.0,
+                        help='gRPC timeout for NuRec renderer requests (seconds)')
     parser.add_argument(
         "--nurec-data-directory",
         type=str,
@@ -246,78 +319,51 @@ def main():
     )
     parser.add_argument('--save-debug-image', action='store_true',
                         help='Save debug images regardless of log level')
-    display_group = parser.add_mutually_exclusive_group()
-    display_group.add_argument('--gui', action='store_true',
-                               help='Open the live GUI window')
-    display_group.add_argument('--video', action='store_true',
-                               help='Record GUI-style mp4 output without opening a window')
+    parser.add_argument('--gui', action='store_true',
+                        help='Open the live GUI window')
+    parser.add_argument('--video', action='store_true',
+                        help='Record GUI-style mp4 output')
     parser.add_argument('--none_sleep_s', type=float, default=0.02,
                         help='Sleep seconds when recv returns empty')
     parser.add_argument('--log-level', dest="log_level", type=str, default='INFO',
                         help='Logging level, e.g. DEBUG/INFO/WARNING/ERROR')
+    parser.add_argument('--no-tui', action='store_true',
+                        help='Disable Rich TUI so stdout/stderr and breakpoints stay visible')
     args = parser.parse_args()
     console = Console()
-    log_path = setup_launcher_logging(args.log_level)
+    log_path = setup_launcher_logging(args.log_level, enable_stderr=args.no_tui)
+    if args.gui and args.video:
+        display_mode = "gui+video"
+    elif args.gui:
+        display_mode = "gui"
+    elif args.video:
+        display_mode = "video"
+    else:
+        display_mode = "none"
 
     top_bar_state = LauncherTopBarState(
         grpc_host=args.grpc_host,
         grpc_port=args.grpc_port,
         onsite_dir=args.onsite_dir,
         scene_config_directory=args.scene_config_directory,
-        display_mode="gui" if args.gui else "video" if args.video else "none",
+        display_mode=display_mode,
     )
-
-    model = None
-    env = None
-    middleware = None
 
     exit_code = 0
 
     try:
-        with Live(
-            get_renderable=lambda: build_launcher_renderable(top_bar_state.snapshot(), log_path),
-            console=console,
-            screen=True,
-            refresh_per_second=8,
-            vertical_overflow="crop",
-        ) as live:
-            # Initialize environment
-            model = SimulatorInterface(
-                grpc_host=args.grpc_host,
-                grpc_port=args.grpc_port,
-                camera_model_type="pinhole",
-                nurec_data_directory=args.nurec_data_directory,
-                ui_update=lambda message, ephemeral=False: (
-                    top_bar_state.set_preparing_progress(message)
-                    if ephemeral else
-                    top_bar_state.push_preparing_message(message)
-                ),
-            )
-            top_bar_state.mark_renderer_interface_ready()
-            env_config = ONSITE_DEFAULT_CONFIG
-            env_config["scene_config_directory"] = args.scene_config_directory
-            env_config["gui"] = args.gui or args.video
-            env_config["gui_mode"] = "window" if args.gui else "video" if args.video else "off"
-            env = OnSiteScenarioEnv(model, env_config)
-            top_bar_state.mark_scenario_env_ready()
-
-            # Initialize OnSite middleware
-            middleware = OnSiteSwitch(
-                onsite_dir=args.onsite_dir,
-                terminal_type=TERMINAL_TYPE.SIMULATOR,
-            )
-            top_bar_state.mark_onsite_switch_ready()
-            middleware.start_onsite_daemon()
-            top_bar_state.mark_onsite_daemon_ready()
-
-            # Run main loop
-            main_loop(
-                env,
-                middleware,
-                top_bar_state,
-                save_debug_image=args.save_debug_image,
-                none_sleep_s=args.none_sleep_s,
-            )
+        if args.no_tui:
+            print(f"Logs saved to {log_path}", file=sys.stderr)
+            run_launcher(args, top_bar_state)
+        else:
+            with Live(
+                get_renderable=lambda: build_launcher_renderable(top_bar_state.snapshot(), log_path),
+                console=console,
+                screen=True,
+                refresh_per_second=8,
+                vertical_overflow="crop",
+            ):
+                run_launcher(args, top_bar_state)
     except KeyboardInterrupt:
         exit_code = 130
         top_bar_state.mark_finished("INTERRUPTED")
@@ -329,10 +375,6 @@ def main():
         print(f"Logs saved to {log_path}", file=sys.stderr)
         sys.stderr.flush()
     finally:
-        if env is not None:
-            env.close()
-        if middleware is not None:
-            middleware.close()
         sys.stdout.flush()
         sys.stderr.flush()
         os._exit(exit_code)
