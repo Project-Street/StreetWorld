@@ -15,20 +15,39 @@ class ScenarioDataManager(BaseManager):
     PRIORITY = -10
 
     @staticmethod
-    def _build_ground_plane(ego_poses, ego_height, start_ts):
-        normals = np.stack([np.asarray(pose)[:3, 2] for pose in ego_poses.values()], axis=0)
+    def _build_ground_plane(ego_poses, ego_length, ego_width, ego_height):
+        local_bottom_vertices = np.array([
+            [ego_length / 2, ego_width / 2, -ego_height / 2],
+            [ego_length / 2, -ego_width / 2, -ego_height / 2],
+            [-ego_length / 2, ego_width / 2, -ego_height / 2],
+            [-ego_length / 2, -ego_width / 2, -ego_height / 2],
+        ], dtype=np.float64)
+
+        poses = [np.asarray(pose, dtype=np.float64) for pose in ego_poses.values()]
+        normals = np.stack([pose[:3, 2] for pose in poses], axis=0)
         average_normal = normals.sum(axis=0)
         average_normal_norm = np.linalg.norm(average_normal)
         if average_normal_norm == 0:
             raise ValueError("Average ego normal has zero length.")
         average_normal = average_normal / average_normal_norm
 
-        start_pose = np.asarray(ego_poses[start_ts])
-        start_bottom_center = start_pose[:3, 3] - start_pose[:3, 2] * (ego_height / 2)
+        bottom_vertices = np.concatenate([
+            (pose[:3, :3] @ local_bottom_vertices.T).T + pose[:3, 3]
+            for pose in poses
+        ], axis=0)
+        centroid = bottom_vertices.mean(axis=0)
+        _, _, vh = np.linalg.svd(bottom_vertices - centroid, full_matrices=False)
+        normal = vh[-1]
+        normal_norm = np.linalg.norm(normal)
+        if normal_norm == 0:
+            raise ValueError("Fitted ground-plane normal has zero length.")
+        normal = normal / normal_norm
+        if np.dot(normal, average_normal) < 0:
+            normal = -normal
 
         return {
-            'normal': average_normal.tolist(),
-            'constant': float(np.dot(average_normal, start_bottom_center))
+            'normal': normal.tolist(),
+            'constant': float(np.dot(normal, centroid))
         }
 
     def __init__(self, config, loader):
@@ -185,11 +204,11 @@ class ScenarioDataManager(BaseManager):
         config_dict["controller"] = config_dict.get("controller", random_vehicle_type(self.np_random)) 
         current_metadata = self.get_current_scenario_data()
         ego_poses = current_metadata['ego_poses']
-        start_ts = current_metadata['timestamp_range'][0]
         current_metadata['ground_plane'] = self._build_ground_plane(
             ego_poses,
+            ego_length=config_dict["controller"].DEFAULT_LENGTH,
+            ego_width=config_dict["controller"].DEFAULT_WIDTH,
             ego_height=config_dict["controller"].DEFAULT_HEIGHT,
-            start_ts=start_ts
         )
 
     def get_current_scenario_data(self):

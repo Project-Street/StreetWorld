@@ -34,8 +34,6 @@ from streetworld.misc.onsite_middleware.onsite_proto.main.proto.messages_pb2 imp
 from streetworld.misc.onsite_middleware.onsite_proto.main.proto.enums_pb2 import MT_PUBROLE, MT_SUBROLE, MT_NOTIFY, MT_SESSIONINFO, MT_ACTOR_PREPARE, MT_ACTOR_PREPARE_RESULT, NT_ABORT_TEST, NT_START_TEST, NT_FINISH_TEST, NT_DESTROY_ROLE
 from streetworld.misc.onsite_middleware.onsite_proto.main.proto import enums_pb2
 from streetworld.utils.console_utils import suppress_process_output
-from streetworld.utils.logger import get_log_timestamp
-
 logger = logging.getLogger(__name__)
 
 
@@ -108,11 +106,6 @@ class OnSiteSwitch:
         self._image_sizes = image_sizes or {}
         self._vts_map_module = None
         self._rlsl_map = None
-        
-        
-        # Send only this logger to a dedicated file.
-        self._init_logger()
-
         # Initialize channels
 
         self.initialize_channels()
@@ -160,24 +153,6 @@ class OnSiteSwitch:
             logger.info("Started OnSite daemon process pid=%s via %s", self._daemon_proc.pid, daemon_bin)
             return
         logger.info("OnSite daemon was not started successfully; pid=%s exited early with code=%s", self._daemon_proc.pid, self._daemon_proc.returncode)
-
-    def _init_logger(self):
-        # Follow root logger level (set by entrypoint --log-level).
-        logger.setLevel(logging.NOTSET)
-        ts = os.environ.get("ONSITE_LOG_TS") or get_log_timestamp()
-        self.log_ts = ts
-        # Share timestamp with other modules (e.g., onsite_integration).
-        os.environ["ONSITE_LOG_TS"] = ts
-        log_dir = Path("logs")
-        log_dir.mkdir(parents=True, exist_ok=True)
-        log_file = log_dir / f"{self.terminal_type.value}_{ts}.logs"
-        handler = logging.FileHandler(log_file, encoding="utf-8")
-        handler.setLevel(logging.DEBUG)
-        handler.setFormatter(logging.Formatter(fmt="%(asctime)s %(levelname)s %(name)s: %(message)s", datefmt="%Y-%m-%d %H:%M:%S"))
-        handler.addFilter(lambda record: record.name == __name__)
-        if not any(isinstance(h, logging.FileHandler) and getattr(h, "baseFilename", "") == str(log_file)
-                   for h in logger.handlers):
-            logger.addHandler(handler)
 
     @classmethod
     def _color_green(cls, value):

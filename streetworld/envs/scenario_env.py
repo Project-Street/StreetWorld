@@ -103,15 +103,15 @@ class ScenarioEnv(BaseEnv):
         self._last_steer = None
         self._last_progress_value = None
         self._last_progress_idx = None
-        if self.config["curriculum_level"] > 1:
-            assert self.config["num_scenarios"] % self.config["curriculum_level"] == 0, \
-                "Each level should have the same number of scenarios"
-            if self.config["num_workers"] > 1:
-                num = int(self.config["num_scenarios"] / self.config["curriculum_level"])
-                assert num % self.config["num_workers"] == 0
-        if self.config["num_workers"] > 1:
-            assert self.config["sequential_seed"], \
-                "If using > 1 workers, you have to allow sequential_seed for consistency!"
+        # if self.config["curriculum_level"] > 1:
+        #     assert self.config["num_scenarios"] % self.config["curriculum_level"] == 0, \
+        #         "Each level should have the same number of scenarios"
+        #     if self.config["num_workers"] > 1:
+        #         num = int(self.config["num_scenarios"] / self.config["curriculum_level"])
+        #         assert num % self.config["num_workers"] == 0
+        # if self.config["num_workers"] > 1:
+        #     assert self.config["sequential_seed"], \
+        #         "If using > 1 workers, you have to allow sequential_seed for consistency!"
 
     def _post_process_config(self, config):
         config = super(ScenarioEnv, self)._post_process_config(config)

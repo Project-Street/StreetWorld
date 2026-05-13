@@ -33,12 +33,19 @@ def _checkbox(label: str, checked: bool) -> Text:
 
 
 class LauncherTopBarState:
-    def __init__(self, grpc_host: str, grpc_port: int, onsite_dir: str, scene_config_directory: str, gui: bool):
+    def __init__(
+        self,
+        grpc_host: str,
+        grpc_port: int,
+        onsite_dir: str,
+        scene_config_directory: str,
+        display_mode: str,
+    ):
         self.grpc_host = grpc_host
         self.grpc_port = grpc_port
         self.onsite_dir = onsite_dir
         self.scene_config_directory = scene_config_directory
-        self.gui = gui
+        self.display_mode = display_mode
         self.bootstrap_checks = [False, False, False, False]
         self.preparing_text = None
         self.preparing_messages = []
@@ -109,7 +116,7 @@ class LauncherTopBarState:
             "grpc_port": self.grpc_port,
             "onsite_dir": self.onsite_dir,
             "scene_config_directory": self.scene_config_directory,
-            "gui": self.gui,
+            "display_mode": self.display_mode,
             "bootstrap_checks": list(self.bootstrap_checks),
             "preparing_text": self.preparing_text,
             "preparing_messages": list(self.preparing_messages),
@@ -143,7 +150,7 @@ def _bootstrap_panel(snapshot: dict[str, Any]) -> Panel:
     info.add_column(ratio=1)
     info.add_row(Text(f"onsite_dir: {snapshot['onsite_dir']}", style=MUTED_TEXT_STYLE))
     info.add_row(Text(f"scene_config_directory: {snapshot['scene_config_directory']}", style=MUTED_TEXT_STYLE))
-    info.add_row(Text(f"gui: {snapshot['gui']}", style=MUTED_TEXT_STYLE))
+    info.add_row(Text(f"display_mode: {snapshot['display_mode']}", style=MUTED_TEXT_STYLE))
 
     body = Table.grid(expand=True)
     body.add_column(ratio=1)

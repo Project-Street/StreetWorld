@@ -136,10 +136,11 @@ def compose_gui_frame(
 
 
 class HeadlessGUI:
-    def __init__(self, image_key: str, history_size: int = 200, output_dir: str = "gui_output"):
+    def __init__(self, image_key: str, history_size: int = 200, output_dir: str = "gui_output", fps: float = 40.0):
         self.image_key = image_key
         self.history_size = int(history_size)
         self.output_dir = Path(output_dir)
+        self.fps = float(fps)
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.timestamp_history: list[int] = []
         self.speed_history: list[float] = []
@@ -163,7 +164,7 @@ class HeadlessGUI:
         if self.episode_frames:
             current_time = datetime.now().strftime("%Y%m%d_%H%M%S")
             output_path = self.output_dir / f"{current_time}_{scene_name}.mp4"
-            image_list_to_video(str(output_path), self.episode_frames, code="mp4v")
+            image_list_to_video(str(output_path), self.episode_frames, code="mp4v", fps=self.fps)
             logger.info("Flushed headless GUI episode for scene %s to %s.", scene_name, output_path)
         self.episode_frames.clear()
         self.timestamp_history.clear()
@@ -172,3 +173,20 @@ class HeadlessGUI:
 
     def shutdown(self) -> None:
         return
+
+
+class CompositeGUI:
+    def __init__(self, *guis):
+        self.guis = guis
+
+    def draw(self, obs: Any, info: Any, action: Sequence[float]) -> None:
+        for gui in self.guis:
+            gui.draw(obs, info, action)
+
+    def flush_episode(self, scene_name: str) -> None:
+        for gui in self.guis:
+            gui.flush_episode(scene_name)
+
+    def shutdown(self) -> None:
+        for gui in reversed(self.guis):
+            gui.shutdown()

@@ -55,6 +55,12 @@ class BaseEnv(gym.Env):
         default_config.merge_from(config, replace_keys=["agent_configs"])
 
         self.logger = get_logger()
+        self.logger.debug(
+            "BaseEnv config merged: env=%s, model=%s, config_type=%s",
+            type(self).__name__,
+            type(model).__name__,
+            type(default_config).__name__,
+        )
         # set_log_level(config.get("log_level", logging.DEBUG if config.get("debug", False) else logging.INFO))
 
         # In MARL envs with respawn mechanism, varying episode lengths might happen.
@@ -71,21 +77,43 @@ class BaseEnv(gym.Env):
         self.gui = None
 
         self.setup(default_config)
+        self.logger.debug(
+            "BaseEnv setup complete: num_scenarios=%d, agents=%s",
+            self.data_manager.num_scenarios,
+            sorted(self.agent_managers.keys()),
+        )
         if self.config["gui"]:
             gui_image_key = self.config["gui_image_key"]
-            try:
-                camera_config = self.config["actor_config"]["observer_config"]["gaussian"]["cameras"][gui_image_key]
-                from streetworld.gui.gui import GUI
-                self.gui = GUI(
-                    image_key=gui_image_key,
-                    image_width=int(camera_config["W"]),
-                    image_height=int(camera_config["H"]),
-                )
-            except Exception as exc:
+            gui_mode = self.config.get("gui_mode", "window")
+            if gui_mode == "video":
                 from streetworld.gui.headless_gui import HeadlessGUI
-        
-                self.logger.warning("GUI creation failed, switching to HeadlessGUI: %s", exc)
+
                 self.gui = HeadlessGUI(image_key=gui_image_key)
+                self.logger.debug("BaseEnv video recorder initialized: gui=%s", type(self.gui).__name__)
+            elif gui_mode == "window":
+                camera_config = self.config["actor_config"]["observer_config"]["gaussian"]["cameras"][gui_image_key]
+                try:
+                    from streetworld.gui.gui import GUI
+                    self.gui = GUI(
+                        image_key=gui_image_key,
+                        image_width=int(camera_config["W"]),
+                        image_height=int(camera_config["H"]),
+                    )
+                except Exception as exc:
+                    raise RuntimeError(
+                        "GUI mode is not supported on this system. Use --video on a headless host."
+                    ) from exc
+                self.logger.debug(
+                    "BaseEnv GUI initialized: gui=%s, width=%s, height=%s",
+                    type(self.gui).__name__,
+                    camera_config["W"],
+                    camera_config["H"],
+                )
+            else:
+                raise ValueError(f"Unknown gui_mode: {gui_mode}")
+        else:
+            self.logger.debug("BaseEnv GUI initialization skipped")
+        self.logger.debug("BaseEnv init complete")
 
     # def _post_process_config(self, config):
     #     """Add more special process to merged config"""
@@ -107,20 +135,38 @@ class BaseEnv(gym.Env):
         Engine setting after launching
         """
         self._register_manager("data_manager", ScenarioDataManager(config, self.model.load_metadata))
+        self.logger.debug(
+            "BaseEnv setup registered data_manager: num_scenarios=%d, scenes=%s",
+            self.data_manager.num_scenarios,
+            self.data_manager.idx2scene,
+        )
         self._register_manager("map_manager", ScenarioMapManager(self.config['map_config'], self.model.load_model))
+        self.logger.debug("BaseEnv setup registered map_manager: store_map=%s", self.map_manager.store_map)
         self._register_manager("step_manager", StepCounter(self.config['physics_world_step_size'] * self.config["decision_repeat"],))
+        self.logger.debug(
+            "BaseEnv setup registered step_manager: physics_world_step_size=%s, decision_repeat=%s",
+            self.config['physics_world_step_size'],
+            self.config["decision_repeat"],
+        )
 
         # self._register_manager("record_manager", RecordManager())
         # self._register_manager("replay_manager", ReplayManager())
 
         # physics world
         self.physics_world = PhysicsWorld(disable_collision=self.config["disable_collision"], physics_world_step_size=self.config['physics_world_step_size'])
+        self.logger.debug(
+            "BaseEnv setup created physics_world: disable_collision=%s, physics_world_step_size=%s",
+            self.config["disable_collision"],
+            self.config['physics_world_step_size'],
+        )
 
         # collision callback
         self.physics_world.dynamic_world.setContactAddedCallback(PythonCallbackObject(collision_callback))
+        self.logger.debug("BaseEnv setup collision callback registered")
 
         self.agent_managers = {}
         self.agent_managers['actor'] = self._init_agent_manager()
+        self.logger.debug("BaseEnv setup actor manager registered: manager=%s", type(self.agent_managers['actor']).__name__)
 
 
     @property

@@ -24,11 +24,22 @@ class OnSiteScenarioEnv(ScenarioEnv):
     """
 
     def __init__(self, model, config=None):
-        if not os.path.exists(config["scene_config_directory"]):
-            os.makedirs(config["scene_config_directory"], exist_ok=True)
-            logger.info(f"Created scene config directory at {config['scene_config_directory']}")
-        
+        scene_config_directory = config["scene_config_directory"]
+        os.makedirs(scene_config_directory, exist_ok=True)
+        logger.info(f"Created scene config directory at {scene_config_directory}")
+        logger.debug(
+            "OnSiteScenarioEnv scene config directory ready: scene_config_directory=%s, gui=%s, model=%s",
+            scene_config_directory,
+            config["gui"],
+            type(model).__name__,
+        )
         super().__init__(model, config)
+        logger.debug(
+            "OnSiteScenarioEnv base initialization complete: num_scenarios=%d, scenes=%s",
+            self.data_manager.num_scenarios,
+            self.data_manager.idx2scene,
+        )
+
         # Cache for last received PubRole (for preserving fields)
         self.last_received_pub_role = None
 
@@ -49,15 +60,18 @@ class OnSiteScenarioEnv(ScenarioEnv):
         """
         if self.step_manager.eposide_step == 0:
             self.agent_managers["actor"].set_state(AgentState.ALIVE)
+        self._surrounding_pre_collection = {}
         
         new_object_poses = {}
         for name, mgr in self.agent_managers.items():
             if name != "actor":
                 mgr.update_state()
 
-            if name != "actor" and mgr.state == AgentState.ALIVE and not mgr.is_static:
-                obj_pose = mgr.get_pose()
-                new_object_poses[name] = torch.from_numpy(obj_pose)
+            if mgr.state == AgentState.ALIVE:
+                base_state = mgr.get_base_state()
+                self._surrounding_pre_collection[name] = base_state
+                if name != "actor" and not mgr.is_static:
+                    new_object_poses[name] = torch.from_numpy(base_state["transform"])
 
         self.model.update_scene(self.step_manager.current_timestamp, new_object_poses)
     def update_agent_from_pub_role_single(self, agent_name, role):

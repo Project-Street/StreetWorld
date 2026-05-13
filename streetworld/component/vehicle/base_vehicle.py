@@ -576,11 +576,10 @@ class BaseVehicle(BaseObject, BaseVehicleState):
 
     def get_steering_wheel_speed(self):
         """
-        Get steering wheel angular velocity in rad/s.
-        Uses the chassis angular velocity around Z-axis.
+        Get average steering wheel velocity in m/s.
         """
 
-        return self.get_wheel_speed(0) + self.get_wheel_speed(1) / 2
+        return (self.get_wheel_speed(0) + self.get_wheel_speed(1)) / 2
 
     def get_longitudinal_acceleration(self):
         """

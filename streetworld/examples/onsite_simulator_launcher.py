@@ -109,6 +109,9 @@ def process_notify(middleware, env, none_sleep_s, top_bar_state: LauncherTopBarS
             scene_name = ""
             continue
         elif notify_type == NT_START_TEST:
+            if not scene_name:
+                logger.warning(f"Simulator: Received {notify_type} without valid session. Ignoring.")
+                continue
             sim_state = SIM_STATE.STARTED
             obs, info = env.reset(scene_name=scene_name)
             logger.info(f"Start simulation for session_id={session_id}, scene_name={scene_name}")
@@ -243,8 +246,11 @@ def main():
     )
     parser.add_argument('--save-debug-image', action='store_true',
                         help='Save debug images regardless of log level')
-    parser.add_argument('--gui', action='store_true',
-                        help='Enable GUI rendering')
+    display_group = parser.add_mutually_exclusive_group()
+    display_group.add_argument('--gui', action='store_true',
+                               help='Open the live GUI window')
+    display_group.add_argument('--video', action='store_true',
+                               help='Record GUI-style mp4 output without opening a window')
     parser.add_argument('--none_sleep_s', type=float, default=0.02,
                         help='Sleep seconds when recv returns empty')
     parser.add_argument('--log-level', dest="log_level", type=str, default='INFO',
@@ -258,7 +264,7 @@ def main():
         grpc_port=args.grpc_port,
         onsite_dir=args.onsite_dir,
         scene_config_directory=args.scene_config_directory,
-        gui=args.gui,
+        display_mode="gui" if args.gui else "video" if args.video else "none",
     )
 
     model = None
@@ -290,7 +296,8 @@ def main():
             top_bar_state.mark_renderer_interface_ready()
             env_config = ONSITE_DEFAULT_CONFIG
             env_config["scene_config_directory"] = args.scene_config_directory
-            env_config["gui"] = args.gui
+            env_config["gui"] = args.gui or args.video
+            env_config["gui_mode"] = "window" if args.gui else "video" if args.video else "off"
             env = OnSiteScenarioEnv(model, env_config)
             top_bar_state.mark_scenario_env_ready()
 
