@@ -144,7 +144,8 @@ def main() -> None:
     parser.add_argument("--log-level", dest="log_level", type=str, default="INFO")
     args = parser.parse_args()
 
-    setup_entrypoint_logging(args.log_level)
+    log_path = setup_entrypoint_logging(args.log_level)
+    logger.info("Logs saved to %s", log_path)
 
     action_state = {"steering": 0.0, "throttle_brake": 0.0}
     frame_state = {"image": None}

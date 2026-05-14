@@ -1,5 +1,8 @@
 import logging
+import os
+import sys
 from datetime import datetime
+from pathlib import Path
 
 global_logger = None
 dup_filter = None
@@ -119,10 +122,33 @@ def resolve_log_level(level_name: str) -> int:
     return getattr(logging, str(level_name).upper(), logging.INFO)
 
 
-def setup_entrypoint_logging(level_name: str) -> int:
+def setup_entrypoint_logging(
+    level_name: str,
+    log_name=None,
+    enable_stderr: bool = True,
+    log_dir="logs",
+) -> str:
+    """Configure root logging for entrypoints and write a timestamped log file."""
     resolved_level = resolve_log_level(level_name)
-    configure_root_logger(resolved_level)
-    return resolved_level
+    if log_name is None:
+        log_name = Path(sys.argv[0]).stem
+
+    log_dir = Path(log_dir)
+    log_dir.mkdir(parents=True, exist_ok=True)
+    shared_ts = os.environ.get("ONSITE_LOG_TS") or get_log_timestamp()
+    os.environ["ONSITE_LOG_TS"] = shared_ts
+    log_path = log_dir / f"{log_name}_{shared_ts}.logs"
+
+    file_handler = logging.FileHandler(log_path, encoding="utf-8")
+    file_handler.setFormatter(PlainFormatter())
+    root_logger = configure_root_logger(resolved_level, handler=file_handler)
+
+    if enable_stderr:
+        stderr_handler = logging.StreamHandler()
+        stderr_handler.setFormatter(CustomFormatter())
+        root_logger.addHandler(stderr_handler)
+
+    return str(log_path)
 
 
 def set_propagate(propagate=False):

@@ -50,7 +50,8 @@ def main() -> int:
     parser.add_argument("--log-level", dest="log_level", type=str, default="INFO")
     args = parser.parse_args()
 
-    setup_entrypoint_logging(args.log_level)
+    log_path = setup_entrypoint_logging(args.log_level)
+    logger.info("Logs saved to %s", log_path)
 
     viewer = None
     middleware = None

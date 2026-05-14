@@ -14,7 +14,6 @@ import sys
 import time
 import traceback
 import os
-from pathlib import Path
 
 from rich.console import Console
 from rich.live import Live
@@ -23,7 +22,7 @@ from streetworld.misc.onsite_middleware import OnSiteSwitch, OnSiteScenarioEnv, 
 from streetworld.manager.agent_manager import AgentState
 from streetworld.misc.nurec_interface.simulator_interface import SimulatorInterface
 from streetworld.onstite_config import ONSITE_DEFAULT_CONFIG
-from streetworld.utils.logger import PlainFormatter, configure_root_logger, get_log_timestamp, resolve_log_level
+from streetworld.utils.logger import setup_entrypoint_logging
 from streetworld.utils.onsite_simulator_top_bar import (
     LauncherTopBarState,
     build_launcher_renderable,
@@ -57,29 +56,6 @@ session_id = ""
 scene_name = ""
 actor_id = "simulator"
 RECV_START_STATE = "RECV_START"
-
-
-def setup_launcher_logging(level_name: str, enable_stderr: bool) -> str:
-    log_dir = Path("logs")
-    log_dir.mkdir(parents=True, exist_ok=True)
-    shared_ts = os.environ.get("ONSITE_LOG_TS") or get_log_timestamp()
-    os.environ["ONSITE_LOG_TS"] = shared_ts
-    log_path = log_dir / f"simulator_{shared_ts}.logs"
-    handlers = []
-
-    file_handler = logging.FileHandler(log_path, encoding="utf-8")
-    file_handler.setFormatter(PlainFormatter())
-    handlers.append(file_handler)
-
-    if enable_stderr:
-        stderr_handler = logging.StreamHandler()
-        stderr_handler.setFormatter(PlainFormatter())
-        handlers.append(stderr_handler)
-
-    root_logger = configure_root_logger(resolve_log_level(level_name), handler=handlers[0])
-    for handler in handlers[1:]:
-        root_logger.addHandler(handler)
-    return str(log_path)
 
 
 def run_launcher(args, top_bar_state: LauncherTopBarState):
@@ -345,7 +321,7 @@ def main():
                         help='Disable Rich TUI so stdout/stderr and breakpoints stay visible')
     args = parser.parse_args()
     console = Console()
-    log_path = setup_launcher_logging(args.log_level, enable_stderr=args.no_tui)
+    log_path = setup_entrypoint_logging(args.log_level, log_name="simulator", enable_stderr=args.no_tui)
     if args.gui and args.video:
         display_mode = "gui+video"
     elif args.gui:

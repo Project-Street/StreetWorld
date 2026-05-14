@@ -136,7 +136,7 @@ def compose_gui_frame(
 
 
 class HeadlessGUI:
-    def __init__(self, image_key: str, history_size: int = 200, output_dir: str = "gui_output", fps: float = 40.0):
+    def __init__(self, image_key: str, history_size: int = 200, output_dir: str = "videos", fps: float = 40.0):
         self.image_key = image_key
         self.history_size = int(history_size)
         self.output_dir = Path(output_dir)
