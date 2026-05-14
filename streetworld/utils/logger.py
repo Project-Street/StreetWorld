@@ -108,11 +108,13 @@ def get_logger():
 
 
 def configure_root_logger(level=logging.INFO, handler=None):
+    logging.disable(logging.NOTSET)
     root_logger = logging.getLogger()
     root_logger.handlers.clear()
     active_handler = handler or logging.StreamHandler()
     if handler is None:
         active_handler.setFormatter(CustomFormatter())
+    active_handler.setLevel(logging.NOTSET)
     root_logger.addHandler(active_handler)
     root_logger.setLevel(level)
     return root_logger
@@ -146,6 +148,7 @@ def setup_entrypoint_logging(
     if enable_stderr:
         stderr_handler = logging.StreamHandler()
         stderr_handler.setFormatter(CustomFormatter())
+        stderr_handler.setLevel(logging.NOTSET)
         root_logger.addHandler(stderr_handler)
 
     return str(log_path)
