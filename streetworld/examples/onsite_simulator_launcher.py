@@ -55,8 +55,8 @@ sim_state = SIM_STATE.IDLE
 session_id = ""
 scene_name = ""
 actor_id = "simulator"
-RECV_START_STATE = "RECV_START"
 
+obs, info = None, None
 
 def run_launcher(args, top_bar_state: LauncherTopBarState):
     model = None
@@ -121,18 +121,17 @@ def run_launcher(args, top_bar_state: LauncherTopBarState):
             middleware.close()
 
 
-def start_simulation(middleware, env, top_bar_state: LauncherTopBarState):
-    global sim_state
-
-    sim_state = SIM_STATE.STARTED
+def prepare_simulation(middleware, env):
+    global obs, info
     obs, info = env.reset(scene_name=scene_name)
-    logger.info(f"Start simulation for session_id={session_id}, scene_name={scene_name}")
+    middleware.configure_rlsl_map(env.config["scene_config_directory"], scene_name)
+
+def start_simulation(middleware, env, top_bar_state: LauncherTopBarState):
+    global sim_state, obs, info
+    sim_state = SIM_STATE.STARTED
     top_bar_state.mark_simulation_started()
     update_top_bar_runtime(top_bar_state, info, None, obs, sim_state.name)
-    middleware.configure_rlsl_map(env.config["scene_config_directory"], scene_name)
     send_current_step_data(middleware, env, obs, info, session_id)
-    env.agent_managers["actor"].set_state(NOTIFY_TO_STATE[NT_START_TEST])
-
 
 def process_notify(middleware, env, none_sleep_s, top_bar_state: LauncherTopBarState):
     """
@@ -175,11 +174,14 @@ def process_notify(middleware, env, none_sleep_s, top_bar_state: LauncherTopBarS
         scene_name = ""
         return
     elif notify_type == NT_START_TEST:
-        if not scene_name:
+        if sim_state == SIM_STATE.IDLE:
             logger.warning(f"Simulator: Received {notify_type} before ActorPrepare. Waiting for ActorPrepare.")
-            sim_state = RECV_START_STATE
+            sim_state = SIM_STATE.RECV_START
+            prepare_simulation(middleware, env)
             return
-        start_simulation(middleware, env, top_bar_state)
+        elif sim_state == SIM_STATE.PREPARED:
+            start_simulation(middleware, env, top_bar_state)
+            return
 
 
 def send_current_step_data(middleware: OnSiteSwitch, env: OnSiteScenarioEnv, obs, info, session_id: str):
@@ -240,6 +242,7 @@ def main_loop(
         middleware: OnSiteMiddleware instance
     """
     global sim_state, session_id, scene_name
+    global obs, info
 
     logger.info("Starting main loop")
 
@@ -248,17 +251,16 @@ def main_loop(
         process_notify(middleware, env, none_sleep_s, top_bar_state)
 
         # Phase 2: Wait for ActorPrepare
-        if sim_state in (SIM_STATE.IDLE, RECV_START_STATE):
-            start_after_prepare = sim_state == RECV_START_STATE
+        if sim_state in (SIM_STATE.IDLE, SIM_STATE.RECV_START):
             result = middleware.recv_actor_prepare()
             if result is not None:
                 session_id, _ , _, scene_name = result
-                sim_state = SIM_STATE.PREPARED
                 top_bar_state.mark_actor_prepared(session_id, scene_name)
-                if start_after_prepare:
+                if sim_state == SIM_STATE.IDLE:
+                    sim_state = SIM_STATE.PREPARED
+                    prepare_simulation(middleware, env)
+                elif sim_state == SIM_STATE.RECV_START:
                     start_simulation(middleware, env, top_bar_state)
-                else:
-                    time.sleep(0.5)
 
         # Phase 3: Send ActorPrepareResult and SubRole
         if sim_state == SIM_STATE.PREPARED:

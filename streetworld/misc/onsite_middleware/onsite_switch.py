@@ -45,6 +45,7 @@ class TERMINAL_TYPE(Enum):
 class SIM_STATE(Enum):
     IDLE = "idle"
     PREPARED = "prepared"
+    RECV_START = "recv_start"
     STARTED = "started"
 
 
