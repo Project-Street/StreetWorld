@@ -274,7 +274,7 @@ class OnSiteSwitch:
         elapsed_ms = (time.perf_counter() - t0) * 1000.0
         return ret, elapsed_ms
 
-    def _drain_testee_finish_caches(self):
+    def _drain_testee_camera_cache(self):
         while True:
             images, image_get_ms = self._timed_get(self.channel_map["camera"].get_image_simple)
             image_count = 0 if images is None else len(images)
@@ -286,7 +286,11 @@ class OnSiteSwitch:
                 channel_op="get",
                 channel_elapsed_ms=image_get_ms,
             )
+            if image_count == 0:
+                return
 
+    def _drain_testee_vehiclecontrol_cache(self):
+        while True:
             (ret, msg), feedback_get_ms = self._timed_get(self.channel_map["vehiclecontrol"].get)
             self._log_message_debug(
                 "recv",
@@ -296,8 +300,12 @@ class OnSiteSwitch:
                 channel_op="get",
                 channel_elapsed_ms=feedback_get_ms,
             )
-            if image_count == 0 and msg is None:
+            if msg is None:
                 return
+
+    def _drain_testee_finish_caches(self):
+        self._drain_testee_camera_cache()
+        self._drain_testee_vehiclecontrol_cache()
 
     @staticmethod
     def _build_camera_encoder_config():
