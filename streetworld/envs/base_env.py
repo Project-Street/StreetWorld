@@ -153,7 +153,7 @@ class BaseEnv(gym.Env):
         )
         self._register_manager("map_manager", ScenarioMapManager(self.config['map_config'], self.model.load_model))
         self.logger.debug("BaseEnv setup registered map_manager: store_map=%s", self.map_manager.store_map)
-        self._register_manager("step_manager", StepCounter(self.config['physics_world_step_size'] * self.config["decision_repeat"],))
+        self._register_manager("step_manager", StepCounter(self.config['physics_world_step_size'],))
         self.logger.debug(
             "BaseEnv setup registered step_manager: physics_world_step_size=%s, decision_repeat=%s",
             self.config['physics_world_step_size'],
@@ -338,16 +338,16 @@ class BaseEnv(gym.Env):
 
     # ===== Run-time =====
     def step(self, actions: Union[Union[np.ndarray, list], Dict[AnyStr, Union[list, np.ndarray]], int]):
+        self.step_manager.step()
         for i in range(self.config["decision_repeat"]):
             # simulate or replay
-            for manager in self.agent_managers.values():
+            for id ,manager in self.agent_managers.items():
                 manager.step(actions)
 
             self.physics_world.step()
             # the recording should happen after step physics world
             # if "record_manager" in self.managers and i < self.config["decision_repeat"] - 1:
             #     self.record_manager.step()
-        self.step_manager.step()
 
         # to get new pose and update gaussian model
         self._update_scene()

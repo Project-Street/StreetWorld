@@ -1,5 +1,6 @@
 import logging
 
+
 from streetworld.policy.base_policy import BasePolicy
 
 logging.basicConfig(level=logging.INFO)
@@ -27,6 +28,10 @@ class ReplayPolicy(BasePolicy):
 
         return info
     
+
+    @property
+    def is_in_trajectory(self):
+        return True
     @property
     def is_arrive(self):
-        return self.step_manager.current_timestamp > self.terminate_timestamp
+        return self.step_manager.current_timestamp >= self.terminate_timestamp

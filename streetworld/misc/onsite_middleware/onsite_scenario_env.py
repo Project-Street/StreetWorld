@@ -41,33 +41,44 @@ class OnSiteScenarioEnv(ScenarioEnv):
 
         # Cache for last received PubRole (for preserving fields)
         self.last_received_pub_role = None
+    # ===== Run-time =====
+    def step(self, actions):
+        self.step_manager.step()
+        for i in range(self.config["decision_repeat"]):
+            # simulate or replay
+            for n, manager in self.agent_managers.items():
+                manager.step(actions)
+                if n != "actor":  # Skip update_state for "actor" since it's controlled by Notify
+                    manager.update_state()
 
+            self.physics_world.step()
+
+        # to get new pose and update gaussian model
+        self._update_scene()
+
+        after_step_infos = {}
+        for mgr_n, manager in self.agent_managers.items() :
+            new_step_infos = manager.observe()
+            after_step_infos[mgr_n] = new_step_infos
+        # Note that we use shallow update for info dict in this function! This will accelerate system.
+        # engine_info = merge_dicts(
+        #     after_step_infos, allow_new_keys=True, without_copy=True
+        # )
+        engine_info = after_step_infos
+        step_result = self._get_step_return(actions, collected_obs=engine_info)  # collect observation, reward, termination
+        obses, _, terminateds, truncateds, step_infos = step_result
+        if self.gui is not None:
+            self.gui.draw(obs=obses, info=step_infos, action=actions)
+            if terminateds or truncateds:
+                self.gui.flush_episode(self.scene_name)
+        return step_result
+    
     def close(self):
         try:
             super().close()
         finally:
             self.model.close()
 
-    def _update_scene(self):
-        """
-        In OnSite mode, actor state is controlled by Notify, so skip actor.update_state().
-        """
-        if self.step_manager.eposide_step == 0:
-            self.agent_managers["actor"].set_state(AgentState.ALIVE)
-        self._surrounding_pre_collection = {}
-        
-        new_object_poses = {}
-        for name, mgr in self.agent_managers.items():
-            if name != "actor":
-                mgr.update_state()
-
-            if mgr.state == AgentState.ALIVE:
-                base_state = mgr.get_base_state()
-                self._surrounding_pre_collection[name] = base_state
-                if name != "actor" and not mgr.is_static:
-                    new_object_poses[name] = torch.from_numpy(base_state["transform"])
-
-        self.model.update_scene(self.step_manager.current_timestamp, new_object_poses)
     def update_agent_from_pub_role_single(self, agent_name, role):
         """
         Update a single agent from PubRole SingleRole message.
