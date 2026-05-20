@@ -5,7 +5,7 @@ from typing import Union, Optional, List
 
 import numpy as np
 from panda3d.bullet import BulletVehicle, BulletBoxShape, ZUp
-from panda3d.core import Material, Vec3, TransformState
+from panda3d.core import Material, Vec3, TransformState, LVector3
 
 from streetworld.base_class.base_object import BaseObject
 # from streetworld.component.navigation_module.node_network_navigation import NodeNetworkNavigation
@@ -238,6 +238,9 @@ class BaseVehicle(BaseObject, BaseVehicleState):
             self.set_angular_velocity(state_info["angular_velocity"])
             step_info = None
         else:
+            if "max_acceleration" in self.config:
+                self.limit_acceleration()
+            
             self.last_position = self.position
             self.last_velocity = self.velocity
             self.last_heading_theta = self.heading_theta
@@ -250,6 +253,19 @@ class BaseVehicle(BaseObject, BaseVehicleState):
             # else:
             self._set_action(action)
         return step_info
+
+    def limit_acceleration(self):
+        max_velocity_delta = float(self.config["max_acceleration"]) * self.physics_world.step_size_sec
+        assert max_velocity_delta > 0.0
+
+        current_velocity = self.velocity
+        delta_velocity = current_velocity[:2] - self.last_velocity[:2]
+        delta_speed = norm(delta_velocity[0], delta_velocity[1])
+        if delta_speed <= max_velocity_delta:
+            return
+
+        limited_velocity = self.last_velocity[:2] + delta_velocity / delta_speed * max_velocity_delta
+        self.body.setLinearVelocity(LVector3(limited_velocity[0], limited_velocity[1], current_velocity[2]))
 
     def _out_of_route(self):
         left, right = self._dist_to_route_left_right()

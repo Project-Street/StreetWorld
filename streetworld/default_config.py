@@ -112,6 +112,7 @@ BASE_DEFAULT_CONFIG = dict(
             size=None,
             enable_reverse=True,
             spawn_velocity=True,
+            max_acceleration=15.0,
         )
     ),
     # ===== participant =====
