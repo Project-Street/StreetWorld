@@ -60,7 +60,7 @@ class OnSiteSwitch:
     """
 
     # Constants for conversion
-    MAX_STEERING_RAD = 1.047  # 60 degrees in radians
+    MAX_STEERING_RAD = float(np.deg2rad(40.0))
     _ANSI_GREEN = "\033[92m"
     _ANSI_BLUE = "\033[94m"
     _ANSI_PURPLE = "\033[95m"
