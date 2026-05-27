@@ -13,6 +13,7 @@ from metadrive.obs.assembly_obs import AssemblyObservation
 from metadrive.obs.observation_base import DefaultObservation
 BASE_DEFAULT_CONFIG = dict(
 
+    gui=False,
     # ===== agent =====
     # Whether randomize the car model for the agent, randomly choosing from 4 types of cars
     random_agent_model=False,
@@ -29,6 +30,8 @@ BASE_DEFAULT_CONFIG = dict(
 
     # ===== actor =====
     actor_config=dict(
+        check_crash=True,
+        max_step=10_000,
         # Vehicle model. Candidates: "s", "m", "l", "xl", "default". random_agent_model makes this config invalid
         observer=AssemblyObservation,
         observer_config=dict(
@@ -72,6 +75,7 @@ BASE_DEFAULT_CONFIG = dict(
         # dont set it, the controller will be random vehicle every turn
         controller=DefaultVehicle,
         controller_config=dict(
+            size=None,
             enable_reverse=True,
             spawn_velocity=True,
         )
@@ -90,6 +94,7 @@ BASE_DEFAULT_CONFIG = dict(
             action_check=False,
         ),
         controller_config=dict(
+            size=None,
             enable_reverse=True,
             spawn_velocity=True,
         )

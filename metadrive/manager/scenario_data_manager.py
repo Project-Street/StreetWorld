@@ -3,10 +3,8 @@ import os
 import numpy as np
 import torch
 from metadrive.manager.base_manager import BaseManager
-from metadrive.scenario.scenario_description import ScenarioDescription as SD, MetaDriveType
-from metadrive.scenario.utils import read_scenario_data, read_dataset_summary
-from metadrive.scenario.parse_object_state import parse_full_trajectory, parse_object_state
-from metadrive.component.vehicle.vehicle_type import random_vehicle_type, vehicle_type
+from metadrive.utils.scenario_utils import parse_object_state
+from metadrive.component.vehicle.vehicle_type import random_vehicle_type
 from metadrive.utils.trajectory import Trajectory
 import json
 
@@ -16,15 +14,36 @@ class ScenarioDataManager(BaseManager):
     DEFAULT_DATA_BUFFER_SIZE = 100
     PRIORITY = -10
 
+    @staticmethod
+    def _build_ground_plane(ego_poses, ego_height, start_ts):
+        normals = np.stack([np.asarray(pose)[:3, 2] for pose in ego_poses.values()], axis=0)
+        average_normal = normals.sum(axis=0)
+        average_normal_norm = np.linalg.norm(average_normal)
+        if average_normal_norm == 0:
+            raise ValueError("Average ego normal has zero length.")
+        average_normal = average_normal / average_normal_norm
+
+        start_pose = np.asarray(ego_poses[start_ts])
+        start_bottom_center = start_pose[:3, 3] - start_pose[:3, 2] * (ego_height / 2)
+
+        return {
+            'normal': average_normal.tolist(),
+            'constant': float(np.dot(average_normal, start_bottom_center))
+        }
 
     def __init__(self, config, loader):
 
         super(ScenarioDataManager, self).__init__()
         self.base_config = config
+        self.loader = loader
 
         # self.store_data = engine.global_config["store_data"]
         # Allow subclasses to set directory differently
         self.directory = self.base_config.get("scene_config_directory")
+
+        self.start_scenario_index = self.base_config.get("start_scenario_index", 0)
+        self.random_scenario = self.base_config.get("random_scenario", True)
+        self.current_scenario_id = self.start_scenario_index - 1
 
         # for multi-worker
         # self._scenarios = {}
@@ -43,47 +62,36 @@ class ScenarioDataManager(BaseManager):
     def _post_process_config(self, config):
         pass
 
+    def _load_single_scene(self, cfg_path):
+        scene_name, cfg, timestamp_range, camera_params, ego_poses, participants, scene_mesh_path = self.loader(cfg_path)
+        metadata = self.restructure_metadata(
+            config=cfg,
+            timestamp_range=timestamp_range,
+            camera_params=camera_params,
+            ego_poses=ego_poses,
+            participants=participants,
+        )
+        metadata["scene_mesh_path"] = scene_mesh_path
+        return scene_name, metadata
+
     def read_metadata(self, loader):
         self.metadata, self.idx2scene = {}, []
         self.num_scenarios = 0
-        for config_file in os.listdir(self.directory):
-            self.num_scenarios += 1
+        for config_file in sorted(os.listdir(self.directory)):
             cfg_path = os.path.join(self.directory, config_file)
-
-            scene_name, cfg, timestamp_range, camera_params, ego_poses, participants, scene_mesh_path = loader(cfg_path)
-            # scene_name : str
-            # cfg : object
-            # timestamp : list|tuple [2]
-            # camera params : 
-            #     "camera_name" :
-            #         "K" : list[3][3]
-            #         "H" : int
-            #         "W" : int
-            #         "ego2camera" : list[4][4]
-            # ego poses : 
-            #     1 : list[4][4]
-            #     ...
-            #     n : list[4][4]            
-            # participants :
-            #     "unique_name" : 
-            #         "size" : list[3]
-            #         "type" : str (vehicle/pedestrian/bicycle)
-            #         "poses" :
-            #             1 : list[4][4]
-            #             ...
-            #             n : list[4][4]
-            # scene_mesh_path : str
-
-            self.metadata[scene_name] = self.restructure_metadata(
-                config=cfg,
-                timestamp_range=timestamp_range,
-                camera_params=camera_params,
-                ego_poses=ego_poses,
-                participants=participants,
-            )
-            self.metadata[scene_name]['scene_mesh_path'] = scene_mesh_path
-
+            scene_name, metadata = self._load_single_scene(cfg_path)
+            self.metadata[scene_name] = metadata
             self.idx2scene.append(scene_name)
+            self.num_scenarios += 1
+
+    def hotload_scenario(self, cfg_path):
+        scene_name, metadata = self._load_single_scene(cfg_path)
+        if scene_name not in self.metadata:
+            self.idx2scene.append(scene_name)
+            self.num_scenarios += 1
+            self.base_config["num_scenarios"] = self.num_scenarios
+        self.metadata[scene_name] = metadata
+        return scene_name
 
     def restructure_metadata(self, config, timestamp_range, camera_params, ego_poses, participants):
         init_state, agent_state = {}, {}
@@ -144,12 +152,12 @@ class ScenarioDataManager(BaseManager):
             'timestamp_range': timestamp_range
         }
 
-    def reset(self, scene_id=None):
+    def reset(self, scene_name=None):
         """
         Reset scenario data manager.
 
         Args:
-            scene_id: Scene index (int) to load specific scene.
+            scene_name: Name of the scene to load.
                      If None, randomly select a scene (default behavior).
 
         Raises:
@@ -160,12 +168,13 @@ class ScenarioDataManager(BaseManager):
         #     self._scenarios = {}
 
         # Support explicit scene selection for OnSite integration
-        if scene_id is not None:
-            if not (0 <= scene_id < self.num_scenarios):
-                raise ValueError(f"scene_id {scene_id} out of range [0, {self.num_scenarios})")
-            self.current_scenario_id = scene_id
-        else:
+        if scene_name is not None:
+            self.current_scenario_id = self.idx2scene.index(scene_name)
+        elif self.random_scenario:
             self.current_scenario_id = self.np_random.randint(0, self.num_scenarios)
+        else:
+            self.current_scenario_id = (self.current_scenario_id + 1) % self.num_scenarios
+
         self.current_config = self.base_config.copy()
 
         config_dict=self.current_config["actor_config"]
@@ -184,7 +193,11 @@ class ScenarioDataManager(BaseManager):
             'normal': [0, 0, 1],
             'constant': ground_height
         }
-
+        # current_metadata['ground_plane'] = self._build_ground_plane(
+        #     ego_poses,
+        #     ego_height=config_dict["controller"].DEFAULT_HEIGHT,
+        #     start_ts=start_ts
+        # )
     def get_current_scenario_data(self):
         return self.get_scenario_data(self.current_scenario_id)
 
@@ -258,61 +271,3 @@ class ScenarioDataManager(BaseManager):
         self.summary_lookup.clear()
         self.mapping.clear()
         self.summary_dict, self.summary_lookup, self.mapping = None, None, None
-
-
-class ScenarioOnlineDataManager(BaseManager):
-    """
-    Compared to ScenarioDataManager, this manager allow user to pass in Scenario Description online.
-    It will not read data from disk, but receive data from user.
-    """
-    PRIORITY = -10
-    _scenario = None
-
-    @property
-    def current_scenario_summary(self):
-        return self.current_scenario[SD.METADATA]
-
-    def set_scenario(self, scenario_description):
-        SD.sanity_check(scenario_description)
-        scenario_description = SD.centralize_to_ego_car_initial_position(scenario_description)
-        self._scenario = scenario_description
-
-    def get_scenario(self, seed=None, should_copy=False):
-        assert self._scenario is not None, "Please set scenario first via env.set_scenario(scenario_description)!"
-        if should_copy:
-            return copy.deepcopy(self._scenario)
-        return self._scenario
-
-    def get_metadata(self):
-        raise ValueError()
-        state = super(ScenarioDataManager, self).get_metadata()
-        raw_data = self.current_scenario
-        state["raw_data"] = raw_data
-        return state
-
-    @property
-    def current_scenario_length(self):
-        return self.current_scenario[SD.LENGTH]
-
-    @property
-    def current_scenario(self):
-        return self._scenario
-
-    @property
-    def current_scenario_difficulty(self):
-        return 0
-
-    @property
-    def current_scenario_id(self):
-        return self.current_scenario_summary["scenario_id"]
-
-    @property
-    def data_coverage(self):
-        return None
-
-    def destroy(self):
-        """
-        Clear memory
-        """
-        super(ScenarioOnlineDataManager, self).destroy()
-        self._scenario = None

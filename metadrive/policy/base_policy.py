@@ -17,6 +17,7 @@ class BasePolicy(Randomizable, Configurable):
         Configurable.__init__(self, config)
         Randomizable.__init__(self, 0)
         self.step_manager = step_manager
+        self.out_of_road_threshold = config.get("out_of_road_threshold", 5)
         self.action_info = dict()
 
     def reset(self, controller, seed, state, init_state, **kwargs):
@@ -57,7 +58,7 @@ class BasePolicy(Randomizable, Configurable):
 
         distances = torch.norm(expert_positions - ego_position.unsqueeze(0), dim=1)
         min_distance = torch.min(distances).item()
-        return min_distance < self.config['out_of_road_threshold']
+        return min_distance < self.out_of_road_threshold
     
     def get_action_info(self):
         """

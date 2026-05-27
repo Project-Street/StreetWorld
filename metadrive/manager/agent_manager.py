@@ -12,6 +12,7 @@ from metadrive.policy.replay_policy import ReplayPolicy
 from metadrive.obs.gaussian_obs import GaussianObservation
 from metadrive.obs.navigation_obs import NavigationObservation
 from metadrive.base_class.base_object import BaseObject
+import time
 logger = get_logger()
 
 
@@ -47,7 +48,8 @@ class AgentManager(BaseManager):
         """
         super().__init__()
         self.INITIALIZED = False
-        self.max_step = config.get('max_step', 10_000)
+        self.max_step = config.get("max_step", None)
+        self.check_crash = config.get("check_crash", True)
 
 
         # for getting {agent_id: BaseObject}, use agent_manager.active_agents
@@ -69,6 +71,8 @@ class AgentManager(BaseManager):
         self.last_observation = None
         if config is not None:
             self.config = config
+        self.max_step = self.config.get("max_step", None)
+        self.check_crash = self.config.get("check_crash", True)
 
         if not self.INITIALIZED:
             self.lazy_init()
@@ -76,7 +80,7 @@ class AgentManager(BaseManager):
         self.controller = self._create_agent(**kwargs)
         self.state = AgentState.NOT_SPAWN
 
-        self.observer.reset(controller=self.controller, seed=self.generate_seed(), **kwargs)
+        self.observer.reset(controller=self.controller, seed=self.generate_seed(), step_mgr=self.step_manager, **kwargs)
         self.policy.reset(controller=self.controller, seed=self.generate_seed(), **kwargs)
 
         if isinstance(self.observer, NavigationObservation):
@@ -97,11 +101,11 @@ class AgentManager(BaseManager):
             config=self.config['controller_config'], 
             physics_world=physics_world,
             random_seed=self.generate_seed(),
-            size=self.config['controller_config'].get('size', None),
+            size=self.config['controller_config']['size'],
             position=init_state['spawn_position'],
             heading_theta=init_state['spawn_yaw'],
-            velocity=init_state.get('spawn_velocity', None),
-            angluar_velocity=init_state.get('spawn_angular_velocity', 0.0),
+            velocity=init_state['spawn_velocity'],
+            angluar_velocity=init_state['spawn_angular_velocity'],
             **kwargs
         )
         # self.init_pos = init_state['spawn_position']
@@ -115,11 +119,11 @@ class AgentManager(BaseManager):
         But other policies like ReplayPolicy should be called in after_step, as they already know the final state and
         exempt the requirement for rolling out the dynamic system to get it.
         """
+        if self.is_static:
+            return
+
         if self.state == AgentState.ALIVE:
-            if isinstance(self.policy, EnvInputPolicy):
-                action = self.policy.act(action)
-            else:
-                action = self.policy.act(self.last_observation)
+            action = self.policy.act(action=action, observation=self.last_observation)
             
             if isinstance(self.policy, ReplayPolicy):
                 self.controller.move(state_info=action)
@@ -140,7 +144,7 @@ class AgentManager(BaseManager):
 
         if self.state == AgentState.ALIVE:
             # crash checks from controller
-            if isinstance(self.controller, BaseVehicle):
+            if not self.is_static and self.check_crash and isinstance(self.controller, BaseVehicle):
                 self.controller.crash_check()
                 
                 if self.controller.crash_human:
@@ -160,7 +164,7 @@ class AgentManager(BaseManager):
                     self.state = AgentState.CRASH_WORLD
                     return
 
-            if self.step_manager.eposide_step >= self.max_step:
+            if self.max_step and self.step_manager.eposide_step >= self.max_step:
                 self.clear_all_objects()
                 self.state = AgentState.OUT_OF_STEP
                 return
@@ -242,3 +246,7 @@ class AgentManager(BaseManager):
         self.policy = None
 
         self.INITIALIZED = False
+
+    @property
+    def is_static(self):
+        return hasattr(self.policy, 'static') and self.policy.static
