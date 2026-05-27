@@ -1,6 +1,6 @@
 from typing import Tuple, Sequence
 from metadrive.constants import CamMask
-
+import numpy as np
 from panda3d.core import LVector3
 from panda3d.bullet import BulletBoxShape
 

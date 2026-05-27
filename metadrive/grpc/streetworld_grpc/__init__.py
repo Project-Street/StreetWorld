@@ -7,13 +7,16 @@ compiles the proto files if necessary.
 """
 
 import sys
+import os
 from pathlib import Path
 from typing import List, Tuple
+
+from grpc_tools import protoc
 
 # Determine package directories
 _PACKAGE_DIR = Path(__file__).parent.resolve()
 _PROTO_DIR = _PACKAGE_DIR / "proto"
-
+PROTO_INCLUDE = os.path.dirname(protoc.__file__) + '/_proto'
 
 def _find_proto_files() -> List[Path]:
     """Find all .proto files in the proto directory."""
@@ -40,24 +43,20 @@ def _check_compilation_needed(proto_file: Path) -> bool:
         pb2_mtime = pb2_file.stat().st_mtime
         pb2_grpc_mtime = pb2_grpc_file.stat().st_mtime
         return proto_mtime > pb2_mtime or proto_mtime > pb2_grpc_mtime
-    except OSError:
+    except OSError as e:
+        print(f"Error checking file modification times: {e}", file=sys.stderr)
         return True
-
 
 def _compile_proto(proto_file: Path) -> bool:
     """Compile a proto file using grpc_tools.protoc."""
-    try:
-        from grpc_tools import protoc
-    except ImportError:
-        print("Error: grpcio-tools not installed. "
-              "Please install with: pip install grpcio-tools", file=sys.stderr)
-        return False
 
     pb2_file, pb2_grpc_file = _get_generated_files(proto_file)
 
     args = [
         "-I",
         str(_PROTO_DIR),
+        "-I",
+        PROTO_INCLUDE,
         "--python_out",
         str(_PACKAGE_DIR),
         "--grpc_python_out",
@@ -67,10 +66,11 @@ def _compile_proto(proto_file: Path) -> bool:
 
     try:
         ret = protoc.main(["protoc"] + args)
-        return ret == 0
+        if ret != 0:
+            raise RuntimeError(f"protoc returned non-zero exit code: {ret}")
     except Exception as e:
-        print(f"Error compiling {proto_file}: {e}", file=sys.stderr)
-        return False
+        raise RuntimeError(f"failed to compile {proto_file}") from e
+
 
 
 def _load_generated_module(module_name: str, file_path: Path) -> object:
@@ -101,8 +101,7 @@ def _ensure_proto_compiled() -> None:
     for proto_file in proto_files:
         if _check_compilation_needed(proto_file):
             print(f"Compiling {proto_file.name}...", file=sys.stderr)
-            if not _compile_proto(proto_file):
-                raise ImportError(f"Failed to compile {proto_file}")
+            _compile_proto(proto_file)
 
 
 # Compile proto files if needed

@@ -21,7 +21,6 @@ from metadrive.obs.observation_base import BaseObservation
 from metadrive.obs.gaussian_obs import GaussianObservation
 from metadrive.obs.observation_base import DummyObservation
 # from metadrive.obs.state_obs import LidarStateObservation
-from metadrive.scenario.utils import convert_recorded_scenario_exported
 from metadrive.utils.random_utils import get_np_random
 from metadrive.utils.utils import merge_dicts, concat_step_infos
 from metadrive.utils.logger import get_logger, reset_logger
@@ -33,7 +32,7 @@ from metadrive.version import VERSION
 from metadrive.component.traffic_participants.cyclist import Cyclist
 from metadrive.component.traffic_participants.pedestrian import Pedestrian
 from metadrive.component.vehicle.vehicle_type import get_vehicle_type
-from metadrive.manager.scenario_data_manager import ScenarioDataManager, ScenarioOnlineDataManager
+from metadrive.manager.scenario_data_manager import ScenarioDataManager
 from metadrive.manager.scenario_map_manager import ScenarioMapManager
 from metadrive.obs.navigation_obs import NavigationObservation
 from metadrive.obs.assembly_obs import AssemblyObservation
@@ -71,6 +70,19 @@ class BaseEnv(gym.Env):
         self.model = model
 
         self.setup(default_config)
+        self.gui = None
+
+        if self.config["gui"]:
+            gui_image_key = self.config["gui_image_key"]
+            try:
+                from metadrive.gui.gui import GUI
+
+                self.gui = GUI(image_key=gui_image_key)
+            except Exception as exc:
+                from metadrive.gui.headless_gui import HeadlessGUI
+        
+                self.logger.warning("GUI creation failed, switching to HeadlessGUI: %s", exc)
+                self.gui = HeadlessGUI(image_key=gui_image_key)
 
     # def _post_process_config(self, config):
     #     """Add more special process to merged config"""
@@ -133,7 +145,7 @@ class BaseEnv(gym.Env):
         # self.managers[manager_name] = manager
         setattr(self, manager_name, manager)
 
-    def reset(self, seed: Union[None, int] = None):
+    def reset(self, seed: Union[None, int] = None, scene_name: Union[None, str] = None):
         # Update record replay
         self.replay_episode = True if self.config["replay_episode"] is not None else False
         self.record_episode = self.config["record_episode"]
@@ -167,12 +179,18 @@ class BaseEnv(gym.Env):
                 self.agent_managers[n].destroy()
                 self.agent_managers.pop(n)
 
-        self.data_manager.reset()
-
+        if scene_name:
+            scene_id = self.data_manager.idx2scene.index(scene_name)
+            self.data_manager.reset(scene_id=scene_id)
+        else:
+            self.data_manager.reset()
+        
         scenario_data = self.data_manager.get_current_scenario_data()
         self.step_manager.reset(**scenario_data)
         scene_map = self.map_manager.reset(config=self.config['map_config'], physics_world=self.physics_world, **scenario_data)
         self._reset_agents(scenario_data, scene_map)
+
+        print("=======>>> Reset scenario: {}, seed: {}".format(self.scene_name, self.current_seed))
 
         self._update_scene()
 
@@ -290,17 +308,24 @@ class BaseEnv(gym.Env):
         # engine_info = merge_dicts(
         #     after_step_infos, allow_new_keys=True, without_copy=True
         # )
-        engine_info = after_step_infos
-        return self._get_step_return(actions, collected_obs=engine_info)  # collect observation, reward, termination
-
+        engine_info = after_step_infos        
+        step_result = self._get_step_return(actions, collected_obs=engine_info)  # collect observation, reward, termination
+        obses, _, terminateds, truncateds, step_infos = step_result
+        if self.gui is not None:
+            self.gui.draw(obs=obses, info=step_infos, action=actions)
+            if terminateds or truncateds:
+                self.gui.flush_episode(self.scene_name)
+        return step_result
+    
     def _update_scene(self):
         self._surrounding_pre_collection = {}
         new_object_poses = {}
 
         for name, mgr in self.agent_managers.items():
             mgr.update_state()
-            obj_pose = mgr.get_pose()
             if mgr.state == AgentState.ALIVE:
+                obj_pose = mgr.get_pose()
+                
                 controller = mgr.controller
                 transform = obj_pose
                 velocity = np.asarray(controller.velocity, dtype=np.float32)
@@ -425,12 +450,10 @@ class BaseEnv(gym.Env):
                     model.destroy()
             except Exception:
                 pass
-        self.model = None
-
-        # 5) Drop manager references to allow GC.
-        self.step_manager = None
-        self.map_manager = None
-        self.data_manager = None
+        
+        if self.gui is not None:
+            self.gui.shutdown()
+            self.gui = None
 
     def capture(self, file_name=None):
         if not hasattr(self, "_capture_img"):

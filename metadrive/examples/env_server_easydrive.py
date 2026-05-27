@@ -214,6 +214,7 @@ class EnvServicer(service_pb2_grpc.EnvServiceServicer):
 
 def serve(
     scene_config_directory: str = "",
+    random_scenario: bool = True,
     host: str = "0.0.0.0",
     port: int = 50052,
     max_workers: int = 10,
@@ -230,6 +231,7 @@ def serve(
     # Create environment configuration
     config = {
         "scene_config_directory": scene_config_directory,
+        "random_scenario": random_scenario,
     }
     # Create servicer
     servicer = EnvServicer(config)
@@ -288,6 +290,11 @@ def main():
         default=10,
         help="Max concurrent RPC handlers (default: 10)"
     )
+    parser.add_argument(
+        "--ordered-scenario",
+        action="store_true",
+        help="Use ordered (sequential) scenarios instead of random sampling"
+    )
     args = parser.parse_args()
 
     try:
@@ -301,6 +308,7 @@ def main():
 
     serve(
         scene_config_directory=args.scene_config_directory,
+        random_scenario=not args.ordered_scenario,
         host=args.host,
         port=args.port,
         max_workers=args.max_workers,
