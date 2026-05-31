@@ -48,10 +48,13 @@ class OnSiteScenarioEnv(ScenarioEnv):
             # simulate or replay
             for n, manager in self.agent_managers.items():
                 manager.step(actions)
+
+            self.physics_world.step()
+            
+            for n ,manager in self.agent_managers.items():
                 if n != "actor":  # Skip update_state for "actor" since it's controlled by Notify
                     manager.update_state()
 
-            self.physics_world.step()
 
         # to get new pose and update gaussian model
         self._update_scene()

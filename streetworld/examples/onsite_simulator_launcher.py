@@ -177,7 +177,6 @@ def process_notify(middleware, env, none_sleep_s, top_bar_state: LauncherTopBarS
         if sim_state == SIM_STATE.IDLE:
             logger.warning(f"Simulator: Received {notify_type} before ActorPrepare. Waiting for ActorPrepare.")
             sim_state = SIM_STATE.RECV_START
-            prepare_simulation(middleware, env)
             return
         elif sim_state == SIM_STATE.PREPARED:
             start_simulation(middleware, env, top_bar_state)
@@ -256,9 +255,9 @@ def main_loop(
             if result is not None:
                 session_id, _ , _, scene_name = result
                 top_bar_state.mark_actor_prepared(session_id, scene_name)
+                prepare_simulation(middleware, env)
                 if sim_state == SIM_STATE.IDLE:
                     sim_state = SIM_STATE.PREPARED
-                    prepare_simulation(middleware, env)
                 elif sim_state == SIM_STATE.RECV_START:
                     start_simulation(middleware, env, top_bar_state)
 
