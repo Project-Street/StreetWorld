@@ -10,10 +10,10 @@ This script implements the complete communication flow with OnSite server:
 
 import argparse
 import logging
+import os
 import sys
 import time
 import traceback
-import os
 
 from rich.console import Console
 from rich.live import Live
@@ -23,6 +23,7 @@ from streetworld.manager.agent_manager import AgentState
 from streetworld.misc.nurec_interface.simulator_interface import SimulatorInterface
 from streetworld.onstite_config import ONSITE_DEFAULT_CONFIG
 from streetworld.utils.logger import setup_entrypoint_logging
+from streetworld.utils.updater import update_streetworld_if_needed
 from streetworld.utils.onsite_simulator_top_bar import (
     LauncherTopBarState,
     build_launcher_renderable,
@@ -37,6 +38,7 @@ from streetworld.misc.onsite_middleware.onsite_proto.main.proto.enums_pb2 import
 )
 
 logger = logging.getLogger(__name__)
+
 
 # NotifyType -> AgentState mapping
 NOTIFY_TO_STATE = {
@@ -57,6 +59,7 @@ scene_name = ""
 actor_id = "simulator"
 
 obs, info = None, None
+
 
 def run_launcher(args, top_bar_state: LauncherTopBarState):
     model = None
@@ -321,6 +324,9 @@ def main():
     parser.add_argument('--no-tui', action='store_true',
                         help='Disable Rich TUI so stdout/stderr and breakpoints stay visible')
     args = parser.parse_args()
+    if update_streetworld_if_needed():
+        sys.exit(0)
+
     console = Console()
     log_path = setup_entrypoint_logging(args.log_level, log_name="simulator", enable_stderr=args.no_tui)
     if args.gui and args.video:
