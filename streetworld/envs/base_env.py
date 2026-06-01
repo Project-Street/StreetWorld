@@ -243,6 +243,8 @@ class BaseEnv(gym.Env):
         scene_map = self.map_manager.reset(config=self.config['map_config'], physics_world=self.physics_world, **scenario_data)
         self._reset_agents(scenario_data, scene_map)
 
+        for mgr_n, manager in self.agent_managers.items() :
+            manager.update_state()
         self._update_scene()
 
         step_infos = {}
@@ -345,9 +347,9 @@ class BaseEnv(gym.Env):
                 manager.step(actions)
 
             self.physics_world.step()
-            # the recording should happen after step physics world
-            # if "record_manager" in self.managers and i < self.config["decision_repeat"] - 1:
-            #     self.record_manager.step()
+
+            for id ,manager in self.agent_managers.items():
+                manager.update_state()
 
         # to get new pose and update gaussian model
         self._update_scene()
@@ -374,7 +376,6 @@ class BaseEnv(gym.Env):
         new_object_poses = {}
 
         for name, mgr in self.agent_managers.items():
-            mgr.update_state()
             if mgr.state == AgentState.ALIVE:
                 self._surrounding_pre_collection[name] = mgr.get_base_state()
                 obj_pose = self._surrounding_pre_collection[name]['transform']
