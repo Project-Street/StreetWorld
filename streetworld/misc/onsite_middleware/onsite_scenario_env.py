@@ -43,8 +43,8 @@ class OnSiteScenarioEnv(ScenarioEnv):
         self.last_received_pub_role = None
     # ===== Run-time =====
     def step(self, actions):
-        self.step_manager.step()
         for i in range(self.config["decision_repeat"]):
+            self.step_manager.step()
             # simulate or replay
             for n, manager in self.agent_managers.items():
                 manager.step(actions)

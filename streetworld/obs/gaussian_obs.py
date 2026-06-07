@@ -60,8 +60,8 @@ class GaussianObservation(BaseObservation):
 
             hpr = np.asarray(cam_cfg["hpr"], dtype=np.float32)
             hpr_rad = np.deg2rad(hpr)
-            R_additional = R.from_euler('ZYX', hpr_rad, degrees=False).as_matrix()
-            R_final = np.asarray(R_ego2cam_base @ R_additional, dtype=np.float32)
+            R_camera2ego = R.from_euler('ZYX', hpr_rad, degrees=False).as_matrix()
+            R_final = np.asarray(R_ego2cam_base @ np.linalg.inv(R_camera2ego), dtype=np.float32)
 
             offset = np.asarray(cam_cfg["offset"], dtype=np.float32)
             translation = -np.asarray(R_final @ offset, dtype=np.float32)
