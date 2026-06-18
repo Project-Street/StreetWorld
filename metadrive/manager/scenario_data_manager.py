@@ -36,6 +36,7 @@ class ScenarioDataManager(BaseManager):
         super(ScenarioDataManager, self).__init__()
         self.base_config = config
         self.loader = loader
+        self.eval_mode = False
 
         # self.store_data = engine.global_config["store_data"]
         # Allow subclasses to set directory differently
@@ -73,6 +74,19 @@ class ScenarioDataManager(BaseManager):
         )
         metadata["scene_mesh_path"] = scene_mesh_path
         return scene_name, metadata
+
+    def eval(self, order=True, repeat_per_scene=1):
+        """
+        Set the manager to evaluation mode. This will reset the scenario index to start and optionally shuffle the scenarios.
+
+        Args:
+            order: If True, scenarios will be evaluated in order. If False, scenarios will be shuffled.
+            repeat_per_scene: Number of times to repeat each scenario before moving to the next one.
+        """
+        self.current_scenario_id = self.start_scenario_index - 1  # Reset to before the first scenario
+        self.remain_queue = [idx for _ in range(repeat_per_scene) for idx in range(self.num_scenarios)]  # Create a queue of scenario indices based on repeat_per_scene
+        self.random_scenario = not order
+        self.eval_mode = True
 
     def read_metadata(self, loader):
         self.metadata, self.idx2scene = {}, []
@@ -168,7 +182,13 @@ class ScenarioDataManager(BaseManager):
         #     self._scenarios = {}
 
         # Support explicit scene selection for OnSite integration
-        if scene_name is not None:
+        if self.eval_mode :
+            if self.remain_queue:
+                self.current_scenario_id = self.remain_queue.pop(0)
+            else:
+                raise LookupError("No more scenarios to evaluate.")
+            
+        elif scene_name is not None:
             self.current_scenario_id = self.idx2scene.index(scene_name)
         elif self.random_scenario:
             self.current_scenario_id = self.np_random.randint(0, self.num_scenarios)

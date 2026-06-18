@@ -41,7 +41,7 @@ class StateObservation(BaseObservation):
 
         linear_vel = np.asarray(self.controller.velocity, dtype=np.float32)[:2]
         prev_vel_xy = np.asarray(self.controller.last_velocity, dtype=np.float32)[:2]
-        linear_acc_xy = (linear_vel - prev_vel_xy) / dt
+        linear_acc_xy = (linear_vel - prev_vel_xy) / dt /5
         linear_acc = np.zeros(3, dtype=np.float32)
         linear_acc[:2] = linear_acc_xy
         accel = float(np.linalg.norm(linear_acc_xy))

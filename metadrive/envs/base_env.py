@@ -65,7 +65,6 @@ class BaseEnv(gym.Env):
         self.in_stop = False
 
         # scenarios
-        self.start_index = 0
 
         self.model = model
 
@@ -74,15 +73,7 @@ class BaseEnv(gym.Env):
 
         if self.config["gui"]:
             gui_image_key = self.config["gui_image_key"]
-            try:
-                from metadrive.gui.gui import GUI
-
-                self.gui = GUI(image_key=gui_image_key)
-            except Exception as exc:
-                from metadrive.gui.headless_gui import HeadlessGUI
-        
-                self.logger.warning("GUI creation failed, switching to HeadlessGUI: %s", exc)
-                self.gui = HeadlessGUI(image_key=gui_image_key)
+            self.gui = self.config["gui"](image_key=gui_image_key)
 
     # def _post_process_config(self, config):
     #     """Add more special process to merged config"""
@@ -144,6 +135,9 @@ class BaseEnv(gym.Env):
         # assert not hasattr(self, manager_name), "Manager name can not be same as the attribute in BaseEnv"
         # self.managers[manager_name] = manager
         setattr(self, manager_name, manager)
+    
+    def eval(self, order=True, repeat_per_scene=1):
+        self.data_manager.eval(order=order, repeat_per_scene=repeat_per_scene)
 
     def reset(self, seed: Union[None, int] = None, scene_name: Union[None, str] = None):
         # Update record replay

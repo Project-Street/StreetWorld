@@ -51,11 +51,18 @@ def build_camera_params(camera_configs):
         
         ego2camera = torch.from_numpy(ego2camera)
         
+        resolution_scale = cam_cfg.get('resolution_scale', 1)
+        if resolution_scale != 1:
+            K = K.clone()
+            K[0, 0] *= resolution_scale
+            K[0, 2] *= resolution_scale
+            K[1, 1] *= resolution_scale
+            K[1, 2] *= resolution_scale
         camera_params[cam_name] = {
             'K': K,
-            'H': cam_cfg['H'],
-            'W': cam_cfg['W'],
-            'ego2camera': ego2camera
+            'H': int(round(cam_cfg['H'] * resolution_scale)),
+            'W': int(round(cam_cfg['W'] * resolution_scale)),
+            'ego2camera': ego2camera,
         }
     
     return camera_params
@@ -88,12 +95,8 @@ class GaussianObservation(BaseObservation):
         merged_params = dict(dataset_params)
 
         if self.camera_configs:
-            missing_cfg = {
-                name: cfg for name, cfg in self.camera_configs.items() if name not in merged_params
-            }
-            if missing_cfg:
-                built_missing = build_camera_params(missing_cfg)
-                merged_params.update(built_missing)
+            configured_params = build_camera_params(self.camera_configs)
+            merged_params.update(configured_params)
 
         self.params = merged_params
 
@@ -143,7 +146,7 @@ class GaussianObservation(BaseObservation):
                     [0, 0, -1],
                     [1, 0, 0]
                 ], dtype=np.float32)
-                R_final = R_ego2cam_base @ R_additional
+                R_final = R_ego2cam_base @ np.linalg.inv(R_additional)
                 translation = -np.asarray(R_final @ offset, dtype=np.float32)
                 ego2cam = torch.from_numpy(
                     np.vstack([

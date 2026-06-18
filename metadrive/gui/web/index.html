@@ -1,0 +1,497 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>EasyDrive WebUI</title>
+  <style>
+    :root {
+      --bg: #111312;
+      --panel: #191d1b;
+      --panel-2: #202622;
+      --text: #eef4ee;
+      --muted: #9faa9f;
+      --grid: #344038;
+      --line: #50dc78;
+      --bar: #3cb9ff;
+      --border: #38443d;
+    }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      margin: 0;
+      background: radial-gradient(circle at 25% 15%, #253229 0, transparent 32%), var(--bg);
+      color: var(--text);
+      font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      overflow: hidden;
+    }
+    .shell {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(280px, 28vw);
+      gap: 14px;
+      height: 100vh;
+      padding: 14px;
+    }
+    .stage, .side {
+      background: linear-gradient(180deg, rgba(32, 38, 34, 0.94), rgba(17, 19, 18, 0.96));
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      box-shadow: 0 20px 70px rgba(0, 0, 0, 0.35);
+      overflow: hidden;
+    }
+    .stage {
+      position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 0;
+    }
+    #frontImage {
+      display: block;
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      background: #050605;
+    }
+    .waiting {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--muted);
+      letter-spacing: 0.04em;
+      background: repeating-linear-gradient(135deg, #101311, #101311 18px, #131815 18px, #131815 36px);
+    }
+    .bars {
+      position: absolute;
+      left: 20px;
+      right: 20px;
+      bottom: 20px;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 14px;
+      pointer-events: none;
+    }
+    .barBox {
+      background: rgba(12, 15, 13, 0.78);
+      border: 2px solid rgba(238, 244, 238, 0.78);
+      border-radius: 10px;
+      padding: 10px 12px 12px;
+      backdrop-filter: blur(6px);
+    }
+    .barLabel {
+      display: flex;
+      justify-content: space-between;
+      margin-bottom: 8px;
+      font-size: 13px;
+      color: var(--text);
+      text-transform: lowercase;
+    }
+    .track {
+      position: relative;
+      height: 18px;
+      background: #282e2a;
+      border-radius: 999px;
+      overflow: hidden;
+    }
+    .track::before {
+      content: "";
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      left: 50%;
+      width: 2px;
+      background: rgba(255, 255, 255, 0.82);
+      transform: translateX(-1px);
+      z-index: 2;
+    }
+    .fill {
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      left: 50%;
+      width: 0;
+      background: linear-gradient(90deg, #2a84ff, var(--bar));
+    }
+    .fill.negative { transform-origin: left center; }
+    .side {
+      display: grid;
+      grid-template-rows: auto auto 1fr 1fr;
+      min-width: 0;
+    }
+    .metrics {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      padding: 14px;
+      border-bottom: 1px solid var(--border);
+      background: rgba(25, 29, 27, 0.72);
+    }
+    .metric {
+      background: var(--panel-2);
+      border: 1px solid #2e3932;
+      border-radius: 12px;
+      padding: 10px;
+      min-width: 0;
+    }
+    .metric span {
+      display: block;
+      color: var(--muted);
+      font-size: 11px;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+    .metric strong {
+      display: block;
+      margin-top: 4px;
+      font-size: 18px;
+      font-variant-numeric: tabular-nums;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .plotCard {
+      min-height: 0;
+      padding: 12px;
+      border-bottom: 1px solid var(--border);
+    }
+    .plotTitle {
+      margin: 0 0 8px;
+      color: var(--muted);
+      font-size: 12px;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+    .metricTableCard {
+      display: none;
+      padding: 12px;
+      border-bottom: 1px solid var(--border);
+    }
+    .metricTable {
+      width: 100%;
+      border-collapse: collapse;
+      overflow: hidden;
+      border: 1px solid #2d3831;
+      border-radius: 10px;
+      font-variant-numeric: tabular-nums;
+    }
+    .metricTable th, .metricTable td {
+      padding: 9px 10px;
+      border-bottom: 1px solid #2d3831;
+      text-align: right;
+      white-space: nowrap;
+    }
+    .metricTable th {
+      color: var(--muted);
+      background: #171b18;
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+    .metricTable td {
+      color: var(--text);
+      background: #111512;
+      font-size: 14px;
+    }
+    .metricTable th:first-child, .metricTable td:first-child {
+      text-align: left;
+      color: var(--muted);
+    }
+    .metricTable tr:last-child th, .metricTable tr:last-child td {
+      border-bottom: 0;
+    }
+    body.metricOnly .shell {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
+      padding: 0;
+    }
+    body.metricOnly .stage,
+    body.metricOnly .metrics,
+    body.metricOnly .plotCard {
+      display: none;
+    }
+    body.metricOnly .side {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 100vw;
+      height: 100vh;
+      background: transparent;
+      border: 0;
+      border-radius: 0;
+      box-shadow: none;
+    }
+    body.metricOnly .metricTableCard {
+      width: min(900px, 92vw);
+      padding: 0;
+      border: 0;
+    }
+    body.metricOnly .metricTableCard .plotTitle {
+      display: none;
+    }
+    body.metricOnly .metricTable {
+      border: 2px solid #3f4c44;
+      border-radius: 16px;
+    }
+    body.metricOnly .metricTable th,
+    body.metricOnly .metricTable td {
+      padding: 24px 30px;
+      font-size: 30px;
+    }
+    body.metricOnly .metricTable th {
+      font-size: 22px;
+    }
+    canvas {
+      display: block;
+      width: 100%;
+      height: calc(100% - 24px);
+      background: #121512;
+      border: 1px solid #2d3831;
+      border-radius: 10px;
+    }
+    @media (max-width: 900px) {
+      body { overflow: auto; }
+      .shell { grid-template-columns: 1fr; height: auto; min-height: 100vh; }
+      .stage { min-height: 55vh; }
+      .side { grid-template-rows: auto auto 240px 240px; }
+      .bars { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <section class="stage">
+      <img id="frontImage" alt="front camera stream">
+      <div id="waiting" class="waiting">Waiting for policy reset/step...</div>
+      <div class="bars">
+        <div class="barBox">
+          <div class="barLabel"><span>steering</span><span id="steeringText">+0.000</span></div>
+          <div class="track"><div id="steeringFill" class="fill"></div></div>
+        </div>
+        <div class="barBox">
+          <div class="barLabel"><span>throttle_brake</span><span id="throttleText">+0.000</span></div>
+          <div class="track"><div id="throttleFill" class="fill"></div></div>
+        </div>
+      </div>
+    </section>
+    <aside class="side">
+      <div class="metrics">
+        <div class="metric"><span>timestamp</span><strong id="timestamp">--</strong></div>
+        <div class="metric"><span>speed</span><strong id="speed">--</strong></div>
+        <div class="metric"><span>angular velocity</span><strong id="angularVelocity">--</strong></div>
+        <div class="metric"><span>connection</span><strong id="connection">connecting</strong></div>
+      </div>
+      <div id="metricTableCard" class="metricTableCard">
+        <p class="plotTitle">policy metric</p>
+        <table class="metricTable">
+          <thead>
+            <tr><th></th><th>NC</th><th>DAC</th><th>TTC</th><th>COM</th><th>RC</th></tr>
+          </thead>
+          <tbody id="metricTableBody"></tbody>
+        </table>
+      </div>
+      <div class="plotCard">
+        <p class="plotTitle">speed</p>
+        <canvas id="speedPlot"></canvas>
+      </div>
+      <div class="plotCard">
+        <p class="plotTitle">angular_velocity</p>
+        <canvas id="angularPlot"></canvas>
+      </div>
+    </aside>
+  </main>
+
+  <script>
+    const image = document.getElementById('frontImage');
+    const waiting = document.getElementById('waiting');
+    const connection = document.getElementById('connection');
+    const timestamp = document.getElementById('timestamp');
+    const speed = document.getElementById('speed');
+    const angularVelocity = document.getElementById('angularVelocity');
+    const steeringText = document.getElementById('steeringText');
+    const throttleText = document.getElementById('throttleText');
+    const steeringFill = document.getElementById('steeringFill');
+    const throttleFill = document.getElementById('throttleFill');
+    const speedPlot = document.getElementById('speedPlot');
+    const angularPlot = document.getElementById('angularPlot');
+    const metricTableCard = document.getElementById('metricTableCard');
+    const metricTableBody = document.getElementById('metricTableBody');
+    let lastSnapshot = null;
+
+    function signed(value) {
+      return `${value >= 0 ? '+' : ''}${value.toFixed(3)}`;
+    }
+
+    function updateBar(fill, text, value) {
+      const clipped = Math.max(-1, Math.min(1, Number(value)));
+      text.textContent = signed(clipped);
+      fill.style.left = clipped < 0 ? `${50 + clipped * 50}%` : '50%';
+      fill.style.width = `${Math.abs(clipped) * 50}%`;
+    }
+
+    function resizeCanvas(canvas) {
+      const rect = canvas.getBoundingClientRect();
+      const dpr = window.devicePixelRatio || 1;
+      const width = Math.max(1, Math.floor(rect.width * dpr));
+      const height = Math.max(1, Math.floor(rect.height * dpr));
+      if (canvas.width !== width || canvas.height !== height) {
+        canvas.width = width;
+        canvas.height = height;
+      }
+      return { width, height, dpr };
+    }
+
+    function drawPlot(canvas, xs, ys, ylabel) {
+      const { width, height, dpr } = resizeCanvas(canvas);
+      const ctx = canvas.getContext('2d');
+      ctx.clearRect(0, 0, width, height);
+      ctx.fillStyle = '#121512';
+      ctx.fillRect(0, 0, width, height);
+
+      const padL = 48 * dpr;
+      const padR = 14 * dpr;
+      const padT = 16 * dpr;
+      const padB = 34 * dpr;
+      const plotW = Math.max(1, width - padL - padR);
+      const plotH = Math.max(1, height - padT - padB);
+
+      ctx.strokeStyle = '#344038';
+      ctx.lineWidth = 1 * dpr;
+      ctx.beginPath();
+      for (let i = 0; i <= 4; i++) {
+        const y = padT + plotH * i / 4;
+        ctx.moveTo(padL, y);
+        ctx.lineTo(width - padR, y);
+      }
+      ctx.stroke();
+
+      ctx.fillStyle = '#9faa9f';
+      ctx.font = `${11 * dpr}px sans-serif`;
+      ctx.fillText(ylabel, 10 * dpr, 18 * dpr);
+      ctx.fillText('timestamp', padL, height - 10 * dpr);
+
+      if (!xs || !ys || xs.length < 2 || ys.length < 2) {
+        return;
+      }
+
+      const minX = Math.min(...xs);
+      const maxX = Math.max(...xs);
+      let minY = Math.min(...ys);
+      let maxY = Math.max(...ys);
+      if (minY === maxY) {
+        minY -= 1;
+        maxY += 1;
+      }
+      const xSpan = maxX === minX ? 1 : maxX - minX;
+      const ySpan = maxY - minY;
+
+      ctx.strokeStyle = '#50dc78';
+      ctx.lineWidth = 2 * dpr;
+      ctx.beginPath();
+      xs.forEach((x, idx) => {
+        const y = ys[idx];
+        const px = padL + ((x - minX) / xSpan) * plotW;
+        const py = padT + (1 - (y - minY) / ySpan) * plotH;
+        if (idx === 0) ctx.moveTo(px, py);
+        else ctx.lineTo(px, py);
+      });
+      ctx.stroke();
+    }
+
+    function applySnapshot(snapshot) {
+      lastSnapshot = snapshot;
+      waiting.style.display = 'none';
+      image.src = snapshot.image;
+      timestamp.textContent = String(snapshot.timestamp);
+      speed.textContent = Number(snapshot.speed).toFixed(3);
+      angularVelocity.textContent = Number(snapshot.angular_velocity).toFixed(3);
+      updateBar(steeringFill, steeringText, snapshot.steering);
+      updateBar(throttleFill, throttleText, snapshot.throttle_brake);
+      drawPlot(speedPlot, snapshot.timestamp_history, snapshot.speed_history, 'speed');
+      drawPlot(angularPlot, snapshot.timestamp_history, snapshot.angular_velocity_history, 'angular_velocity');
+    }
+
+    function clearView() {
+      lastSnapshot = null;
+      image.removeAttribute('src');
+      timestamp.textContent = '--';
+      speed.textContent = '--';
+      angularVelocity.textContent = '--';
+      updateBar(steeringFill, steeringText, 0);
+      updateBar(throttleFill, throttleText, 0);
+      drawPlot(speedPlot, [], [], 'speed');
+      drawPlot(angularPlot, [], [], 'angular_velocity');
+    }
+
+    function applyMetrics(metrics) {
+      metricTableBody.innerHTML = '';
+      if (!metrics) {
+        metricTableCard.style.display = 'none';
+        document.body.classList.remove('metricOnly');
+        return;
+      }
+      document.body.classList.add('metricOnly');
+      const columns = ['NC', 'DAC', 'TTC', 'COM', 'RC'];
+      Object.entries(metrics).forEach(([name, values]) => {
+        const tr = document.createElement('tr');
+        const label = document.createElement('td');
+        label.textContent = name;
+        tr.appendChild(label);
+        columns.forEach((column) => {
+          const td = document.createElement('td');
+          const value = Number(values[column]);
+          td.textContent = Number.isFinite(value) ? value.toFixed(3) : String(values[column]);
+          tr.appendChild(td);
+        });
+        metricTableBody.appendChild(tr);
+      });
+      metricTableCard.style.display = 'block';
+    }
+
+    function connect() {
+      const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
+      const ws = new WebSocket(`${protocol}://${window.location.host}/ws`);
+      ws.onopen = () => { connection.textContent = 'connected'; };
+      ws.onmessage = (event) => {
+        const message = JSON.parse(event.data);
+        if (message.type === 'waiting') {
+          clearView();
+          if ('metrics' in message) applyMetrics(message.metrics);
+          waiting.style.display = message.metrics ? 'none' : 'flex';
+          return;
+        }
+        if (message.type === 'frame') {
+          applySnapshot(message.snapshot);
+          return;
+        }
+        if (message.type === 'metrics') {
+          applyMetrics(message.metrics);
+        }
+      };
+      ws.onclose = () => {
+        connection.textContent = 'closed';
+        setTimeout(connect, 1000);
+      };
+      ws.onerror = () => {
+        connection.textContent = 'error';
+        ws.close();
+      };
+    }
+
+    window.addEventListener('resize', () => {
+      if (lastSnapshot) {
+        drawPlot(speedPlot, lastSnapshot.timestamp_history, lastSnapshot.speed_history, 'speed');
+        drawPlot(angularPlot, lastSnapshot.timestamp_history, lastSnapshot.angular_velocity_history, 'angular_velocity');
+      } else {
+        drawPlot(speedPlot, [], [], 'speed');
+        drawPlot(angularPlot, [], [], 'angular_velocity');
+      }
+    });
+    connect();
+  </script>
+</body>
+</html>

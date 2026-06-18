@@ -21,6 +21,7 @@ from metadrive.obs.surrounding_obs import SurroundingObservation
 from metadrive.utils.random_utils import get_np_random
 from metadrive.utils.math import wrap_to_pi
 from metadrive.utils.navigation_utils import nearest_front_index
+from metadrive.envs.scenario_metrics import ScenarioMetricTracker
 
 SCENARIO_ENV_CONFIG = dict(
     # ===== Scenario Config =====
@@ -111,6 +112,7 @@ class ScenarioEnv(BaseEnv):
 
     def __init__(self, model, config=None):
         super(ScenarioEnv, self).__init__(model, config)
+        self.metric_tracker = ScenarioMetricTracker()
         self._reset_reward_trackers()
         if self.config["curriculum_level"] > 1:
             assert self.config["num_scenarios"] % self.config["curriculum_level"] == 0, \
@@ -220,7 +222,20 @@ class ScenarioEnv(BaseEnv):
 
     def reset(self, seed: Union[None, int] = None):
         self._reset_reward_trackers()
-        return super().reset(seed=seed)
+        self.metric_tracker.reset()
+        obs, info = super().reset(seed=seed)
+        self.metric_tracker.update(info, obs, self)
+        return obs, info
+
+    def step(self, actions):
+        obs, reward, terminated, truncated, info = super().step(actions)
+        self.metric_tracker.update(info, obs, self)
+        if terminated or truncated:
+            self.metric_tracker.finalize()
+        return obs, reward, terminated, truncated, info
+
+    def get_average_metric(self):
+        return self.metric_tracker.get_average_metric()
 
     def _reset_reward_trackers(self):
         self._last_progress_value = None
