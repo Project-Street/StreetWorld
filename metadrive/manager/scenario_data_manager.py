@@ -44,13 +44,17 @@ class ScenarioDataManager(BaseManager):
 
         self.start_scenario_index = self.base_config.get("start_scenario_index", 0)
         self.random_scenario = self.base_config.get("random_scenario", True)
+        self.hotload = bool(self.base_config.get("hotload", False))
         self.current_scenario_id = self.start_scenario_index - 1
 
         # for multi-worker
         # self._scenarios = {}
 
-        # Read summary file first:
-        self.read_metadata(loader)
+        if self.hotload:
+            self.metadata, self.idx2scene = {}, []
+            self.num_scenarios = 0
+        else:
+            self.read_metadata(loader)
         self.base_config["num_scenarios"] = self.num_scenarios
 
         # sort scenario for curriculum training
@@ -189,6 +193,9 @@ class ScenarioDataManager(BaseManager):
                 raise LookupError("No more scenarios to evaluate.")
             
         elif scene_name is not None:
+            if scene_name not in self.idx2scene and self.hotload:
+                cfg_path = os.path.join(self.directory, f"{scene_name}.yaml")
+                scene_name = self.hotload_scenario(cfg_path)
             self.current_scenario_id = self.idx2scene.index(scene_name)
         elif self.random_scenario:
             self.current_scenario_id = self.np_random.randint(0, self.num_scenarios)

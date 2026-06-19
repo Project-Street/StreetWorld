@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+import logging
 from pathlib import Path
 from typing import Any, Sequence
 
@@ -14,6 +15,8 @@ from metadrive.utils.image_to_video import image_list_to_video
 
 matplotlib.use("Agg")
 
+logger = logging.getLogger(__name__)
+
 def extract_gui_payload(obs: Any, info: Any, action: Sequence[float], image_key: str):
     if len(action) != 2:
         raise ValueError(f"Expected action with length 2, got {len(action)}")
@@ -25,9 +28,12 @@ def extract_gui_payload(obs: Any, info: Any, action: Sequence[float], image_key:
         raise ValueError(f"Invalid image stack shape for {image_key}: {image_stack.shape}")
 
     image = image_stack[-1]
-    velocity = np.asarray(states["velocity"], dtype=np.float32).reshape(-1)
+    velocity = np.asarray(states["linear_velocity"], dtype=np.float32).reshape(-1)
     speed = float(np.linalg.norm(velocity[:2]))
-    angular_velocity = float(states["angular_velocity"])
+    angular_velocity = np.asarray(states["angular_velocity"], dtype=np.float32).reshape(-1)
+    if angular_velocity.shape[0] < 3:
+        raise ValueError(f"Expected angular_velocity with at least 3 values, got shape {angular_velocity.shape}")
+    yaw_rate = float(angular_velocity[2])
     timestamp = int(info["relative_timestamp"])
 
     return {
@@ -36,7 +42,7 @@ def extract_gui_payload(obs: Any, info: Any, action: Sequence[float], image_key:
         "steering": float(action[0]),
         "throttle_brake": float(action[1]),
         "speed": speed,
-        "angular_velocity": angular_velocity,
+        "angular_velocity": yaw_rate,
     }
 
 
@@ -133,10 +139,11 @@ def compose_gui_frame(
 
 
 class HeadlessGUI:
-    def __init__(self, image_key: str, history_size: int = 200, output_dir: str = "gui_output"):
+    def __init__(self, image_key: str, history_size: int = 200, output_dir: str = "videos", fps: float = 40.0):
         self.image_key = image_key
         self.history_size = int(history_size)
         self.output_dir = Path(output_dir)
+        self.fps = float(fps)
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.timestamp_history: list[int] = []
         self.speed_history: list[float] = []
@@ -160,7 +167,8 @@ class HeadlessGUI:
         if self.episode_frames:
             current_time = datetime.now().strftime("%Y%m%d_%H%M%S")
             output_path = self.output_dir / f"{current_time}_{scene_name}.mp4"
-            image_list_to_video(str(output_path), self.episode_frames, code="mp4v")
+            image_list_to_video(str(output_path), self.episode_frames, code="mp4v", fps=self.fps)
+            logger.info("Flushed headless GUI episode for scene %s to %s.", scene_name, output_path)
         self.episode_frames.clear()
         self.timestamp_history.clear()
         self.speed_history.clear()
@@ -168,3 +176,20 @@ class HeadlessGUI:
 
     def shutdown(self) -> None:
         return
+
+
+class CompositeGUI:
+    def __init__(self, *guis):
+        self.guis = guis
+
+    def draw(self, obs: Any, info: Any, action: Sequence[float]) -> None:
+        for gui in self.guis:
+            gui.draw(obs, info, action)
+
+    def flush_episode(self, scene_name: str) -> None:
+        for gui in self.guis:
+            gui.flush_episode(scene_name)
+
+    def shutdown(self) -> None:
+        for gui in reversed(self.guis):
+            gui.shutdown()

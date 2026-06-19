@@ -7,8 +7,8 @@ from metadrive.constants import CollisionGroup
 
 
 class PhysicsWorld:
-    def __init__(self, disable_collision=False, dt=0.01, substep : int = 1): # dt in seconds
-        self.dt = dt
+    def __init__(self, disable_collision=False, physics_world_step_size=0.01, substep : int = 1): # physics_world_step_size in microsecond
+        self.physics_world_step_size = physics_world_step_size
         self.substep = int(substep)
 
         # a dynamic world, moving objects or objects which react to other objects should be placed here
@@ -39,7 +39,17 @@ class PhysicsWorld:
         self.static_world = None
 
     def step(self):
-        self.dynamic_world.doPhysics(self.dt, self.substep, self.dt / self.substep)
+        self.dynamic_world.doPhysics(self.step_size_sec, self.substep, self.step_size_sec / self.substep)
+
+    @property
+    def step_size_sec(self):
+        return self.physics_world_step_size * 1e-6
+
+    def step_size_ms(self):
+        return self.physics_world_step_size * 1e-3
+
+    def step_size_us(self):
+        return self.physics_world_step_size
     
     def __del__(self):
         logging.debug("Physics world is destroyed successfully!")

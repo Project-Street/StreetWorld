@@ -96,16 +96,13 @@ class BaseEnv(gym.Env):
         """
         self._register_manager("data_manager", ScenarioDataManager(config, self.model.load_metadata))
         self._register_manager("map_manager", ScenarioMapManager(self.config['map_config'], self.model.load_model))
-        self._register_manager("step_manager", StepCounter(self.config['physics_world_step_size'] * self.config["decision_repeat"],))
+        self._register_manager("step_manager", StepCounter(self.config['physics_world_step_size'], self.config["decision_repeat"]))
 
         # self._register_manager("record_manager", RecordManager())
         # self._register_manager("replay_manager", ReplayManager())
 
         # physics world
-        self.physics_world = PhysicsWorld(
-            disable_collision=self.config["disable_collision"],
-            dt=self.config["physics_world_step_size"] * 1e-6
-        )
+        self.physics_world = PhysicsWorld(disable_collision=self.config["disable_collision"], physics_world_step_size=self.config['physics_world_step_size'])
 
         # collision callback
         self.physics_world.dynamic_world.setContactAddedCallback(PythonCallbackObject(collision_callback))
@@ -135,7 +132,7 @@ class BaseEnv(gym.Env):
         # assert not hasattr(self, manager_name), "Manager name can not be same as the attribute in BaseEnv"
         # self.managers[manager_name] = manager
         setattr(self, manager_name, manager)
-    
+
     def eval(self, order=True, repeat_per_scene=1):
         self.data_manager.eval(order=order, repeat_per_scene=repeat_per_scene)
 
@@ -173,11 +170,7 @@ class BaseEnv(gym.Env):
                 self.agent_managers[n].destroy()
                 self.agent_managers.pop(n)
 
-        if scene_name:
-            scene_id = self.data_manager.idx2scene.index(scene_name)
-            self.data_manager.reset(scene_id=scene_id)
-        else:
-            self.data_manager.reset()
+        self.data_manager.reset(scene_name=scene_name)
         
         scenario_data = self.data_manager.get_current_scenario_data()
         self.step_manager.reset(**scenario_data)
@@ -236,6 +229,8 @@ class BaseEnv(gym.Env):
                     cfg['controller'] = Pedestrian
                 elif tracking['type'] == 'cyclist':
                     cfg['controller'] = Cyclist
+                else:
+                    raise
                 
                 self.agent_managers[name] = AgentManager(cfg, self.step_manager)
             else:
@@ -281,14 +276,16 @@ class BaseEnv(gym.Env):
     def step(self, actions: Union[Union[np.ndarray, list], Dict[AnyStr, Union[list, np.ndarray]], int]):
         for i in range(self.config["decision_repeat"]):
             # simulate or replay
+            self.step_manager.step()
             for manager in self.agent_managers.values():
                 manager.step(actions)
 
             self.physics_world.step()
+            for manager in self.agent_managers.values():
+                manager.update_state()
             # the recording should happen after step physics world
             # if "record_manager" in self.managers and i < self.config["decision_repeat"] - 1:
             #     self.record_manager.step()
-        self.step_manager.step()
 
         # to get new pose and update gaussian model
         self._update_scene()
@@ -318,21 +315,8 @@ class BaseEnv(gym.Env):
         for name, mgr in self.agent_managers.items():
             mgr.update_state()
             if mgr.state == AgentState.ALIVE:
-                obj_pose = mgr.get_pose()
-                
-                controller = mgr.controller
-                transform = obj_pose
-                velocity = np.asarray(controller.velocity, dtype=np.float32)
-                self._surrounding_pre_collection[name] = {
-                    "controller": controller,
-                    "transform": transform,
-                    "velocity": velocity,
-                    "heading_theta": float(controller.heading_theta),
-                    "angular_velocity": float(controller.angular_velocity),
-                    "length": float(controller.LENGTH),
-                    "width": float(controller.WIDTH),
-                    "type": controller.metadrive_type
-                }
+                self._surrounding_pre_collection[name] = mgr.get_base_state()
+                obj_pose = self._surrounding_pre_collection[name]['transform']
                 if name != 'actor':
                     new_object_poses[name] = torch.from_numpy(obj_pose)
         self.model.update_scene(self.step_manager.current_timestamp, new_object_poses)
@@ -388,63 +372,26 @@ class BaseEnv(gym.Env):
         raise NotImplementedError
     
     def close(self):
-        """
-        Best-effort resource cleanup.
-
-        This method is intentionally idempotent and tolerant to partially
-        initialized state, so callers can safely invoke it in finally blocks.
-        """
-        # 1) Clean all agent managers and spawned agent objects.
         agent_managers = getattr(self, "agent_managers", None)
         if isinstance(agent_managers, dict):
-            for _, manager in list(agent_managers.items()):
-                if manager is None:
-                    continue
-                try:
-                    # AgentManager.destroy() may fail before lazy_init() happens.
-                    if hasattr(manager, "destroy"):
-                        manager.destroy()
-                    elif hasattr(manager, "clear_all_objects"):
-                        manager.clear_all_objects()
-                except Exception:
-                    try:
-                        if hasattr(manager, "clear_all_objects"):
-                            manager.clear_all_objects()
-                    except Exception:
-                        pass
+            for manager in list(agent_managers.values()):
+                manager.destroy()
             agent_managers.clear()
         self.agent_managers = {}
 
-        # 2) Clean map objects (ground/mesh) to detach physics bodies.
         map_manager = getattr(self, "map_manager", None)
         if map_manager is not None:
-            try:
-                if hasattr(map_manager, "clear_all_objects"):
-                    map_manager.clear_all_objects()
-            except Exception:
-                pass
+            map_manager.clear_all_objects()
 
-        # 3) Tear down physics world callbacks and Bullet worlds.
         physics_world = getattr(self, "physics_world", None)
         if physics_world is not None:
-            try:
-                if hasattr(physics_world, "destroy"):
-                    physics_world.destroy()
-            except Exception:
-                pass
+            physics_world.destroy()
         self.physics_world = None
 
-        # 4) Close/destroy external simulator model if provided.
         model = getattr(self, "model", None)
-        if model is not None:
-            try:
-                if hasattr(model, "close"):
-                    model.close()
-                elif hasattr(model, "destroy"):
-                    model.destroy()
-            except Exception:
-                pass
-        
+        if model is not None and hasattr(model, "close"):
+            model.close()
+
         if self.gui is not None:
             self.gui.shutdown()
             self.gui = None

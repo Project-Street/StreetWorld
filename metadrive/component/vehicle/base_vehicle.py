@@ -5,7 +5,7 @@ from typing import Union, Optional, List
 
 import numpy as np
 from panda3d.bullet import BulletVehicle, BulletBoxShape, ZUp
-from panda3d.core import Material, Vec3, TransformState
+from panda3d.core import Material, Vec3, TransformState, LVector3
 
 from metadrive.base_class.base_object import BaseObject
 # from metadrive.component.navigation_module.node_network_navigation import NodeNetworkNavigation
@@ -13,14 +13,12 @@ from metadrive.component.pg_space import VehicleParameterSpace, ParameterSpace
 from metadrive.constants import CamMask, get_color_palette
 from metadrive.constants import MetaDriveType, CollisionGroup
 from metadrive.constants import Semantics
-from metadrive.engine.asset_loader import AssetLoader
 from metadrive.utils.logger import get_logger
 from metadrive.engine.physics_node import BaseRigidBodyNode
 from metadrive.utils.config import Config
 from metadrive.utils.math import safe_clip_for_small_array, Vector
 from metadrive.utils.math import get_vertical_vector, norm, clip
 from metadrive.utils.math import wrap_to_pi
-from metadrive.utils.utils import get_object_from_node
 import torch
 logger = get_logger()
 
@@ -139,6 +137,9 @@ class BaseVehicle(BaseObject, BaseVehicleState):
         self.steering = 0
         self.last_current_action = deque([(0.0, 0.0), (0.0, 0.0)], maxlen=2)
 
+        self._brake_pedal_position = 0.0
+        self._accelerator_pedal_position = 0.0
+
         # step info
         self.out_of_route = None
         self.on_lane = None
@@ -179,7 +180,7 @@ class BaseVehicle(BaseObject, BaseVehicleState):
         position: np.ndarray = None,
         heading_theta: float = 0.0,
         velocity: np.ndarray = None,
-        angluar_velocity: float = 0.0,
+        angular_velocity: float = 0.0,
         *args,
         **kwargs
     ):
@@ -202,20 +203,14 @@ class BaseVehicle(BaseObject, BaseVehicleState):
         self.set_heading_theta(heading_theta)
         self.last_heading_theta = heading_theta
 
-        if len(position) == 2:
-            self.set_position(position, height=self.HEIGHT / 2)
-            self.last_position = position
-        elif len(position) == 3:
-            self.set_position(position[:2], height=position[-1])
-            self.last_position = position[:2]
-        else:
-            raise ValueError()
+        self.set_position(position)
+        self.last_position = self.position
 
         if self.config["spawn_velocity"]:
             self.set_velocity(velocity)
-            self.set_angular_velocity(angluar_velocity)
-            self.last_velocity = velocity
-            self.last_angular_velocity = angluar_velocity
+            self.set_angular_velocity(angular_velocity)
+            self.last_velocity = self.velocity
+            self.last_angular_velocity = self.angular_velocity
 
         # done info
         self._init_step_info()
@@ -242,6 +237,9 @@ class BaseVehicle(BaseObject, BaseVehicleState):
             self.set_angular_velocity(state_info["angular_velocity"])
             step_info = None
         else:
+            if "max_acceleration" in self.config:
+                self.limit_acceleration()
+
             self.last_position = self.position
             self.last_velocity = self.velocity
             self.last_heading_theta = self.heading_theta
@@ -254,6 +252,19 @@ class BaseVehicle(BaseObject, BaseVehicleState):
             # else:
             self._set_action(action)
         return step_info
+
+    def limit_acceleration(self):
+        max_velocity_delta = float(self.config["max_acceleration"]) * self.physics_world.step_size_sec
+        assert max_velocity_delta > 0.0
+
+        current_velocity = self.velocity
+        delta_velocity = current_velocity[:2] - self.last_velocity[:2]
+        delta_speed = norm(delta_velocity[0], delta_velocity[1])
+        if delta_speed <= max_velocity_delta:
+            return
+
+        limited_velocity = self.last_velocity[:2] + delta_velocity / delta_speed * max_velocity_delta
+        self.body.setLinearVelocity(LVector3(limited_velocity[0], limited_velocity[1], current_velocity[2]))
 
     def _out_of_route(self):
         left, right = self._dist_to_route_left_right()
@@ -351,12 +362,17 @@ class BaseVehicle(BaseObject, BaseVehicleState):
                 self.vehicle.setBrake(2.0, wheel_index)
                 if self.speed_km_h > self.max_speed_km_h:
                     self.vehicle.applyEngineForce(0.0, wheel_index)
+                    self._accelerator_pedal_position = 0.0
                 else:
                     self.vehicle.applyEngineForce(self.max_engine_force * throttle_brake, wheel_index)
+                    self._accelerator_pedal_position = throttle_brake * 100.0
+                self._brake_pedal_position = 0.0
             else:
                 if self.enable_reverse:
                     self.vehicle.applyEngineForce(self.max_engine_force * throttle_brake, wheel_index)
                     self.vehicle.setBrake(0, wheel_index)
+                    self._accelerator_pedal_position = abs(throttle_brake) * 100.0
+                    self._brake_pedal_position = 0.0
                 else:
                     DEADZONE = 0.01
 
@@ -368,9 +384,15 @@ class BaseVehicle(BaseObject, BaseVehicleState):
                     if speed_in_heading < DEADZONE:
                         self.vehicle.applyEngineForce(0.0, wheel_index)
                         self.vehicle.setBrake(2, wheel_index)
+                        self._accelerator_pedal_position = 0.0
+                        self._brake_pedal_position = 100.0
                     else:
                         self.vehicle.applyEngineForce(0.0, wheel_index)
                         self.vehicle.setBrake(abs(throttle_brake) * self.max_brake_force, wheel_index)
+                        self._accelerator_pedal_position = 0.0
+                        self._brake_pedal_position = abs(throttle_brake) * 100.0
+
+    """---------------------------------------- vehicle info ----------------------------------------------"""
 
     """---------------------------------------- some math tool ----------------------------------------------"""
 
@@ -429,11 +451,9 @@ class BaseVehicle(BaseObject, BaseVehicleState):
         self.vehicle = None
         self.wheels = None
 
-    def set_position(self, position : List[float], height=None):
-        if height is None:
-            height = self.position[-1]
+    def set_position(self, position):
         if len(position) == 2:
-            position.append(height)
+            position.append(self.position[-1])
         super(BaseVehicle, self).set_position(position)
     
     def get_state(self):
@@ -525,3 +545,21 @@ class BaseVehicle(BaseObject, BaseVehicleState):
     def max_speed_m_s(self):
         return self.config["max_speed_km_h"] / 3.6
 
+    def get_steering_wheel_angle(self):
+        return self.steering * self.max_steering * (np.pi / 180.0)
+
+    def get_wheel_speed(self, wheel_index):
+        if len(self.wheels) <= wheel_index:
+            return 0.0
+        wheel = self.wheels[wheel_index]
+        rotation_speed = wheel.getDeltaRotation() / self.physics_world.step_size_sec
+        return rotation_speed * wheel.getWheelRadius()
+
+    def get_brake_pedal_position(self):
+        return self._brake_pedal_position
+
+    def get_accelerator_pedal_position(self):
+        return self._accelerator_pedal_position
+
+    def get_longitudinal_acceleration(self):
+        return self.acceleration[:2] * self.heading

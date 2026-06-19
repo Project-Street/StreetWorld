@@ -14,6 +14,7 @@ from metadrive.obs.observation_base import DefaultObservation
 BASE_DEFAULT_CONFIG = dict(
 
     gui=False,
+    gui_image_key="front_cam",
     # ===== agent =====
     # Whether randomize the car model for the agent, randomly choosing from 4 types of cars
     random_agent_model=False,
@@ -49,6 +50,8 @@ BASE_DEFAULT_CONFIG = dict(
             ),
             surrounding = dict(
                 observer_class=SurroundingObservation,
+                coordinate_mode="agent",
+                ignore_dist=None,
             )
         ),
         policy=EnvInputPolicy,
@@ -66,10 +69,13 @@ BASE_DEFAULT_CONFIG = dict(
             size=None,
             enable_reverse=True,
             spawn_velocity=True,
+            max_acceleration=15.0,
         )
     ),
     # ===== participant =====
     participant_config=dict(
+        check_crash=True,
+        max_step=10_000,
         # Vehicle model. Candidates: "s", "m", "l", "xl", "default". random_agent_model makes this config invalid
         observer=DefaultObservation,
         observer_config=dict(
@@ -162,5 +168,6 @@ BASE_DEFAULT_CONFIG = dict(
     force_reuse_object_name=False,
 
     # ===== randomization =====
-    num_scenarios=1  # the number of scenarios in this environment
+    num_scenarios=1,  # the number of scenarios in this environment
+    hotload=False,
 )

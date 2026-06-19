@@ -7,15 +7,12 @@ from metadrive.obs.observation_base import BaseObservation
 
 class StateObservation(BaseObservation):
     """
-    Simple state observation returning a dict with:
-    - position: [x, y]
-    - velocity: [vx, vy]
+    Simple state observation returning the legacy ego-state fields.
     """
 
     def __init__(self, config=None):
         super().__init__(config or {})
         self.controller = None
-        # Generous bounds for meters and m/s
         self._pos_low = -1e6
         self._pos_high = 1e6
         self._vel_low = -1e3
@@ -32,26 +29,24 @@ class StateObservation(BaseObservation):
         })
 
     def observe(self):
-        dt = self.controller.physics_world.dt
-
-        ego_r = SCR.from_matrix(self.controller.transform[:3, :3]).as_euler('XYZ', degrees=False)
-        ego_t = self.controller.transform[:3, 3]
+        ego_transform = self.controller.transform
+        ego_pos = np.asarray(ego_transform[:3, 3], dtype=np.float32)
+        ego_rot = SCR.from_matrix(ego_transform[:3, :3]).as_euler('XYZ', degrees=False).astype(np.float32)
         velo = float(self.controller.speed)
-        steer = float(self.controller.steering * np.deg2rad(self.controller.max_steering))
+        steer = float(self.controller.get_steering_wheel_angle())
 
-        linear_vel = np.asarray(self.controller.velocity, dtype=np.float32)[:2]
-        prev_vel_xy = np.asarray(self.controller.last_velocity, dtype=np.float32)[:2]
-        linear_acc_xy = (linear_vel - prev_vel_xy) / dt /5
+        linear_vel = np.asarray(self.controller.velocity, dtype=np.float32)
+        longitudinal_acc = np.asarray(self.controller.get_longitudinal_acceleration(), dtype=np.float32)
         linear_acc = np.zeros(3, dtype=np.float32)
-        linear_acc[:2] = linear_acc_xy
-        accel = float(np.linalg.norm(linear_acc_xy))
+        linear_acc[:2] = longitudinal_acc
+        accel = float(np.linalg.norm(linear_acc[:2]))
 
         angular_vel = np.zeros(3, dtype=np.float32)
         angular_vel[2] = float(self.controller.angular_velocity)
 
         return {
-            'ego_pos': ego_t.tolist(),
-            'ego_rot': ego_r.tolist(),
+            'ego_pos': ego_pos,
+            'ego_rot': ego_rot,
             'ego_steer': steer,
             'linear_velocity': linear_vel,
             'ego_velo': velo,

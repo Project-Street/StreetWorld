@@ -157,9 +157,12 @@ class BaseObject(BaseRunnable, MetaDriveType, ABC):
         :param in_local_frame: True, apply speed to local fram
         """
         self.last_velocity = self.velocity
-        self.body.setLinearVelocity(
-            LVector3(velocity[0], velocity[1], self.body.getLinearVelocity()[-1])
-        )
+        if len(velocity) == 2:
+            self.body.setLinearVelocity(
+                LVector3(velocity[0], velocity[1], self.body.getLinearVelocity()[-1])
+            )
+        else:
+            self.body.setLinearVelocity(LVector3(velocity[0], velocity[1], velocity[2]))
 
     @property
     def velocity(self):
@@ -167,7 +170,7 @@ class BaseObject(BaseRunnable, MetaDriveType, ABC):
         Velocity, unit: m/s
         """
         velocity = self.body.getLinearVelocity()
-        return np.asarray([velocity[0], velocity[1]])
+        return np.asarray([velocity[0], velocity[1], velocity[2]])
 
     def set_angular_velocity(self, angular_velocity, in_rad=True):
         self.last_angular_velocity = self.angular_velocity
@@ -178,6 +181,12 @@ class BaseObject(BaseRunnable, MetaDriveType, ABC):
     @property
     def angular_velocity(self):
         return self.body.getAngularVelocity()[-1]
+
+    @property
+    def angular_acceleration(self):
+        step_size = self.physics_world.step_size_sec
+        step_size = max(step_size, 1e-6)
+        return float(self.angular_velocity - self.last_angular_velocity) / step_size
 
     def set_velocity_km_h(self, direction: list, value=None, in_local_frame=False):
         direction = np.array(direction)
@@ -193,6 +202,15 @@ class BaseObject(BaseRunnable, MetaDriveType, ABC):
         Velocity, unit: km/h
         """
         return self.velocity * 3.6
+
+    @property
+    def acceleration(self):
+        """
+        Acceleration, unit: m/s^2
+        """
+        total_force = self.body.getTotalForce()
+        mass = self.body.getMass()
+        return np.asarray([total_force[0], total_force[1], total_force[2]]) / mass
 
     @property
     def speed(self):

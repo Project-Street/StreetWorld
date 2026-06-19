@@ -29,4 +29,4 @@ class ReplayPolicy(BasePolicy):
     
     @property
     def is_arrive(self):
-        return self.step_manager.current_timestamp > self.terminate_timestamp
+        return self.step_manager.current_timestamp >= self.terminate_timestamp

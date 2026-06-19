@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ctypes
+import logging
 import platform
 from typing import Any, Sequence
 
@@ -11,9 +12,18 @@ from imgui_bundle import imgui
 
 from metadrive.gui.headless_gui import compose_gui_frame, extract_gui_payload
 
+logger = logging.getLogger(__name__)
+
 
 class GUI:
-    def __init__(self, image_key: str, history_size: int = 200, window_title: str = "MetaDrive GUI"):
+    def __init__(
+        self,
+        image_key: str,
+        history_size: int = 200,
+        window_title: str = "MetaDrive GUI",
+        image_width: int = 1280,
+        image_height: int = 720,
+    ):
         self.image_key = image_key
         self.history_size = int(history_size)
         self.window_title = window_title
@@ -23,8 +33,10 @@ class GUI:
         self.glsl_version = None
         self.window = None
         self.texture_id = None
-        self.window_width = 1
-        self.window_height = 1
+        self.window_width, self.window_height = self._get_initial_window_size(
+            image_width=int(image_width),
+            image_height=int(image_height),
+        )
         self._glfw_initialized = False
         self._window_created = False
         self._imgui_context_created = False
@@ -37,6 +49,9 @@ class GUI:
         except Exception:
             self._rollback_init()
             raise
+
+    def _get_initial_window_size(self, image_width: int, image_height: int) -> tuple[int, int]:
+        return image_width + image_height // 2, image_height
 
     def _init_glfw(self) -> None:
         if not glfw.init():
@@ -55,7 +70,7 @@ class GUI:
             glfw.window_hint(glfw.CONTEXT_VERSION_MAJOR, 3)
             glfw.window_hint(glfw.CONTEXT_VERSION_MINOR, 0)
 
-        self.window = glfw.create_window(1, 1, self.window_title, None, None)
+        self.window = glfw.create_window(self.window_width, self.window_height, self.window_title, None, None)
         if not self.window:
             glfw.terminate()
             self._glfw_initialized = False
@@ -63,6 +78,7 @@ class GUI:
         self._window_created = True
         glfw.make_context_current(self.window)
         glfw.swap_interval(False)
+        glfw.set_input_mode(self.window, glfw.CURSOR, glfw.CURSOR_NORMAL)
 
     def _init_imgui(self) -> None:
         imgui.create_context()
@@ -76,6 +92,9 @@ class GUI:
         gl.glBindTexture(gl.GL_TEXTURE_2D, self.texture_id)
         gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MIN_FILTER, gl.GL_LINEAR)
         gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MAG_FILTER, gl.GL_LINEAR)
+        gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_S, gl.GL_CLAMP_TO_EDGE)
+        gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_T, gl.GL_CLAMP_TO_EDGE)
+        gl.glPixelStorei(gl.GL_UNPACK_ALIGNMENT, 1)
         gl.glBindTexture(gl.GL_TEXTURE_2D, 0)
         self._texture_initialized = True
 
@@ -136,6 +155,7 @@ class GUI:
         gl.glClearColor(0.0, 0.0, 0.0, 1.0)
         gl.glClear(gl.GL_COLOR_BUFFER_BIT)
         gl.glBindTexture(gl.GL_TEXTURE_2D, self.texture_id)
+        gl.glPixelStorei(gl.GL_UNPACK_ALIGNMENT, 1)
         gl.glTexImage2D(
             gl.GL_TEXTURE_2D,
             0,
@@ -168,6 +188,7 @@ class GUI:
         glfw.swap_buffers(self.window)
 
     def flush_episode(self, scene_name: str) -> None:
+        logger.info("Flushing GUI episode for scene %s.", scene_name)
         self.timestamp_history.clear()
         self.speed_history.clear()
         self.angular_velocity_history.clear()

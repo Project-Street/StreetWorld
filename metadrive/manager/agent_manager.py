@@ -48,8 +48,8 @@ class AgentManager(BaseManager):
         """
         super().__init__()
         self.INITIALIZED = False
-        self.max_step = config.get("max_step", None)
-        self.check_crash = config.get("check_crash", True)
+        self.max_step = config["max_step"]
+        self.check_crash = config["check_crash"]
 
 
         # for getting {agent_id: BaseObject}, use agent_manager.active_agents
@@ -71,8 +71,8 @@ class AgentManager(BaseManager):
         self.last_observation = None
         if config is not None:
             self.config = config
-        self.max_step = self.config.get("max_step", None)
-        self.check_crash = self.config.get("check_crash", True)
+        self.max_step = self.config["max_step"]
+        self.check_crash = self.config["check_crash"]
 
         if not self.INITIALIZED:
             self.lazy_init()
@@ -105,7 +105,7 @@ class AgentManager(BaseManager):
             position=init_state['spawn_position'],
             heading_theta=init_state['spawn_yaw'],
             velocity=init_state['spawn_velocity'],
-            angluar_velocity=init_state['spawn_angular_velocity'],
+            angular_velocity=init_state['spawn_angular_velocity'],
             **kwargs
         )
         # self.init_pos = init_state['spawn_position']
@@ -164,7 +164,7 @@ class AgentManager(BaseManager):
                     self.state = AgentState.CRASH_WORLD
                     return
 
-            if self.max_step and self.step_manager.eposide_step >= self.max_step:
+            if self.step_manager.eposide_step >= self.max_step:
                 self.clear_all_objects()
                 self.state = AgentState.OUT_OF_STEP
                 return
@@ -220,7 +220,42 @@ class AgentManager(BaseManager):
         return {'observation': self.last_observation}
 
     def get_pose(self):
+        if self.state != AgentState.ALIVE:
+            raise ValueError(f"Cannot get pose for agent in state {self.state}")
         return self.controller.transform
+
+    def get_base_state(self, transform=None):
+        if self.state != AgentState.ALIVE:
+            raise ValueError(f"Cannot get state for agent in state {self.state}")
+
+        transform = self.get_pose()
+        position = np.asarray(self.controller.position, dtype=np.float32)
+        length = self.controller.LENGTH
+        width = self.controller.WIDTH
+        height = self.controller.HEIGHT
+        if self.is_static:
+            velocity = np.zeros(3, dtype=np.float32)
+            acceleration = np.zeros(3, dtype=np.float32)
+            angular_velocity = 0.0
+            angular_acceleration = 0.0
+        else:
+            velocity = np.asarray(self.controller.velocity, dtype=np.float32)
+            acceleration = np.asarray(self.controller.acceleration, dtype=np.float32)
+            angular_velocity = float(self.controller.angular_velocity)
+            angular_acceleration = float(self.controller.angular_acceleration)
+
+        return {
+            "controller": self.controller,
+            "transform": transform,
+            "position": position,
+            "velocity": velocity,
+            "acceleration": acceleration,
+            "heading_theta": float(self.controller.heading_theta),
+            "angular_velocity": angular_velocity,
+            "angular_acceleration": angular_acceleration,
+            "size": [length, width, height],
+            "type": self.controller.metadrive_type
+        }
     
     def get_observation_spaces(self):
         return self.observer.observation_space
