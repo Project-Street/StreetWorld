@@ -39,18 +39,6 @@ BASE_DEFAULT_CONFIG = dict(
                 observer_class=GaussianObservation,
                 clip_rgb=False,
                 stack_size=1,
-                cameras={
-                'BACK': {
-                    'offset': [-2.65, 0, 1.8],
-                    'hpr': [180, 0, 0],
-                    'H': 900,
-                    'W': 1600,
-                    'fovx': 180.4461887779197,
-                    'fovy': 117.8127128568232,
-                    'cx': 857.7774326863696,
-                    'cy': 476.8848988407415
-                }
-                }
             ),
             navigation = dict(
                 observer_class=NavigationObservation,
