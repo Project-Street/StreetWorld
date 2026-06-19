@@ -13,8 +13,6 @@ from metadrive.obs.assembly_obs import AssemblyObservation
 from metadrive.obs.observation_base import DefaultObservation
 BASE_DEFAULT_CONFIG = dict(
 
-    gui=False,
-    gui_image_key="front_cam",
     # ===== agent =====
     # Whether randomize the car model for the agent, randomly choosing from 4 types of cars
     random_agent_model=False,
@@ -109,6 +107,10 @@ BASE_DEFAULT_CONFIG = dict(
     render_pipeline=False,
     # Disable collision detection in physics world
     disable_collision=False,
+    image_layout=[
+        ["FRONT_LEFT", "FRONT", "FRONT_RIGHT"],
+        ["BACK_LEFT", "BACK", "BACK_RIGHT"],
+    ],
     curriculum_level=1,
     num_workers=1,
 

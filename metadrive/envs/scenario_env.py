@@ -17,7 +17,6 @@ from metadrive.manager.scenario_map_manager import ScenarioMapManager
 from metadrive.manager.agent_manager import AgentManager
 from metadrive.obs.assembly_obs import AssemblyObservation
 from metadrive.obs.navigation_obs import NavigationObservation
-from metadrive.obs.surrounding_obs import SurroundingObservation
 from metadrive.utils.random_utils import get_np_random
 from metadrive.utils.math import wrap_to_pi
 from metadrive.utils.navigation_utils import nearest_front_index
@@ -260,7 +259,7 @@ class ScenarioEnv(BaseEnv):
         """Return reward composed of collision, positional, heading, TTC, progress, and shaping terms."""
         actor_manager = self.agent_managers['actor']
         state = actor_manager.state
-        vehicle = getattr(actor_manager, "controller", None)
+        vehicle = actor_manager.controller
         nav = self._get_navigation_observer()
 
         step_info = dict()
@@ -286,7 +285,7 @@ class ScenarioEnv(BaseEnv):
         ego_xy = None
         path_xy = None
         path_cumlen = None
-        if nav is not None and vehicle is not None:
+        if nav is not None:
             path_xy = getattr(nav, "_path_xy", None)
             path_cumlen = getattr(nav, "_path_cumlen", None)
             if path_xy is not None and len(path_xy) > 0:
@@ -302,7 +301,7 @@ class ScenarioEnv(BaseEnv):
                 ego_xy, path_xy, path_cumlen, self._last_progress_idx
             )
 
-        if best_idx is None and nav is not None and vehicle is not None and path_xy is not None:
+        if best_idx is None and nav is not None and path_xy is not None:
             heading_vec = nav._ego_heading_vec(vehicle)
             idx = nearest_front_index(path_xy, ego_xy, heading_vec) if ego_xy is not None else 0
             best_idx = int(np.clip(idx, 0, len(path_xy) - 1))
@@ -311,8 +310,7 @@ class ScenarioEnv(BaseEnv):
             expert_state = nav.get_reference_state(int(np.clip(best_idx, 0, len(path_xy) - 1)))
 
         step_info["expert_available"] = 1 if expert_state else 0
-
-        ego_speed = float(vehicle.speed) if vehicle is not None and hasattr(vehicle, "speed") else 0.0
+        ego_speed = vehicle.speed
         diag_info["speed"] = ego_speed
 
         # ===== Positional deviation =====
@@ -335,7 +333,7 @@ class ScenarioEnv(BaseEnv):
         # ===== Heading deviation =====
         heading_reward = 0.0
         heading_penalty_max = float(self.config.get("heading_penalty_max", 1.0))
-        ego_heading = float(getattr(vehicle, "heading_theta", 0.0)) if vehicle is not None else 0.0
+        ego_heading = vehicle.heading_theta
         if expert_state and expert_state.get("heading_theta") is not None:
             expert_heading = float(expert_state["heading_theta"])
             heading_err = abs(wrap_to_pi(ego_heading - expert_heading))
@@ -473,27 +471,30 @@ class ScenarioEnv(BaseEnv):
         return total_reward, step_info
 
     def _compute_min_ttc(self, vehicle):
-        surrounding_obs = self._get_surrounding_observer()
-        if vehicle is None or surrounding_obs is None:
+        objects = self._collect_all_object()
+        if not objects:
             return None
-        surroundings = surrounding_obs.observe()
-        if not surroundings:
-            return None
-        # ego velocity in ego frame
-        vel_world = np.array(getattr(vehicle, "velocity", [0.0, 0.0]), dtype=np.float32)
-        if vel_world.shape[0] < 2:
-            vel_world = np.array([float(vel_world[0]), 0.0], dtype=np.float32)
+
+        transform_inv = np.linalg.inv(vehicle.transform)
+        R_vehicle_world = transform_inv[:3, :3]
+
+        vel_world = np.asarray(vehicle.velocity)
         vel_world3 = np.array([float(vel_world[0]), float(vel_world[1]), 0.0], dtype=np.float32)
-        transform = getattr(vehicle, "transform", None)
-        if transform is None:
-            return None
-        R_world_vehicle = transform[:3, :3]
-        R_vehicle_world = np.linalg.inv(R_world_vehicle)
         ego_vel_ego = (R_vehicle_world @ vel_world3)[:2]
+
         min_ttc = None
-        for obj in surroundings:
-            rel_pos = np.asarray(obj.get("position", [0.0, 0.0]), dtype=np.float32)
-            rel_vel = np.asarray(obj.get("velocity", [0.0, 0.0]), dtype=np.float32) - ego_vel_ego
+        for name, obj in objects.items():
+            if obj["controller"] is vehicle:
+                continue
+
+            obj_transform = obj["transform"]
+            rel_transform = transform_inv @ obj_transform
+            rel_pos = np.asarray(rel_transform[:2, 3], dtype=np.float32)
+            obj_vel_world = np.asarray(obj["velocity"], dtype=np.float32).reshape(-1)
+            if obj_vel_world.shape[0] < 2:
+                raise ValueError(f"Expected object velocity with at least 2 values, got shape {obj_vel_world.shape}")
+            obj_vel_world3 = np.array([float(obj_vel_world[0]), float(obj_vel_world[1]), 0.0], dtype=np.float32)
+            rel_vel = (R_vehicle_world @ obj_vel_world3)[:2] - ego_vel_ego
             dist = float(np.linalg.norm(rel_pos))
             if dist < 1e-3:
                 return 0.0
@@ -559,16 +560,6 @@ class ScenarioEnv(BaseEnv):
         if best_progress is None:
             return None, None, None
         return best_progress, best_idx, best_dist
-
-    def _get_surrounding_observer(self):
-        actor_observer = getattr(self.agent_managers['actor'], "observer", None)
-        if isinstance(actor_observer, SurroundingObservation):
-            return actor_observer
-        if isinstance(actor_observer, AssemblyObservation):
-            surrounding = actor_observer._observers.get("surrounding") if hasattr(actor_observer, "_observers") else None
-            if isinstance(surrounding, SurroundingObservation):
-                return surrounding
-        return None
 
     def _get_reference_direction(self, path_xy, idx):
         if path_xy is None or idx is None or len(path_xy) < 2:

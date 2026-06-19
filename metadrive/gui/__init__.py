@@ -1,3 +1,3 @@
-from metadrive.gui.headless_gui import HeadlessGUI
+from metadrive.gui.video_exporter import VideoExporter
 
-__all__ = ["HeadlessGUI"]
+__all__ = ["VideoExporter"]

@@ -17,17 +17,11 @@ matplotlib.use("Agg")
 
 logger = logging.getLogger(__name__)
 
-def extract_gui_payload(obs: Any, info: Any, action: Sequence[float], image_key: str):
+
+def extract_video_payload(image: np.ndarray, states: dict[str, Any], info: Any, action: Sequence[float]):
     if len(action) != 2:
         raise ValueError(f"Expected action with length 2, got {len(action)}")
 
-    gaussian = obs["gaussian"]
-    states = obs["states"]
-    image_stack = gaussian["image"][image_key]
-    if image_stack.ndim != 4 or image_stack.shape[0] <= 0:
-        raise ValueError(f"Invalid image stack shape for {image_key}: {image_stack.shape}")
-
-    image = image_stack[-1]
     velocity = np.asarray(states["linear_velocity"], dtype=np.float32).reshape(-1)
     speed = float(np.linalg.norm(velocity[:2]))
     angular_velocity = np.asarray(states["angular_velocity"], dtype=np.float32).reshape(-1)
@@ -44,14 +38,6 @@ def extract_gui_payload(obs: Any, info: Any, action: Sequence[float], image_key:
         "speed": speed,
         "angular_velocity": yaw_rate,
     }
-
-
-def _ensure_uint8_rgb(image: np.ndarray) -> np.ndarray:
-    if image.dtype != np.uint8:
-        image = np.clip(image, 0, 255).astype(np.uint8)
-    if image.ndim != 3 or image.shape[2] != 3:
-        raise ValueError(f"Expected RGB image with shape (H, W, 3), got {image.shape}")
-    return np.ascontiguousarray(image)
 
 
 def _draw_bar(canvas: np.ndarray, origin: tuple[int, int], size: tuple[int, int], value: float, label: str) -> None:
@@ -103,13 +89,13 @@ def _draw_history_plot(
     return np.ascontiguousarray(rgba[..., :3])
 
 
-def compose_gui_frame(
+def compose_video_frame(
     payload: dict[str, Any],
     timestamp_history: Sequence[int | float],
     speed_history: Sequence[float],
     angular_velocity_history: Sequence[float],
 ) -> np.ndarray:
-    image = _ensure_uint8_rgb(payload["image"])
+    image = payload["image"]
     image_h, image_w = image.shape[:2]
     plot_side = image_h // 2
     output_w = image_w + plot_side
@@ -120,7 +106,13 @@ def compose_gui_frame(
     bar_width = (image_w - bar_margin * 3) // 2
     bar_y = image_h - bar_margin - bar_height
     _draw_bar(left, (bar_margin, bar_y), (bar_width, bar_height), payload["steering"], "steering")
-    _draw_bar(left, (bar_margin * 2 + bar_width, bar_y), (bar_width, bar_height), payload["throttle_brake"], "throttle_brake")
+    _draw_bar(
+        left,
+        (bar_margin * 2 + bar_width, bar_y),
+        (bar_width, bar_height),
+        payload["throttle_brake"],
+        "throttle_brake",
+    )
 
     speed_plot = _draw_history_plot(timestamp_history, speed_history, plot_side, "speed")
     angular_plot = _draw_history_plot(timestamp_history, angular_velocity_history, plot_side, "angular_velocity")
@@ -138,9 +130,13 @@ def compose_gui_frame(
     return frame
 
 
-class HeadlessGUI:
-    def __init__(self, image_key: str, history_size: int = 200, output_dir: str = "videos", fps: float = 40.0):
-        self.image_key = image_key
+class VideoExporter:
+    def __init__(
+        self,
+        history_size: int = 200,
+        output_dir: str = "videos",
+        fps: float = 40.0,
+    ):
         self.history_size = int(history_size)
         self.output_dir = Path(output_dir)
         self.fps = float(fps)
@@ -150,17 +146,21 @@ class HeadlessGUI:
         self.angular_velocity_history: list[float] = []
         self.episode_frames: list[np.ndarray] = []
 
+    @property
+    def has_frames(self) -> bool:
+        return len(self.episode_frames) > 0
+
     def _append_history(self, container: list, value) -> None:
         container.append(value)
         if len(container) > self.history_size:
             del container[0]
 
-    def draw(self, obs: Any, info: Any, action: Sequence[float]) -> None:
-        payload = extract_gui_payload(obs, info, action, self.image_key)
+    def draw(self, image: np.ndarray, states: dict[str, Any], info: Any, action: Sequence[float]) -> None:
+        payload = extract_video_payload(image, states, info, action)
         self._append_history(self.timestamp_history, payload["timestamp"])
         self._append_history(self.speed_history, payload["speed"])
         self._append_history(self.angular_velocity_history, payload["angular_velocity"])
-        frame = compose_gui_frame(payload, self.timestamp_history, self.speed_history, self.angular_velocity_history)
+        frame = compose_video_frame(payload, self.timestamp_history, self.speed_history, self.angular_velocity_history)
         self.episode_frames.append(frame)
 
     def flush_episode(self, scene_name: str) -> None:
@@ -168,7 +168,7 @@ class HeadlessGUI:
             current_time = datetime.now().strftime("%Y%m%d_%H%M%S")
             output_path = self.output_dir / f"{current_time}_{scene_name}.mp4"
             image_list_to_video(str(output_path), self.episode_frames, code="mp4v", fps=self.fps)
-            logger.info("Flushed headless GUI episode for scene %s to %s.", scene_name, output_path)
+            logger.info("Exported video for scene %s to %s.", scene_name, output_path)
         self.episode_frames.clear()
         self.timestamp_history.clear()
         self.speed_history.clear()
@@ -176,20 +176,3 @@ class HeadlessGUI:
 
     def shutdown(self) -> None:
         return
-
-
-class CompositeGUI:
-    def __init__(self, *guis):
-        self.guis = guis
-
-    def draw(self, obs: Any, info: Any, action: Sequence[float]) -> None:
-        for gui in self.guis:
-            gui.draw(obs, info, action)
-
-    def flush_episode(self, scene_name: str) -> None:
-        for gui in self.guis:
-            gui.flush_episode(scene_name)
-
-    def shutdown(self) -> None:
-        for gui in reversed(self.guis):
-            gui.shutdown()

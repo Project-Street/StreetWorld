@@ -69,11 +69,6 @@ class BaseEnv(gym.Env):
         self.model = model
 
         self.setup(default_config)
-        self.gui = None
-
-        if self.config["gui"]:
-            gui_image_key = self.config["gui_image_key"]
-            self.gui = self.config["gui"](image_key=gui_image_key)
 
     # def _post_process_config(self, config):
     #     """Add more special process to merged config"""
@@ -301,11 +296,6 @@ class BaseEnv(gym.Env):
         # )
         engine_info = after_step_infos        
         step_result = self._get_step_return(actions, collected_obs=engine_info)  # collect observation, reward, termination
-        obses, _, terminateds, truncateds, step_infos = step_result
-        if self.gui is not None:
-            self.gui.draw(obs=obses, info=step_infos, action=actions)
-            if terminateds or truncateds:
-                self.gui.flush_episode(self.scene_name)
         return step_result
     
     def _update_scene(self):
@@ -391,10 +381,6 @@ class BaseEnv(gym.Env):
         model = getattr(self, "model", None)
         if model is not None and hasattr(model, "close"):
             model.close()
-
-        if self.gui is not None:
-            self.gui.shutdown()
-            self.gui = None
 
     def capture(self, file_name=None):
         if not hasattr(self, "_capture_img"):
