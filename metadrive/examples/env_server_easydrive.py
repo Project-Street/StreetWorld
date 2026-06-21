@@ -18,6 +18,7 @@ import base64
 import concurrent.futures
 import os
 import threading
+import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -50,9 +51,11 @@ class WebUIState:
         self,
         history_size: int = 200,
         jpeg_quality: int = 85,
+        max_image_edge: int = 1200,
     ):
         self.history_size = int(history_size)
         self.jpeg_quality = int(jpeg_quality)
+        self.max_image_edge = int(max_image_edge)
         self.timestamp_history: list[int] = []
         self.speed_history: list[float] = []
         self.angular_velocity_history: list[float] = []
@@ -61,6 +64,7 @@ class WebUIState:
         self._sequence = 0
         self._metrics: Optional[dict[str, dict[str, float]]] = None
         self._metrics_sequence = 0
+        self._take_over_action: Optional[list[float]] = None
 
     def _append_history(self, container: list, value: Any) -> None:
         container.append(value)
@@ -81,10 +85,12 @@ class WebUIState:
         timestamp = int(info["relative_timestamp"])
         speed = float(np.linalg.norm(velocity[:2]))
         yaw_rate = float(angular_velocity[2])
+        image = self._resize_image_for_webui(image)
+        jpeg_quality = self.get_jpeg_quality()
         ok, encoded = cv2.imencode(
             ".jpg",
             cv2.cvtColor(image, cv2.COLOR_RGB2BGR),
-            [int(cv2.IMWRITE_JPEG_QUALITY), self.jpeg_quality],
+            [int(cv2.IMWRITE_JPEG_QUALITY), jpeg_quality],
         )
         if not ok:
             raise RuntimeError("Failed to encode WebUI image as JPEG")
@@ -110,7 +116,7 @@ class WebUIState:
         with self._lock:
             if self._snapshot is None:
                 return None
-            return self._sequence, dict(self._snapshot)
+            return self._sequence, self._snapshot
 
     def metrics_snapshot(self) -> tuple[int, Optional[dict[str, dict[str, Any]]]]:
         with self._lock:
@@ -118,10 +124,48 @@ class WebUIState:
                 return self._metrics_sequence, None
             return self._metrics_sequence, {name: dict(values) for name, values in self._metrics.items()}
 
+    def get_jpeg_quality(self) -> int:
+        with self._lock:
+            return self.jpeg_quality
+
+    def update_jpeg_quality(self, send_elapsed_s: float, frame_interval_s: Optional[float]) -> None:
+        if frame_interval_s is None or frame_interval_s <= 0.0:
+            return
+        ratio = send_elapsed_s / frame_interval_s
+        with self._lock:
+            if ratio > 1.0:
+                self.jpeg_quality = max(30, int(self.jpeg_quality / ratio))
+            elif ratio < 0.5:
+                self.jpeg_quality = min(95, self.jpeg_quality + 1)
+
+    def _resize_image_for_webui(self, image: np.ndarray) -> np.ndarray:
+        height, width = image.shape[:2]
+        max_edge = max(height, width)
+        if max_edge <= self.max_image_edge:
+            return image
+        scale = self.max_image_edge / max_edge
+        resized_size = (round(width * scale), round(height * scale))
+        return cv2.resize(image, resized_size, interpolation=cv2.INTER_AREA)
+
     def set_policy_metric(self, metric: dict[str, float]) -> None:
         with self._lock:
             self._metrics = {"policy": {str(key): self._json_metric_value(value) for key, value in metric.items()}}
             self._metrics_sequence += 1
+
+    def set_take_over_action(self, action: Optional[list[float]]) -> None:
+        with self._lock:
+            if action is None:
+                self._take_over_action = None
+                return
+            if len(action) != 2:
+                raise ValueError(f"Expected takeover action with length 2, got {len(action)}")
+            self._take_over_action = [float(action[0]), float(action[1])]
+
+    def get_take_over_action(self) -> Optional[list[float]]:
+        with self._lock:
+            if self._take_over_action is None:
+                return None
+            return list(self._take_over_action)
 
     def clear(self) -> None:
         with self._lock:
@@ -243,6 +287,9 @@ class EnvServicer(service_pb2_grpc.EnvServiceServicer):
 
             # Extract action from request
             action = list(request.action)  # [steering, throttle]
+            take_over_action = self.webui_state.get_take_over_action()
+            if take_over_action is not None:
+                action = take_over_action
 
             # Step environment
             obs, reward, terminated, truncated, info = self.env.step(action)
@@ -356,6 +403,10 @@ class EnvServicer(service_pb2_grpc.EnvServiceServicer):
 def create_web_app(webui_state: WebUIState):
     from fastapi import FastAPI, WebSocket, WebSocketDisconnect
     from fastapi.responses import FileResponse
+    from pydantic import BaseModel
+
+    class TakeOverActionRequest(BaseModel):
+        action: Optional[list[float]]
 
     app = FastAPI()
     index_path = Path(__file__).resolve().parents[1] / "gui" / "web" / "index.html"
@@ -364,11 +415,17 @@ def create_web_app(webui_state: WebUIState):
     async def index():
         return FileResponse(index_path, headers={"Cache-Control": "no-store"})
 
+    @app.post("/take_over_action")
+    async def take_over_action(request: TakeOverActionRequest):
+        webui_state.set_take_over_action(request.action)
+        return {"status": "ok"}
+
     @app.websocket("/ws")
     async def websocket_endpoint(websocket: WebSocket):
         await websocket.accept()
         last_sequence = -1
         last_metrics_sequence = -1
+        last_frame_send_started_at = time.perf_counter()
         waiting_sent = False
         try:
             while True:
@@ -388,10 +445,16 @@ def create_web_app(webui_state: WebUIState):
                 waiting_sent = False
                 sequence, payload = snapshot
                 if sequence != last_sequence:
+                    send_started_at = time.perf_counter()
+                    frame_interval_s = send_started_at - last_frame_send_started_at
+                    
                     await websocket.send_json({"type": "frame", "snapshot": payload})
+                    webui_state.update_jpeg_quality(time.perf_counter() - send_started_at, frame_interval_s)
+                    last_frame_send_started_at = send_started_at
                     last_sequence = sequence
                 await asyncio.sleep(0.02)
         except WebSocketDisconnect:
+            webui_state.set_take_over_action(None)
             return
 
     return app

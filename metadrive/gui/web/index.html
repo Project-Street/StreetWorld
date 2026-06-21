@@ -321,6 +321,7 @@
     const metricTableCard = document.getElementById('metricTableCard');
     const metricTableBody = document.getElementById('metricTableBody');
     let lastSnapshot = null;
+    const keys = { w: false, a: false, s: false, d: false };
 
     function signed(value) {
       return `${value >= 0 ? '+' : ''}${value.toFixed(3)}`;
@@ -452,10 +453,28 @@
       metricTableCard.style.display = 'block';
     }
 
+    function takeOverAction() {
+      const steering = (keys.a ? -1 : 0) + (keys.d ? 1 : 0);
+      const throttleBrake = (keys.w ? 1 : 0) + (keys.s ? -1 : 0);
+      if (steering === 0 && throttleBrake === 0) return null;
+      return [steering, throttleBrake];
+    }
+
+    function sendTakeOverAction() {
+      fetch('/take_over_action', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: takeOverAction() })
+      });
+    }
+
     function connect() {
       const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
       const ws = new WebSocket(`${protocol}://${window.location.host}/ws`);
-      ws.onopen = () => { connection.textContent = 'connected'; };
+      ws.onopen = () => {
+        connection.textContent = 'connected';
+        sendTakeOverAction();
+      };
       ws.onmessage = (event) => {
         const message = JSON.parse(event.data);
         if (message.type === 'waiting') {
@@ -481,6 +500,27 @@
         ws.close();
       };
     }
+
+    window.addEventListener('keydown', (event) => {
+      const key = event.key.toLowerCase();
+      if (!(key in keys) || event.repeat) return;
+      keys[key] = true;
+      sendTakeOverAction();
+      event.preventDefault();
+    });
+
+    window.addEventListener('keyup', (event) => {
+      const key = event.key.toLowerCase();
+      if (!(key in keys)) return;
+      keys[key] = false;
+      sendTakeOverAction();
+      event.preventDefault();
+    });
+
+    window.addEventListener('blur', () => {
+      Object.keys(keys).forEach((key) => { keys[key] = false; });
+      sendTakeOverAction();
+    });
 
     window.addEventListener('resize', () => {
       if (lastSnapshot) {
