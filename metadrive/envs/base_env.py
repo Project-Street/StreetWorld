@@ -174,6 +174,8 @@ class BaseEnv(gym.Env):
 
         print("=======>>> Reset scenario: {}, seed: {}".format(self.scene_name, self.current_seed))
 
+        for mgr_n, manager in self.agent_managers.items() :
+            manager.update_state()
         self._update_scene()
 
         step_infos = {}
@@ -269,12 +271,14 @@ class BaseEnv(gym.Env):
 
     # ===== Run-time =====
     def step(self, actions: Union[Union[np.ndarray, list], Dict[AnyStr, Union[list, np.ndarray]], int]):
+        for manager in self.agent_managers.values():
+            manager.decide_action(actions)
+
         for i in range(self.config["decision_repeat"]):
             # simulate or replay
             self.step_manager.step()
             for manager in self.agent_managers.values():
-                manager.step(actions)
-
+                manager.step()
             self.physics_world.step()
             for manager in self.agent_managers.values():
                 manager.update_state()
@@ -303,7 +307,6 @@ class BaseEnv(gym.Env):
         new_object_poses = {}
 
         for name, mgr in self.agent_managers.items():
-            mgr.update_state()
             if mgr.state == AgentState.ALIVE:
                 self._surrounding_pre_collection[name] = mgr.get_base_state()
                 obj_pose = self._surrounding_pre_collection[name]['transform']

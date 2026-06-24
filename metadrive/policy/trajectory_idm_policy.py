@@ -15,6 +15,8 @@ class IDMPolicy(BasePolicy):
     ACC_FACTOR = 2.0
     DEACC_FACTOR = 3.0
     DELTA = 4.0
+    MAX_ACCELERATION = 3.0
+    MAX_DECELERATION = 5.0
     lookahead_path_length = 50
     LANE_WIDTH = 3.5
 
@@ -23,7 +25,7 @@ class IDMPolicy(BasePolicy):
         self.front_distance = float(self.config["front_distance"]) if "front_distance" in self.config else 5.0
         self.react_time = float(self.config["react_time"]) if "react_time" in self.config else 1.0
 
-        # Sample speeds (m/s)
+        # Sample speeds (km/h)
         self.max_speed = float(gym.spaces.Box(low=np.array([25.0]), high=np.array([50.0]), dtype=np.float32).sample()[0])
         self.max_turning_speed = float(gym.spaces.Box(low=np.array([10.0]), high=np.array([20.0]), dtype=np.float32).sample()[0])
 
@@ -49,15 +51,16 @@ class IDMPolicy(BasePolicy):
         turn_signal = nav["turn_signal"]
         path = nav["waypoint"]
         if path is None:
-            return [0.0, 0.0]
+            raise ValueError("IDMPolicy requires navigation waypoints.")
         pts = np.asarray(path, dtype=np.float32)
         cumlen = nav['cummulative_length']
 
         if len(path) < 2:
-            return 0.0, 0.1
+            raise ValueError(f"IDMPolicy requires at least 2 navigation waypoints, got {len(path)}.")
 
         v0 = self.max_turning_speed if turn_signal != 0 else self.max_speed
         v = self.controller.speed_km_h
+        v_m_s = self.controller.speed
 
         # Ego pose and heading
         ego_xy = np.array([self.controller.position[0], self.controller.position[1]], dtype=np.float32)
@@ -67,8 +70,7 @@ class IDMPolicy(BasePolicy):
         # nearest forward index for ego; if none, return zeros
         rel_all = pts - ego_xy[None, :]
         if not np.any((rel_all @ heading_vec) >= 0.0):
-            self.is_arrive = True
-            return 0.0, 0.0
+            raise RuntimeError("IDMPolicy found no forward waypoint on the navigation path.")
         front_idx = int(nearest_front_index(pts, ego_xy, heading_vec))
 
         # Free road acceleration
@@ -76,9 +78,10 @@ class IDMPolicy(BasePolicy):
 
         # Select closest lead object in ego frame: x>0 and |y|<= lane width/2
         lead = None
-        for obj in surround:
-            px = obj["position"][0]
-            py = obj["position"][1]
+        for obj in surround.values():
+            position = np.asarray(obj["position"], dtype=np.float32)
+            px = position[0]
+            py = position[1]
             if px <= 0 or abs(py) > self.LANE_WIDTH * 0.5:
                 continue
             if lead is None or px < lead["position"][0]:
@@ -89,7 +92,7 @@ class IDMPolicy(BasePolicy):
         R = np.array([[heading_vec[0], -heading_vec[1]], [heading_vec[1], heading_vec[0]]])
         if lead is not None:
             # Project lead to path to get arclen gap and tangent
-            pos_ego = np.asarray(lead["position"], dtype=np.float32)
+            pos_ego = np.asarray(lead["position"], dtype=np.float32)[:2]
             pos_world = ego_xy + R @ pos_ego
             obj_closest_idx = np.argmin(np.sum((pts - pos_world[None, :]) ** 2, axis=1))
             delta_dist = float(cumlen[obj_closest_idx] - cumlen[front_idx])
@@ -109,14 +112,20 @@ class IDMPolicy(BasePolicy):
             path_dir = t_vec / (np.linalg.norm(t_vec) + 1e-9)
 
             # Tangential velocities (km/h)
-            v_obj_world = R @ np.asarray(lead["velocity"], dtype=np.float32)
+            v_obj_world = R @ np.asarray(lead["velocity"], dtype=np.float32)[:2]
             v_obj_t = np.dot(v_obj_world, path_dir) * 3.6
             dv = max(0.0, v - v_obj_t)
+            dv_m_s = dv / 3.6
 
-            s_star = s0 + v * self.react_time + v * dv / (2.0 * math.sqrt(self.ACC_FACTOR * self.DEACC_FACTOR))
+            s_star = s0 + v_m_s * self.react_time + v_m_s * dv_m_s / (2.0 * math.sqrt(self.ACC_FACTOR * self.DEACC_FACTOR))
             a_int = self.ACC_FACTOR * (s_star / s) ** 2
 
         a_cmd = a_free - a_int
+        if a_cmd >= 0.0:
+            throttle_brake = a_cmd / self.MAX_ACCELERATION
+        else:
+            throttle_brake = a_cmd / self.MAX_DECELERATION
+        throttle_brake = float(np.clip(throttle_brake, -1.0, 1.0))
 
         # Steering from lookahead path
         steering = 0.0
@@ -132,4 +141,4 @@ class IDMPolicy(BasePolicy):
                 ang_limit = math.radians(float(self.controller.max_steering))
                 steering = float(np.clip(ang / ang_limit, -1.0, 1.0))
 
-        return steering, a_cmd
+        return steering, throttle_brake

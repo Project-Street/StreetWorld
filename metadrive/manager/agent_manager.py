@@ -1,18 +1,10 @@
-import copy
 import math
 import numpy as np
-import torch
 from gymnasium.spaces import Space
-from metadrive.constants import DEFAULT_AGENT
 from metadrive.utils.logger import get_logger
 from metadrive.component.vehicle.base_vehicle import BaseVehicle
 from metadrive.manager.base_manager import BaseManager
-from metadrive.policy.env_input_policy import EnvInputPolicy
-from metadrive.policy.replay_policy import ReplayPolicy
-from metadrive.obs.gaussian_obs import GaussianObservation
 from metadrive.obs.navigation_obs import NavigationObservation
-from metadrive.base_class.base_object import BaseObject
-import time
 logger = get_logger()
 
 
@@ -57,6 +49,7 @@ class AgentManager(BaseManager):
         self.step_manager = step_manager
         self.observer = None
         self.policy = None
+        self.step_action = None
         
     def lazy_init(self):
         self.observer = self.config['observer'](self.config['observer_config'])
@@ -69,6 +62,7 @@ class AgentManager(BaseManager):
         Agent manager is really initialized after the BaseObject Instances are created
         """
         self.last_observation = None
+        self.step_action = None
         if config is not None:
             self.config = config
         self.max_step = self.config["max_step"]
@@ -86,7 +80,7 @@ class AgentManager(BaseManager):
         if isinstance(self.observer, NavigationObservation):
             self.policy.destination = self.observer.destination
 
-        if math.isclose(self.policy.spawn_timestamp, self.step_manager.current_timestamp):
+        if self.step_manager.key_step and math.isclose(self.policy.spawn_timestamp, self.step_manager.current_timestamp):
             self.controller.attachDyWld()
         
         assert isinstance(self.get_action_spaces(), Space)
@@ -112,24 +106,21 @@ class AgentManager(BaseManager):
         # self.dest_pos = init_state['destination']
         return obj
 
-    def step(self, action=None):
-
-        """
-        Some policies should make decision before physics world actuation, in particular, those need decision-making
-        But other policies like ReplayPolicy should be called in after_step, as they already know the final state and
-        exempt the requirement for rolling out the dynamic system to get it.
-        """
+    def decide_action(self, action=None):
         if self.is_static:
             return
 
-        if self.state == AgentState.ALIVE:
-            action = self.policy.act(action=action, observation=self.last_observation)
-            
-            if isinstance(self.policy, ReplayPolicy):
-                self.controller.move(state_info=action)
-            else:
-                self.controller.move(action=action)
+        if self.state != AgentState.ALIVE:
+            return
+        self.step_action = self.policy.act(action=action, observation=self.last_observation)
 
+    def step(self):
+        if self.is_static:
+            return
+        if self.state != AgentState.ALIVE:
+            return
+
+        self.controller.move(self.step_action)
         return
 
     def update_state(self):
@@ -137,7 +128,7 @@ class AgentManager(BaseManager):
         Derive and cache the agent's discrete state using policy signals.
         """
         # Not spawned yet
-        if self.state == AgentState.NOT_SPAWN and self.policy.is_spawned:
+        if self.state == AgentState.NOT_SPAWN and self.step_manager.key_step and self.policy.is_spawned:
             self.controller.attachDyWld()
             self.state = AgentState.ALIVE
             return

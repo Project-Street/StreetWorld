@@ -17,10 +17,10 @@ class AssemblyObservation(BaseObservation):
             'observer_class': GaussianObservation,
             'clip_rgb': False,
             'stack_size': 3,
-          },
+        },
         'navigation': {
             'observer_class': NavigationObservation,
-            'navigating_type': 'destination_following',
+            'navigating_type': 'expert_following',
           }
       }
 
@@ -36,6 +36,7 @@ class AssemblyObservation(BaseObservation):
         self._observers: Dict[str, BaseObservation] = {}
         self._obs_cls = {}
         for name, sub_cfg in (config or {}).items():
+            sub_cfg = dict(sub_cfg)
             # Support both 'observer_class' and a common misspelling 'obsever_class'
             cls = sub_cfg.get("observer_class")
             if cls is None:

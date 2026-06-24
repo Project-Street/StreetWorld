@@ -14,7 +14,7 @@ class NavigationObservation(BaseObservation, Randomizable):
     def __init__(self, config):
         BaseObservation.__init__(self, config)
         Randomizable.__init__(self, None)
-        self.navigating_type = config.get("navigating_type", "expert_following")  # lane_following, destination_following, expert_following
+        self.navigating_type = config.get("navigating_type", "expert_following")  # lane_following, expert_following
         self.early_signal_distance = float(config.get("early_signal_distance", 10.0))  # meters
         # New radius-based threshold using triangle inradius (meters). Smaller -> sharper turn.
         # You may tune this based on map scale; ~20m is a moderate default.
@@ -32,8 +32,8 @@ class NavigationObservation(BaseObservation, Randomizable):
         self._expert_heading = None
 
     def reset(self, trajdata_map: VectorMap, init_state, state, controller, seed=None, **kwargs):
-        if self.navigating_type in ["lane_following", "destination_following"]:
-            assert isinstance(trajdata_map, VectorMap), "trajdata_map must be provided for lane_following or destination_following navigation type."
+        if self.navigating_type == "lane_following":
+            assert isinstance(trajdata_map, VectorMap), "trajdata_map must be provided for lane_following navigation type."
 
         if seed is not None:
             self.seed(int(seed))
@@ -48,8 +48,6 @@ class NavigationObservation(BaseObservation, Randomizable):
             self._build_expert_path()
         elif self.navigating_type == "lane_following":
             self._build_lane_follow_path()
-        elif self.navigating_type == "destination_following":
-            self._build_destination_path()
         else:
             raise ValueError(f"Unknown navigating_type: {self.navigating_type}")
         
@@ -188,30 +186,6 @@ class NavigationObservation(BaseObservation, Randomizable):
         self._set_path(path_pts)
         self._clear_expert_reference()
 
-    def _build_destination_path(self):
-        spawn_xyz = np.array(self.init_state["spawn_position"])
-        spawn_yaw = self.init_state["spawn_yaw"]
-        dest_xyz = np.array(self.init_state["destination"])
-        dest_yaw = self.init_state["destination_yaw"]
-
-        start_lanes = self.trajdata_map.get_current_lane(self._vec4(spawn_xyz,spawn_yaw))
-        goal_lanes = self.trajdata_map.get_current_lane(self._vec4(dest_xyz,dest_yaw))
-        if len(start_lanes) == 0 or len(goal_lanes) == 0:
-            Warning("No lane found for destination_following navigation, switch to expert_following.")
-            return self._build_expert_path()
-        start_lane = start_lanes[0]
-        goal_lane = goal_lanes[0]
-
-        if start_lane == goal_lane:
-            lane_seq = [start_lane]
-        else:
-            lane_seq = self._bfs_lane_seq(start_lane, goal_lane)
-            if len(lane_seq) == 0:
-                lane_seq = [start_lane]
-        path_pts = self._concat_centerlines(lane_seq, spawn_xyz, spawn_yaw)
-        self._set_path(path_pts)
-        self._clear_expert_reference()
-
     # ---------- small utils ----------
     @staticmethod
     def _vehicle_xy(vehicle):
@@ -319,26 +293,3 @@ class NavigationObservation(BaseObservation, Randomizable):
             else:
                 pts.extend(cl)
         return pts
-
-    def _bfs_lane_seq(self, start_lane, goal_lane):
-        if start_lane == goal_lane:
-            return [start_lane]
-        from collections import deque
-        q = deque([start_lane])
-        parent = {start_lane: None}
-        visited = {start_lane}
-        while len(q) > 0:
-            u = q.popleft()
-            for v in self.trajdata_map.successors(u):
-                if v in visited:
-                    continue
-                parent[v] = u
-                if v == goal_lane:
-                    seq = [v]
-                    while parent[seq[-1]] is not None:
-                        seq.append(parent[seq[-1]])
-                    seq.reverse()
-                    return seq
-                visited.add(v)
-                q.append(v)
-        return []

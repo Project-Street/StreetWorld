@@ -21,5 +21,9 @@ class StepCounter:
         return self.begin_timestamp + self.relative_timestamp
 
     @property
+    def key_step(self):
+        return self.physical_step % self.physical_repeat == 0
+
+    @property
     def eposide_step(self):
         return self.physical_step // self.physical_repeat

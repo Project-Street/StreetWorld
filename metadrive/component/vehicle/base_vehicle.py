@@ -220,7 +220,7 @@ class BaseVehicle(BaseObject, BaseVehicleState):
         self.steer_rate = 0.0
 
 
-    def move(self, action=None, state_info=None):
+    def move(self, action=None):
         """
         Save info and make decision before action
         """
@@ -230,11 +230,11 @@ class BaseVehicle(BaseObject, BaseVehicleState):
 
         self._init_step_info()
 
-        if state_info:
-            self.set_transform(state_info["transform"])
+        if 'transform' in action and 'velocity' in action and 'angular_velocity' in action:
+            self.set_transform(action["transform"])
 
-            self.set_velocity(state_info["velocity"])
-            self.set_angular_velocity(state_info["angular_velocity"])
+            self.set_velocity(action["velocity"])
+            self.set_angular_velocity(action["angular_velocity"])
             step_info = None
         else:
             if "max_acceleration" in self.config:
