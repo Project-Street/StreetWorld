@@ -11,12 +11,10 @@ from metadrive.policy.base_policy import BasePolicy
 from metadrive.type import MetaDriveType
 from metadrive.utils.navigation_utils import nearest_front_index
 
-class IDMPolicy(BasePolicy):
+class TrajectoryIDMPolicy(BasePolicy):
     ACC_FACTOR = 2.0
     DEACC_FACTOR = 3.0
     DELTA = 4.0
-    MAX_ACCELERATION = 3.0
-    MAX_DECELERATION = 5.0
     lookahead_path_length = 50
     LANE_WIDTH = 3.5
 
@@ -27,38 +25,23 @@ class IDMPolicy(BasePolicy):
 
         # Sample speeds (km/h)
         self.max_speed = float(gym.spaces.Box(low=np.array([25.0]), high=np.array([50.0]), dtype=np.float32).sample()[0])
-        self.max_turning_speed = float(gym.spaces.Box(low=np.array([10.0]), high=np.array([20.0]), dtype=np.float32).sample()[0])
+        self.path = None
+        self.cumlen = None
+        self.curve_radius = None
 
     def reset(self, controller, seed, state, init_state, **kwargs):
         if controller.metadrive_type != MetaDriveType.VEHICLE:
             raise ValueError("IDMPolicy can only be used for vehicle agents.")
-        self.controller = controller
-        self.seed(seed)
-
-        timestamp_list = sorted(state.keys())
-        self.spawn_timestamp = timestamp_list[0]
-
-        self.trajectory = state
-        if len(self.trajectory) == 0:
-            raise ValueError("IDMPolicy reset got empty state trajectory.")
-        self.static = sum([np.linalg.norm(traj["velocity"]) for traj in self.trajectory.values()]) / len(self.trajectory) < 0.1
-        self.destination = init_state['destination']
+        super().reset(controller, seed, state, init_state, **kwargs)
+        self.path, self.cumlen = self._build_path_from_trajectory()
+        self.curve_radius = self._curve_radius(self.path)
 
     def act(self, observation, *args, **kwargs):
-        nav = observation["navigation"]
+        if observation is None or "surrounding" not in observation:
+            raise KeyError("IDMPolicy requires observation['surrounding'].")
         surround = observation["surrounding"]
-
-        turn_signal = nav["turn_signal"]
-        path = nav["waypoint"]
-        if path is None:
-            raise ValueError("IDMPolicy requires navigation waypoints.")
-        pts = np.asarray(path, dtype=np.float32)
-        cumlen = nav['cummulative_length']
-
-        if len(path) < 2:
-            raise ValueError(f"IDMPolicy requires at least 2 navigation waypoints, got {len(path)}.")
-
-        v0 = self.max_turning_speed if turn_signal != 0 else self.max_speed
+        pts = self.path
+        cumlen = self.cumlen
         v = self.controller.speed_km_h
         v_m_s = self.controller.speed
 
@@ -70,30 +53,31 @@ class IDMPolicy(BasePolicy):
         # nearest forward index for ego; if none, return zeros
         rel_all = pts - ego_xy[None, :]
         if not np.any((rel_all @ heading_vec) >= 0.0):
-            raise RuntimeError("IDMPolicy found no forward waypoint on the navigation path.")
+            raise RuntimeError("IDMPolicy found no forward waypoint on the trajectory path.")
         front_idx = int(nearest_front_index(pts, ego_xy, heading_vec))
+        v0 = self._target_speed(front_idx)
 
         # Free road acceleration
         a_free = self.ACC_FACTOR * (1.0 - (v / max(v0, 1e-3)) ** self.DELTA)
 
-        # Select closest lead object in ego frame: x>0 and |y|<= lane width/2
+        left_vec = np.array([-heading_vec[1], heading_vec[0]], dtype=np.float32)
+
+        # Select closest lead object in ego heading frame.
         lead = None
+        lead_longitudinal = None
         for obj in surround.values():
-            position = np.asarray(obj["position"], dtype=np.float32)
-            px = position[0]
-            py = position[1]
-            if px <= 0 or abs(py) > self.LANE_WIDTH * 0.5:
+            rel = np.asarray(obj["position"], dtype=np.float32)[:2] - ego_xy
+            longitudinal = float(np.dot(rel, heading_vec))
+            lateral = float(np.dot(rel, left_vec))
+            if longitudinal <= 0 or abs(lateral) > self.LANE_WIDTH * 0.5:
                 continue
-            if lead is None or px < lead["position"][0]:
+            if lead is None or longitudinal < lead_longitudinal:
                 lead = obj
+                lead_longitudinal = longitudinal
 
         a_int = 0.0
-        # Rotation from ego to world
-        R = np.array([[heading_vec[0], -heading_vec[1]], [heading_vec[1], heading_vec[0]]])
         if lead is not None:
-            # Project lead to path to get arclen gap and tangent
-            pos_ego = np.asarray(lead["position"], dtype=np.float32)[:2]
-            pos_world = ego_xy + R @ pos_ego
+            pos_world = np.asarray(lead["position"], dtype=np.float32)[:2]
             obj_closest_idx = np.argmin(np.sum((pts - pos_world[None, :]) ** 2, axis=1))
             delta_dist = float(cumlen[obj_closest_idx] - cumlen[front_idx])
             ego_len = self.controller.LENGTH
@@ -112,8 +96,8 @@ class IDMPolicy(BasePolicy):
             path_dir = t_vec / (np.linalg.norm(t_vec) + 1e-9)
 
             # Tangential velocities (km/h)
-            v_obj_world = R @ np.asarray(lead["velocity"], dtype=np.float32)[:2]
-            v_obj_t = np.dot(v_obj_world, path_dir) * 3.6
+            v_obj = np.asarray(lead["velocity"], dtype=np.float32)[:2]
+            v_obj_t = np.dot(v_obj, path_dir) * 3.6
             dv = max(0.0, v - v_obj_t)
             dv_m_s = dv / 3.6
 
@@ -122,9 +106,9 @@ class IDMPolicy(BasePolicy):
 
         a_cmd = a_free - a_int
         if a_cmd >= 0.0:
-            throttle_brake = a_cmd / self.MAX_ACCELERATION
+            throttle_brake = a_cmd / self._controller_max_acceleration()
         else:
-            throttle_brake = a_cmd / self.MAX_DECELERATION
+            throttle_brake = a_cmd / self._controller_max_deceleration()
         throttle_brake = float(np.clip(throttle_brake, -1.0, 1.0))
 
         # Steering from lookahead path
@@ -142,3 +126,47 @@ class IDMPolicy(BasePolicy):
                 steering = float(np.clip(ang / ang_limit, -1.0, 1.0))
 
         return steering, throttle_brake
+
+    def _build_path_from_trajectory(self):
+        points = []
+        for ts in sorted(self.trajectory.keys()):
+            frame = self.trajectory[ts]
+            if not frame["valid"]:
+                continue
+            pos = frame["position"]
+            points.append([float(pos[0]), float(pos[1])])
+        path = np.asarray(points, dtype=np.float32)
+        if len(path) < 3:
+            raise ValueError(f"IDMPolicy requires at least 3 valid trajectory points, got {len(path)}.")
+        seg_len = np.linalg.norm(path[1:] - path[:-1], axis=1)
+        if not np.any(seg_len > 1e-6):
+            raise ValueError("IDMPolicy got zero-length trajectory path.")
+        cumlen = np.concatenate([[0.0], np.cumsum(seg_len)]).astype(np.float32)
+        return path, cumlen
+
+    def _target_speed(self, front_idx):
+        radius = float(self.curve_radius[front_idx])
+        curve_speed = math.sqrt(self._controller_max_acceleration() * radius) * 3.6
+        return float(min(self.max_speed, curve_speed))
+
+    def _controller_max_acceleration(self):
+        return 4.0 * float(self.controller.max_engine_force) / float(self.controller.MASS)
+
+    def _controller_max_deceleration(self):
+        return 4.0 * float(self.controller.max_brake_force) / (
+            float(self.controller.MASS) * float(self.controller.TIRE_RADIUS)
+        )
+
+    @staticmethod
+    def _curve_radius(path):
+        radius = np.full(len(path), np.inf, dtype=np.float32)
+        for i in range(1, len(path) - 1):
+            a = float(np.linalg.norm(path[i] - path[i - 1]))
+            b = float(np.linalg.norm(path[i + 1] - path[i]))
+            c = float(np.linalg.norm(path[i + 1] - path[i - 1]))
+            v1 = path[i] - path[i - 1]
+            v2 = path[i + 1] - path[i]
+            cross = float(v1[0] * v2[1] - v1[1] * v2[0])
+            if abs(cross) > 1e-6:
+                radius[i] = a * b * c / (2.0 * abs(cross))
+        return radius

@@ -5,6 +5,9 @@ from metadrive.utils.logger import get_logger
 from metadrive.component.vehicle.base_vehicle import BaseVehicle
 from metadrive.manager.base_manager import BaseManager
 from metadrive.obs.navigation_obs import NavigationObservation
+from metadrive.policy.idm_policy import IDMRouteInitializationError
+from metadrive.policy.replay_policy import ReplayPolicy
+from metadrive.policy.trajectory_idm_policy import TrajectoryIDMPolicy
 logger = get_logger()
 
 
@@ -50,6 +53,10 @@ class AgentManager(BaseManager):
         self.observer = None
         self.policy = None
         self.step_action = None
+        self.trajectory = None
+        self.init_state = None
+        self.trajdata_map = None
+        self.out_of_road_threshold = float(config.get("policy_config", {}).get("out_of_road_threshold", 5))
         
     def lazy_init(self):
         self.observer = self.config['observer'](self.config['observer_config'])
@@ -67,6 +74,12 @@ class AgentManager(BaseManager):
             self.config = config
         self.max_step = self.config["max_step"]
         self.check_crash = self.config["check_crash"]
+        self.trajectory = kwargs["state"]
+        self.init_state = kwargs["init_state"]
+        self.trajdata_map = kwargs.get("trajdata_map")
+        self.out_of_road_threshold = float(
+            self.config.get("policy_config", {}).get("out_of_road_threshold", 5)
+        )
 
         if not self.INITIALIZED:
             self.lazy_init()
@@ -74,8 +87,32 @@ class AgentManager(BaseManager):
         self.controller = self._create_agent(**kwargs)
         self.state = AgentState.NOT_SPAWN
 
+        try:
+            self.policy.reset(controller=self.controller, seed=self.generate_seed(), **kwargs)
+        except IDMRouteInitializationError:
+            positions = [
+                np.asarray(self.trajectory[timestamp]["position"], dtype=np.float32)[:2]
+                for timestamp in sorted(self.trajectory.keys())
+                if self.trajectory[timestamp]["valid"]
+            ]
+            expert_distance = 0.0
+            if len(positions) >= 2:
+                expert_distance = float(np.linalg.norm(np.diff(np.asarray(positions), axis=0), axis=1).sum())
+
+            self.policy.destroy()
+            if expert_distance < 5.0:
+                self.policy = ReplayPolicy(step_manager=self.step_manager, config=self.config["policy_config"])
+            else:
+                self.policy = TrajectoryIDMPolicy(step_manager=self.step_manager, config=self.config["policy_config"])
+            self.policy.reset(controller=self.controller, seed=self.generate_seed(), **kwargs)
+
+        if self._is_out_of_road():
+            self.clear_all_objects()
+            self.state = AgentState.OUT_OF_ROAD
+            assert isinstance(self.get_action_spaces(), Space)
+            return
+
         self.observer.reset(controller=self.controller, seed=self.generate_seed(), step_mgr=self.step_manager, **kwargs)
-        self.policy.reset(controller=self.controller, seed=self.generate_seed(), **kwargs)
 
         if isinstance(self.observer, NavigationObservation):
             self.policy.destination = self.observer.destination
@@ -84,7 +121,7 @@ class AgentManager(BaseManager):
             self.controller.attachDyWld()
         
         assert isinstance(self.get_action_spaces(), Space)
-        
+
     def _create_agent(self, physics_world, init_state, **kwargs):
         # Only create one agent - use the first config or default agent
         obj_name = "default_agent"
@@ -125,7 +162,7 @@ class AgentManager(BaseManager):
 
     def update_state(self):
         """
-        Derive and cache the agent's discrete state using policy signals.
+        Derive and cache the agent's discrete state.
         """
         # Not spawned yet
         if self.state == AgentState.NOT_SPAWN and self.step_manager.key_step and self.policy.is_spawned:
@@ -155,12 +192,12 @@ class AgentManager(BaseManager):
                     self.state = AgentState.CRASH_WORLD
                     return
 
-            if self.step_manager.eposide_step >= self.max_step:
+            if self.max_step is not None and self.step_manager.eposide_step >= self.max_step:
                 self.clear_all_objects()
                 self.state = AgentState.OUT_OF_STEP
                 return
 
-            if not self.policy.is_in_trajectory:
+            if self._is_out_of_road():
                 self.clear_all_objects()
                 self.state = AgentState.OUT_OF_ROAD
                 return
@@ -169,6 +206,22 @@ class AgentManager(BaseManager):
                 self.clear_all_objects()
                 self.state = AgentState.SUCCESS
                 return
+
+    def _is_out_of_road(self):
+        if self.trajdata_map is not None:
+            position = np.asarray(self.controller.position, dtype=np.float32)
+            lanes = self.trajdata_map.get_lanes_within(position[:3], self.out_of_road_threshold)
+            if len(lanes) == 0:
+                return True
+            return False
+
+        ego_position = np.asarray(self.controller.position, dtype=np.float32)[:2]
+        expert_positions = np.asarray(
+            [np.asarray(state["position"], dtype=np.float32)[:2] for state in self.trajectory.values()],
+            dtype=np.float32,
+        )
+        distances = np.linalg.norm(expert_positions - ego_position[None, :], axis=1)
+        return float(np.min(distances)) >= self.out_of_road_threshold
 
     def set_state(self, new_state):
         """
@@ -275,4 +328,4 @@ class AgentManager(BaseManager):
 
     @property
     def is_static(self):
-        return hasattr(self.policy, 'static') and self.policy.static
+        return hasattr(self.policy, "static") and self.policy.static

@@ -26,6 +26,7 @@ class StateObservation(BaseObservation):
         return gym.spaces.Dict({
             'position': gym.spaces.Box(self._pos_low, self._pos_high, shape=(2,), dtype=np.float32),
             'velocity': gym.spaces.Box(self._vel_low, self._vel_high, shape=(2,), dtype=np.float32),
+            'heading_theta': gym.spaces.Box(-np.pi, np.pi, shape=(), dtype=np.float32),
         })
 
     def observe(self):
@@ -47,6 +48,7 @@ class StateObservation(BaseObservation):
         return {
             'ego_pos': ego_pos,
             'ego_rot': ego_rot,
+            'heading_theta': float(self.controller.heading_theta),
             'ego_steer': steer,
             'linear_velocity': linear_vel,
             'ego_velo': velo,

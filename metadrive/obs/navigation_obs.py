@@ -165,10 +165,10 @@ class NavigationObservation(BaseObservation, Randomizable):
         spawn_xyz = np.array(self.init_state["spawn_position"])
         spawn_yaw = float(self.init_state["spawn_yaw"])
 
-        lanes = self.trajdata_map.get_current_lane(self._vec4(spawn_xyz,spawn_yaw))
+        xyzh = np.asarray([float(spawn_xyz[0]), float(spawn_xyz[1]), float(spawn_xyz[2]), spawn_yaw], dtype=np.float32)
+        lanes = self.trajdata_map.get_current_lane(xyzh, max_heading_error=np.inf)
         if len(lanes) == 0:
-            Warning("No lane found for lane_following navigation, switch to expert_following.")
-            return self._build_expert_path()
+            raise RuntimeError(f"No current lane found for lane_following navigation at spawn pose {xyzh.tolist()}.")
         curr_lane = lanes[0]
 
         accum_length = self._seg_len(curr_lane.center.xy).sum()

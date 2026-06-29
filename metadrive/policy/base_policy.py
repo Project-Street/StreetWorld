@@ -1,7 +1,6 @@
 import copy
 import logging
 import uuid
-import torch
 import gymnasium as gym
 import numpy as np
 from metadrive.base_class.configurable import Configurable
@@ -18,6 +17,7 @@ class BasePolicy(Randomizable, Configurable):
         Randomizable.__init__(self, 0)
         self.step_manager = step_manager
         self.out_of_road_threshold = config.get("out_of_road_threshold", 5)
+        self.arrive_speed_threshold = float(config.get("arrive_speed_threshold", 10.0))
         self.action_info = dict()
 
     def reset(self, controller, seed, state, init_state, **kwargs):
@@ -28,8 +28,25 @@ class BasePolicy(Randomizable, Configurable):
         self.spawn_timestamp = timestamp_list[0]
 
         self.trajectory = state
-        self.destination = init_state['destination']
-        self.static = sum([np.linalg.norm(traj['velocity']) for traj in self.trajectory.values()]) / len(self.trajectory) < 0.1
+        self.destination = init_state["destination"]
+        self.destination_heading = float(init_state["destination_yaw"])
+        self.destination_forward = np.asarray(
+            [np.cos(self.destination_heading), np.sin(self.destination_heading)],
+            dtype=np.float32,
+        )
+        self.destination_lateral = np.asarray(
+            [-self.destination_forward[1], self.destination_forward[0]],
+            dtype=np.float32,
+        )
+        self.destination_xy = np.asarray(self.destination, dtype=np.float32)[:2]
+        valid_timestamps = [timestamp for timestamp in timestamp_list if self.trajectory[timestamp]["valid"]]
+        if len(valid_timestamps) == 0:
+            raise ValueError("BasePolicy reset got trajectory with no valid states.")
+        last_state = self.trajectory[valid_timestamps[-1]]
+        self.destination_speed = float(np.linalg.norm(np.asarray(last_state["velocity"], dtype=np.float32)[:2]))
+        self.static = sum(
+            [np.linalg.norm(traj["velocity"]) for traj in self.trajectory.values()]
+        ) / len(self.trajectory) < 0.1
 
     def act(self, *args, **kwargs):
         """
@@ -37,28 +54,20 @@ class BasePolicy(Randomizable, Configurable):
         the policy can be written to self.action_info, which will be retrieved and shown in info dict automatically.
         """
         pass
-    
+
     @property
     def is_arrive(self):
-        p = self.controller.position
-        dest = self.destination
-        return (p[0] - dest[0])**2 + (p[1] - dest[1])**2 < 4 and not self.static
-    
+        if self.static:
+            return False
+        rel = np.asarray(self.controller.position, dtype=np.float32)[:2] - self.destination_xy
+        longitudinal = float(np.dot(rel, self.destination_forward))
+        lateral = abs(float(np.dot(rel, self.destination_lateral)))
+        speed_error = abs(float(self.controller.speed) - self.destination_speed)
+        return longitudinal >= 0.0 and lateral <= 20.0 and speed_error <= self.arrive_speed_threshold
+
     @property
     def is_spawned(self):
         return self.step_manager.current_timestamp >= self.spawn_timestamp
-
-    @property
-    def is_in_trajectory(self):
-        ego_position = self.controller.position
-        ego_position = torch.tensor([ego_position[0], ego_position[1]], dtype=torch.float32).cuda()
-
-        states = self.trajectory.values()
-        expert_positions = torch.stack([torch.tensor(state['position'][:2]).float() for state in states]).cuda()
-
-        distances = torch.norm(expert_positions - ego_position.unsqueeze(0), dim=1)
-        min_distance = torch.min(distances).item()
-        return min_distance < self.out_of_road_threshold
     
     def get_action_info(self):
         """
