@@ -263,20 +263,26 @@ class AgentManager(BaseManager):
             self.last_observation = self.observer.observe()
         return {'observation': self.last_observation}
 
-    def get_pose(self):
-        if self.state != AgentState.ALIVE:
-            raise ValueError(f"Cannot get pose for agent in state {self.state}")
-        return self.controller.transform
-
     def get_base_state(self, transform=None):
         if self.state != AgentState.ALIVE:
             raise ValueError(f"Cannot get state for agent in state {self.state}")
 
-        transform = self.get_pose()
+        transform = self.controller.transform
         position = np.asarray(self.controller.position, dtype=np.float32)
         length = self.controller.LENGTH
         width = self.controller.WIDTH
         height = self.controller.HEIGHT
+        current_lane = None
+        covered_lanes = None
+        if self.trajdata_map is not None:
+            xyzh = np.asarray(
+                [float(position[0]), float(position[1]), float(position[2]), float(self.controller.heading_theta)],
+                dtype=np.float32,
+            )
+            lanes = self.trajdata_map.get_current_lane(xyzh, max_heading_error=np.inf)
+            if len(lanes) > 0:
+                current_lane = lanes[0]
+            covered_lanes = self._covered_lanes(position, float(self.controller.heading_theta), length, width)
         if self.is_static:
             velocity = np.zeros(3, dtype=np.float32)
             acceleration = np.zeros(3, dtype=np.float32)
@@ -297,9 +303,36 @@ class AgentManager(BaseManager):
             "heading_theta": float(self.controller.heading_theta),
             "angular_velocity": angular_velocity,
             "angular_acceleration": angular_acceleration,
+            "current_lane": current_lane,
+            "covered_lanes": covered_lanes,
             "size": [length, width, height],
             "type": self.controller.metadrive_type
         }
+
+    def _covered_lanes(self, position, heading_theta, length, width):
+        half_length = float(length) * 0.5
+        half_width = float(width) * 0.5
+        forward = np.asarray([math.cos(heading_theta), math.sin(heading_theta)], dtype=np.float32)
+        left = np.asarray([-forward[1], forward[0]], dtype=np.float32)
+        center = np.asarray(position, dtype=np.float32)[:2]
+        corners = [
+            center + forward * half_length + left * half_width,
+            center + forward * half_length - left * half_width,
+            center - forward * half_length - left * half_width,
+            center - forward * half_length + left * half_width,
+        ]
+        covered_lanes = []
+        covered_lane_ids = set()
+        for corner in corners:
+            xyzh = np.asarray(
+                [float(corner[0]), float(corner[1]), float(position[2]), heading_theta],
+                dtype=np.float32,
+            )
+            for lane in self.trajdata_map.get_current_lane(xyzh, max_heading_error=np.inf):
+                if lane.id not in covered_lane_ids:
+                    covered_lanes.append(lane)
+                    covered_lane_ids.add(lane.id)
+        return covered_lanes
     
     def get_observation_spaces(self):
         return self.observer.observation_space

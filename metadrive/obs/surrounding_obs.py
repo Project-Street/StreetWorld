@@ -82,6 +82,8 @@ class SurroundingObservation(BaseObservation):
                 "heading_theta": float(heading_theta),
                 "angular_velocity": ctrl["angular_velocity"],
                 "angular_acceleration": ctrl["angular_acceleration"],
+                "current_lane": ctrl["current_lane"],
+                "covered_lanes": ctrl["covered_lanes"],
                 "size": ctrl["size"],
                 "type": ctrl["type"]
             }

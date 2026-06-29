@@ -8,7 +8,6 @@ import numpy as np
 
 @dataclass
 class ScenarioMetricTracker:
-    dac_threshold: float = 1.5
     ttc_threshold: float = 5.0
     accel_threshold: float = 2.0
     yaw_acc_threshold: float = 0.5
@@ -36,15 +35,14 @@ class ScenarioMetricTracker:
     def update(self, info: Dict[str, Any], obs: Dict[str, Any], env) -> None:
         self.collision |= bool(info["collision"])
 
-        deviation = float(info["position_deviation"])
+        states = obs["states"]
         self.dac_total += 1
-        if deviation <= self.dac_threshold:
+        if states["current_lane"] is not None:
             self.dac_hits += 1
 
         ttc = info["ttc"]
         self.ttc_flags.append(1.0 if ttc is None or float(ttc) >= self.ttc_threshold else 0.0)
 
-        states = obs["states"]
         angular_velocity = np.asarray(states["angular_velocity"], dtype=np.float32)
         self.com_total += 1
         if float(states["accelerate"]) <= self.accel_threshold and abs(float(angular_velocity[2])) <= self.yaw_acc_threshold:

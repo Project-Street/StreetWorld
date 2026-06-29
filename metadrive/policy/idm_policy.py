@@ -36,6 +36,7 @@ class ObjectState:
     heading_theta: float
     size: Sequence[float]
     obj_type: str
+    covered_lanes: Optional[Sequence[object]] = None
     lane: Optional[object] = None
     lane_s: Optional[float] = None
     lane_lat: Optional[float] = None
@@ -150,7 +151,6 @@ class IDMPolicy(BasePolicy):
     ACC_FACTOR = 2.0
     DEACC_FACTOR = 3.0
 
-    DEFAULT_LANE_WIDTH = 3.5
     DEST_REGION_RADIUS = 2.0
 
     def __init__(self, step_manager, config=None):
@@ -160,7 +160,6 @@ class IDMPolicy(BasePolicy):
         self.target_speed = float(self.config.get("normal_speed", self.NORMAL_SPEED))
         self.normal_speed = float(self.config.get("normal_speed", self.NORMAL_SPEED))
         self.creep_speed = float(self.config.get("creep_speed", self.CREEP_SPEED))
-        self.lane_width = float(self.config.get("lane_width", self.DEFAULT_LANE_WIDTH))
         self.max_long_dist = float(self.config.get("max_long_dist", self.MAX_LONG_DIST))
         self.safe_lane_change_distance = float(
             self.config.get("safe_lane_change_distance", self.SAFE_LANE_CHANGE_DISTANCE)
@@ -218,9 +217,8 @@ class IDMPolicy(BasePolicy):
 
         ego = self._parse_ego_state(observation["states"])
         surrounding = self._parse_surrounding(observation["surrounding"])
-        try:
-            current_lane = self._current_lane(ego)
-        except IDMLaneRuntimeError:
+        current_lane = observation["states"]["current_lane"]
+        if current_lane is None:
             action = [0.0, 0.0]
             self.last_action = action
             self.action_info["action"] = action
@@ -285,6 +283,7 @@ class IDMPolicy(BasePolicy):
                 heading_theta=float(obj["heading_theta"]),
                 size=obj["size"],
                 obj_type=obj["type"],
+                covered_lanes=obj["covered_lanes"],
             )
             obj_state.lane_relation_cache = {}
             ret.append(obj_state)
@@ -637,7 +636,7 @@ class IDMPolicy(BasePolicy):
         if obj.lane_relation_cache is None:
             obj.lane_relation_cache = {}
         if lane.id not in obj.lane_relation_cache:
-            relation = self._object_lane_relation_by_box(lane, obj)
+            relation = self._object_lane_relation_by_covered_lanes(lane, obj)
             if relation is not None:
                 obj.lane_relation_cache[lane.id] = relation
         relation = obj.lane_relation_cache.get(lane.id)
@@ -649,47 +648,18 @@ class IDMPolicy(BasePolicy):
             return relation_name
         return None
 
-    def _object_lane_relation_by_box(self, lane, obj: ObjectState):
+    def _object_lane_relation_by_covered_lanes(self, lane, obj: ObjectState):
+        if obj.covered_lanes is None:
+            return None
         for candidate_lane, relation in (
             (lane, "same"),
             *[(self._lane_by_id(lane_id), "next") for lane_id in lane.next_lanes],
             *[(self._lane_by_id(lane_id), "prev") for lane_id in lane.prev_lanes],
         ):
-            lane_s = self._object_s_on_lane_by_box(candidate_lane, obj)
-            if lane_s is not None:
+            if any(covered_lane.id == candidate_lane.id for covered_lane in obj.covered_lanes):
+                lane_s, _, _ = self._project_to_lane(candidate_lane, obj.position)
                 return relation, candidate_lane, lane_s
         return None
-
-    def _object_s_on_lane_by_box(self, lane, obj: ObjectState) -> Optional[float]:
-        lane_length = self._lane_length(lane)
-        inside_s = []
-        for corner in self._object_bottom_corners(obj):
-            s, lat, _ = self._project_to_lane(lane, corner)
-            if 0.0 <= s <= lane_length and abs(lat) <= self.lane_width * 0.5:
-                inside_s.append(s)
-        if not inside_s:
-            return None
-        center_s, _, _ = self._project_to_lane(lane, obj.position)
-        return float(np.clip(center_s, min(inside_s), max(inside_s)))
-
-    def _object_bottom_corners(self, obj: ObjectState) -> np.ndarray:
-        size = np.asarray(obj.size, dtype=np.float32).reshape(-1)
-        if size.shape[0] < 2:
-            raise ValueError(f"Object {obj.name} size must contain length and width, got {obj.size}.")
-        half_length = float(size[0]) * 0.5
-        half_width = float(size[1]) * 0.5
-        forward = np.asarray([math.cos(obj.heading_theta), math.sin(obj.heading_theta)], dtype=np.float32)
-        left = np.asarray([-forward[1], forward[0]], dtype=np.float32)
-        center = np.asarray(obj.position, dtype=np.float32)[:2]
-        return np.asarray(
-            [
-                center + forward * half_length + left * half_width,
-                center + forward * half_length - left * half_width,
-                center - forward * half_length - left * half_width,
-                center - forward * half_length + left * half_width,
-            ],
-            dtype=np.float32,
-        )
 
     def _relative_longitudinal(self, lane, ego_s: float, obj: ObjectState, relation: str):
         if relation == "same":
