@@ -126,6 +126,12 @@ def slerp(v1, v2, t, DOT_THR=0.99975, to_cpu=False, dim=-1):
     v1_norm = v1 / torch.norm(v1, dim=dim, keepdim=True)
     v2_norm = v2 / torch.norm(v2, dim=dim, keepdim=True)
     dot = (v1_norm * v2_norm).sum(dim)
+    flip = dot < 0
+    if flip.any():
+        flip = flip.unsqueeze(dim)
+        v2 = torch.where(flip, -v2, v2)
+        v2_norm = torch.where(flip, -v2_norm, v2_norm)
+        dot = (v1_norm * v2_norm).sum(dim)
 
     # if the vectors are too close, return a simple linear interpolation
     if (torch.abs(dot) > DOT_THR).any():

@@ -48,10 +48,12 @@ class StateObservation(BaseObservation):
         longitudinal_acc = np.asarray(self.controller.get_longitudinal_acceleration(), dtype=np.float32)
         linear_acc = np.zeros(3, dtype=np.float32)
         linear_acc[:2] = longitudinal_acc
-        accel = float(np.linalg.norm(linear_acc[:2]))
+        accel = np.asarray(ego_state["acceleration"], dtype=np.float32)
 
         angular_vel = np.zeros(3, dtype=np.float32)
         angular_vel[2] = float(ego_state["angular_velocity"])
+        angular_acc = np.zeros(3, dtype=np.float32)
+        angular_acc[2] = float(ego_state["angular_acceleration"])
 
         return {
             'ego_pos': ego_pos,
@@ -63,6 +65,7 @@ class StateObservation(BaseObservation):
             'linear_acceleration': linear_acc,
             'accelerate': accel,
             'angular_velocity': angular_vel,
+            'angular_acceleration': angular_acc,
             'current_lane': ego_state["current_lane"],
         }
 

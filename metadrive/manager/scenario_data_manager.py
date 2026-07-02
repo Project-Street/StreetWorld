@@ -82,6 +82,7 @@ class ScenarioDataManager(BaseManager):
 
     def _load_single_scene(self, cfg_path):
         scene_name, cfg, timestamp_range, camera_params, ego_poses, participants, scene_mesh_path = self.loader(cfg_path)
+        ego_poses, camera_params = self._calibrate_ego_center(cfg, ego_poses, camera_params)
         metadata = self.restructure_metadata(
             config=cfg,
             timestamp_range=timestamp_range,
@@ -91,6 +92,33 @@ class ScenarioDataManager(BaseManager):
         )
         metadata["scene_mesh_path"] = scene_mesh_path
         return scene_name, metadata
+
+    def _ego_vehicle_height(self):
+        actor_config = self.base_config["actor_config"]
+        vehicle_size = actor_config["controller_config"]["size"]
+        if vehicle_size is not None:
+            return float(vehicle_size[2])
+        return float(actor_config["controller"].DEFAULT_HEIGHT)
+
+    def _calibrate_ego_center(self, config, ego_poses, camera_params):
+        ego_center_height = float(config.get("ego_center_height", 0))
+        ego_origin_delta = np.eye(4, dtype=np.float32)
+        ego_origin_delta[2, 3] = self._ego_vehicle_height() / 2 - ego_center_height
+
+        calibrated_ego_poses = {
+            int(timestamp): (np.asarray(pose, dtype=np.float32) @ ego_origin_delta).astype(np.float32)
+            for timestamp, pose in ego_poses.items()
+        }
+
+        calibrated_camera_params = {}
+        for cam_name, cam_param in camera_params.items():
+            calibrated_cam_param = dict(cam_param)
+            calibrated_cam_param["ego2camera"] = (
+                np.asarray(cam_param["ego2camera"], dtype=np.float32) @ ego_origin_delta
+            ).astype(np.float32)
+            calibrated_camera_params[cam_name] = calibrated_cam_param
+
+        return calibrated_ego_poses, calibrated_camera_params
 
     def eval(self, order=True, repeat_per_scene=1):
         """

@@ -164,6 +164,7 @@ class IDMPolicy(BasePolicy):
         self.safe_lane_change_distance = float(
             self.config.get("safe_lane_change_distance", self.SAFE_LANE_CHANGE_DISTANCE)
         )
+        self.current_lane_max_dist = float(self.config.get("current_lane_max_dist", 2.25))
         self.lane_change_speed_increase = float(
             self.config.get("lane_change_speed_increase", self.LANE_CHANGE_SPEED_INCREASE)
         )
@@ -292,7 +293,11 @@ class IDMPolicy(BasePolicy):
     def _lane_for_pose(self, xyz, heading_theta=None, route_initialization=False):
         heading = 0.0 if heading_theta is None else float(heading_theta)
         xyzh = np.asarray([float(xyz[0]), float(xyz[1]), float(xyz[2]), heading], dtype=np.float32)
-        lanes = self.trajdata_map.get_current_lane(xyzh, max_heading_error=np.inf)
+        lanes = self.trajdata_map.get_current_lane(
+            xyzh,
+            max_dist=self.current_lane_max_dist,
+            max_heading_error=np.inf,
+        )
         if len(lanes) == 0:
             error_cls = IDMRouteInitializationError if route_initialization else IDMLaneRuntimeError
             raise error_cls(
@@ -300,9 +305,6 @@ class IDMPolicy(BasePolicy):
                 f"pos={xyzh[:3].tolist()} heading={heading:.6f}."
             )
         return lanes[0]
-
-    def _current_lane(self, ego: EgoState):
-        return self._lane_for_pose(ego.position, ego.heading_theta)
 
     def _target_lane_from_trajectory(self, trajectory):
         if len(trajectory) == 0:

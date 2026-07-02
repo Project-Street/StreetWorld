@@ -43,9 +43,11 @@ class ScenarioMetricTracker:
         ttc = info["ttc"]
         self.ttc_flags.append(1.0 if ttc is None or float(ttc) >= self.ttc_threshold else 0.0)
 
+        acceleration = np.asarray(states["accelerate"], dtype=np.float32).reshape(-1)
         angular_velocity = np.asarray(states["angular_velocity"], dtype=np.float32)
+        acceleration_norm = float(np.linalg.norm(acceleration[:2]))
         self.com_total += 1
-        if float(states["accelerate"]) <= self.accel_threshold and abs(float(angular_velocity[2])) <= self.yaw_acc_threshold:
+        if acceleration_norm <= self.accel_threshold and abs(float(angular_velocity[2])) <= self.yaw_acc_threshold:
             self.com_hits += 1
 
         self.route_progress = float(env._last_progress_value)

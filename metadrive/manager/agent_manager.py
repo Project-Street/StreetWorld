@@ -279,7 +279,7 @@ class AgentManager(BaseManager):
                 [float(position[0]), float(position[1]), float(position[2]), float(self.controller.heading_theta)],
                 dtype=np.float32,
             )
-            lanes = self.trajdata_map.get_current_lane(xyzh, max_heading_error=np.inf)
+            lanes = self.trajdata_map.get_current_lane(xyzh, max_heading_error=np.inf, max_dist=2.25)
             if len(lanes) > 0:
                 current_lane = lanes[0]
             covered_lanes = self._covered_lanes(position, float(self.controller.heading_theta), length, width)
@@ -328,7 +328,7 @@ class AgentManager(BaseManager):
                 [float(corner[0]), float(corner[1]), float(position[2]), heading_theta],
                 dtype=np.float32,
             )
-            for lane in self.trajdata_map.get_current_lane(xyzh, max_heading_error=np.inf):
+            for lane in self.trajdata_map.get_current_lane(xyzh, max_heading_error=np.inf, max_dist=2.25):
                 if lane.id not in covered_lane_ids:
                     covered_lanes.append(lane)
                     covered_lane_ids.add(lane.id)

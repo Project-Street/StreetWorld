@@ -24,6 +24,7 @@ IDM_CONFIG["participant_config"]["policy"] = IDMPolicy
 IDM_CONFIG["participant_config"]["policy_config"] = dict(
     enable_lane_change=True,
     arrive_speed_threshold=10.0,
+    current_lane_max_dist=2.25,
 )
 IDM_CONFIG["participant_config"]["controller_config"]["enable_reverse"] = False
 

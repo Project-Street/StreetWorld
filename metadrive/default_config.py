@@ -43,6 +43,7 @@ BASE_DEFAULT_CONFIG = dict(
                 observer_class=NavigationObservation,
                 navigating_type="snap_lane",
                 snap_lane_interval=2.0,
+                current_lane_max_dist=2.25,
             ),
             states = dict(
                 observer_class=StateObservation,

@@ -17,6 +17,7 @@ class NavigationObservation(BaseObservation, Randomizable):
         self.navigating_type = config.get("navigating_type", "expert_following")  # lane_following, expert_following, snap_lane
         self.early_signal_distance = float(config.get("early_signal_distance", 10.0))  # meters
         self.snap_lane_interval = float(config.get("snap_lane_interval", 2.0))
+        self.current_lane_max_dist = float(config.get("current_lane_max_dist", 2.25))
         # New radius-based threshold using triangle inradius (meters). Smaller -> sharper turn.
         # You may tune this based on map scale; ~20m is a moderate default.
         self.turn_inradius_threshold = float(config.get("turn_radius_threshold", 10.0))
@@ -170,7 +171,11 @@ class NavigationObservation(BaseObservation, Randomizable):
         spawn_yaw = float(self.init_state["spawn_yaw"])
 
         xyzh = np.asarray([float(spawn_xyz[0]), float(spawn_xyz[1]), float(spawn_xyz[2]), spawn_yaw], dtype=np.float32)
-        lanes = self.trajdata_map.get_current_lane(xyzh, max_heading_error=np.inf)
+        lanes = self.trajdata_map.get_current_lane(
+            xyzh,
+            max_dist=self.current_lane_max_dist,
+            max_heading_error=np.inf,
+        )
         if len(lanes) == 0:
             raise RuntimeError(f"No current lane found for lane_following navigation at spawn pose {xyzh.tolist()}.")
         curr_lane = lanes[0]
@@ -303,7 +308,11 @@ class NavigationObservation(BaseObservation, Randomizable):
     def _lane_for_point(self, point, heading):
         assert isinstance(self.trajdata_map, VectorMap), "trajdata_map must be provided for snap_lane navigation type."
         query = np.asarray([float(point[0]), float(point[1]), 0.0, float(heading)], dtype=np.float32)
-        lanes = self.trajdata_map.get_current_lane(query)
+        lanes = self.trajdata_map.get_current_lane(
+            query,
+            max_dist=self.current_lane_max_dist,
+            max_heading_error=np.inf,
+        )
         if len(lanes) == 0:
             return None
         return lanes[0]
