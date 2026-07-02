@@ -39,8 +39,7 @@ class ScenarioDataManager(BaseManager):
         self.eval_mode = False
 
         # self.store_data = engine.global_config["store_data"]
-        # Allow subclasses to set directory differently
-        self.directory = self.base_config.get("scene_config_directory")
+        self.scene_config_list = self._build_scene_config_list()
 
         self.start_scenario_index = self.base_config.get("start_scenario_index", 0)
         self.random_scenario = self.base_config.get("random_scenario", True)
@@ -51,8 +50,9 @@ class ScenarioDataManager(BaseManager):
         # self._scenarios = {}
 
         if self.hotload:
-            self.metadata, self.idx2scene = {}, []
-            self.num_scenarios = 0
+            self.metadata = {}
+            self.idx2scene = [None] * len(self.scene_config_list)
+            self.num_scenarios = len(self.scene_config_list)
         else:
             self.read_metadata(loader)
         self.base_config["num_scenarios"] = self.num_scenarios
@@ -66,6 +66,19 @@ class ScenarioDataManager(BaseManager):
         # self.coverage = [0 for _ in range(self.num_scenarios)]
     def _post_process_config(self, config):
         pass
+
+    def _build_scene_config_list(self):
+        scene_config_input = self.base_config.get("scene_config_list")
+        if scene_config_input is None:
+            scene_config_input = self.base_config.get("scene_config_directory")
+
+        if isinstance(scene_config_input, list):
+            return scene_config_input
+
+        return [
+            os.path.join(scene_config_input, config_file)
+            for config_file in sorted(os.listdir(scene_config_input))
+        ]
 
     def _load_single_scene(self, cfg_path):
         scene_name, cfg, timestamp_range, camera_params, ego_poses, participants, scene_mesh_path = self.loader(cfg_path)
@@ -95,21 +108,34 @@ class ScenarioDataManager(BaseManager):
     def read_metadata(self, loader):
         self.metadata, self.idx2scene = {}, []
         self.num_scenarios = 0
-        for config_file in sorted(os.listdir(self.directory)):
-            cfg_path = os.path.join(self.directory, config_file)
+        for cfg_path in self.scene_config_list:
             scene_name, metadata = self._load_single_scene(cfg_path)
             self.metadata[scene_name] = metadata
             self.idx2scene.append(scene_name)
             self.num_scenarios += 1
 
-    def hotload_scenario(self, cfg_path):
+    def hotload_scenario(self, scenario_id):
+        cfg_path = self.scene_config_list[scenario_id]
         scene_name, metadata = self._load_single_scene(cfg_path)
-        if scene_name not in self.metadata:
-            self.idx2scene.append(scene_name)
-            self.num_scenarios += 1
-            self.base_config["num_scenarios"] = self.num_scenarios
+        old_scene_name = self.idx2scene[scenario_id]
+        if old_scene_name is not None and old_scene_name != scene_name:
+            self.metadata.pop(old_scene_name)
+        self.idx2scene[scenario_id] = scene_name
         self.metadata[scene_name] = metadata
         return scene_name
+
+    def hotload_scene_name(self, scene_name):
+        if scene_name in self.idx2scene:
+            return self.idx2scene.index(scene_name)
+
+        for scenario_id in range(self.num_scenarios):
+            if self.idx2scene[scenario_id] is not None:
+                continue
+            loaded_scene_name = self.hotload_scenario(scenario_id)
+            if loaded_scene_name == scene_name:
+                return scenario_id
+
+        raise ValueError(f"Scene not found: {scene_name}")
 
     def restructure_metadata(self, config, timestamp_range, camera_params, ego_poses, participants):
         init_state, agent_state = {}, {}
@@ -193,14 +219,17 @@ class ScenarioDataManager(BaseManager):
                 raise LookupError("No more scenarios to evaluate.")
             
         elif scene_name is not None:
-            if scene_name not in self.idx2scene and self.hotload:
-                cfg_path = os.path.join(self.directory, f"{scene_name}.yaml")
-                scene_name = self.hotload_scenario(cfg_path)
-            self.current_scenario_id = self.idx2scene.index(scene_name)
+            if self.hotload:
+                self.current_scenario_id = self.hotload_scene_name(scene_name)
+            else:
+                self.current_scenario_id = self.idx2scene.index(scene_name)
         elif self.random_scenario:
             self.current_scenario_id = self.np_random.randint(0, self.num_scenarios)
         else:
             self.current_scenario_id = (self.current_scenario_id + 1) % self.num_scenarios
+
+        if self.hotload and self.idx2scene[self.current_scenario_id] is None:
+            self.hotload_scenario(self.current_scenario_id)
 
         self.current_config = self.base_config.copy()
 
@@ -231,6 +260,8 @@ class ScenarioDataManager(BaseManager):
     def get_scenario_data(self, i, should_copy=False):
         assert 0 <= i < self.num_scenarios, \
             "scenario index exceeds range, scenario index: {}, worker_index: {}".format(i, self.worker_index)
+        if self.hotload and self.idx2scene[i] is None:
+            self.hotload_scenario(i)
         scenario_name = self.idx2scene[i]
         return self.metadata[scenario_name]
 
@@ -251,7 +282,7 @@ class ScenarioDataManager(BaseManager):
             return
 
         def _score(scenario_id):
-            file_path = os.path.join(self.directory, self.mapping[scenario_id], scenario_id)
+            file_path = self.scene_config_list[scenario_id]
             scenario = read_scenario_data(file_path, centralize=True)
             obj_weight = 0
 

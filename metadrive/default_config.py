@@ -41,7 +41,8 @@ BASE_DEFAULT_CONFIG = dict(
             ),
             navigation = dict(
                 observer_class=NavigationObservation,
-                navigating_type="expert_following",
+                navigating_type="snap_lane",
+                snap_lane_interval=2.0,
             ),
             states = dict(
                 observer_class=StateObservation,
