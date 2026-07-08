@@ -42,6 +42,9 @@ BASE_DEFAULT_CONFIG = dict(
             navigation = dict(
                 observer_class=NavigationObservation,
                 navigating_type="snap_lane",
+                forecast_type="distance",
+                forecast_value=20.0,
+                lateral_offset=2.0,
                 snap_lane_interval=2.0,
                 current_lane_max_dist=2.25,
             ),
@@ -105,34 +108,12 @@ BASE_DEFAULT_CONFIG = dict(
     # Physics world step is in microsecond (0.02s) and will be repeated for decision_repeat times per env.step()
     physics_world_step_size=2e4,
     decision_repeat=5,
-    # Turn on it to use render pipeline, which provides advanced rendering effects (Beta)
-    render_pipeline=False,
+
     # Disable collision detection in physics world
     disable_collision=False,
-    image_layout=[
-        ["FRONT_LEFT", "FRONT", "FRONT_RIGHT"],
-        ["BACK_LEFT", "BACK", "BACK_RIGHT"],
-    ],
     curriculum_level=1,
     num_workers=1,
 
-    # ===== Terrain =====
-    # The size of the square map region, which is centered at [0, 0]. The map objects outside it are culled.
-    map_region_size=2048,
-    # Whether to remove lanes outside the map region. If True, lane localization only applies to map region
-    cull_lanes_outside_map=False,
-    # Road will have a flat marin whose width is determined by this value, unit: [m]
-    drivable_area_extension=7,
-    # Height scale for mountains, unit: [m]. 0 height makes the terrain flat
-    height_scale=50,
-    # If using mesh collision, mountains will have physics body and thus interact with vehicles.
-    use_mesh_terrain=False,
-    # If set to False, only the center region of the terrain has the physics body
-    full_size_mesh=True,
-    # Whether to show crosswalk
-    show_crosswalk=True,
-    # Whether to show sidewalk
-    show_sidewalk=True,
 
     # ===== Debug =====
     # Please see Documentation: Debug for more details
@@ -144,21 +125,7 @@ BASE_DEFAULT_CONFIG = dict(
     log_level=logging.INFO,  # log level. logging.DEBUG/logging.CRITICAL or so on
     show_coordinates=False,  # show coordinates for maps and objects for debug
 
-    # ===== GUI =====
-    # Please see Documentation: GUI for more details
-    # Whether to show these elements in the 3D scene
-    show_fps=True,
-    show_logo=True,
-    show_mouse=True,
-    show_skybox=True,
-    show_terrain=True,
-    show_interface=True,
-    # Show marks for policies for debugging multi-policy setting
-    show_policy_mark=False,
-    # Show an arrow marks for providing navigation information
-    show_interface_navi_mark=True,
-    # A list showing sensor output on window. Its elements are chosen from sensors.keys() + "dashboard"
-    interface_panel=["dashboard"],
+
 
     # ===== Record/Replay Metadata =====
     # Please see Documentation: Record and Replay for more details
@@ -171,7 +138,5 @@ BASE_DEFAULT_CONFIG = dict(
     # If True, when creating and replaying object trajectories, use the same ID as in dataset
     force_reuse_object_name=False,
 
-    # ===== randomization =====
-    num_scenarios=1,  # the number of scenarios in this environment
     hotload=False,
 )

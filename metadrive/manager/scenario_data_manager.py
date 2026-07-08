@@ -8,7 +8,7 @@ from metadrive.component.vehicle.vehicle_type import random_vehicle_type
 from metadrive.utils.trajectory import Trajectory
 import json
 
-from metadrive.default_config import BASE_DEFAULT_CONFIG
+from metadrive.configs.default_config import BASE_DEFAULT_CONFIG
 
 class ScenarioDataManager(BaseManager):
     DEFAULT_DATA_BUFFER_SIZE = 100

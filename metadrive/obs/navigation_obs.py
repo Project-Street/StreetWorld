@@ -15,12 +15,11 @@ class NavigationObservation(BaseObservation, Randomizable):
         BaseObservation.__init__(self, config)
         Randomizable.__init__(self, None)
         self.navigating_type = config.get("navigating_type", "expert_following")  # lane_following, expert_following, snap_lane
-        self.early_signal_distance = float(config.get("early_signal_distance", 10.0))  # meters
+        self.forecast_type = config.get("forecast_type", "distance")
+        self.forecast_value = float(config.get("forecast_value", 20.0))
+        self.lateral_offset = float(config.get("lateral_offset", 2.0))
         self.snap_lane_interval = float(config.get("snap_lane_interval", 2.0))
         self.current_lane_max_dist = float(config.get("current_lane_max_dist", 2.25))
-        # New radius-based threshold using triangle inradius (meters). Smaller -> sharper turn.
-        # You may tune this based on map scale; ~20m is a moderate default.
-        self.turn_inradius_threshold = float(config.get("turn_radius_threshold", 10.0))
 
         self.controller = None
         self.trajdata_map = None
@@ -71,7 +70,7 @@ class NavigationObservation(BaseObservation, Randomizable):
         self._expert_heading = None
     
     def _get_turn_signal(self):
-        if self._path_xy is None or len(self._path_xy) < 5:
+        if self._path_xy is None or len(self._path_xy) < 2:
             return 0
 
         ego_xy = self._vehicle_xy(self.controller)
@@ -80,51 +79,20 @@ class NavigationObservation(BaseObservation, Randomizable):
         if i0 >= len(self._path_xy):
             return 0
 
-        j = self._first_index_by_arclen(self._path_cumlen, i0, self.early_signal_distance)
-        if j == len(self._path_cumlen) or j == 0:
-            return 0
+        if self.forecast_type == "step":
+            idx = i0 + int(self.forecast_value)
+        elif self.forecast_type == "distance":
+            idx = self._first_index_by_arclen(self._path_cumlen, i0, self.forecast_value)
+        else:
+            raise ValueError(f"Unknown forecast_type: {self.forecast_type}")
+        idx = min(idx, len(self._path_xy) - 1)
 
-        # Vectorized scan within [i0+1, j-1] using numpy
-        N = len(self._path_xy)
-        k_start = max(i0 + 1, 1)
-        k_end = min(j - 1, N - 2)
-        if k_start > k_end:
-            return 0
-
-        idx = np.arange(k_start, k_end + 1, dtype=np.int32)
-        p = self._path_xy
-        p0 = p[idx - 1]
-        p1 = p[idx]
-        p2 = p[idx + 1]
-
-        v01 = p1 - p0
-        v12 = p2 - p1
-        v02 = p2 - p0
-
-        len01 = np.linalg.norm(v01, axis=1)
-        len12 = np.linalg.norm(v12, axis=1)
-        len02 = np.linalg.norm(v02, axis=1)
-        cross = v01[:, 0] * v12[:, 1] - v01[:, 1] * v12[:, 0]
-        area2 = np.abs(cross)
-
-        eps = 1e-10
-        valid = (len01 >= eps) & (len12 >= eps) & (len02 >= eps)
-        R = np.full_like(len01, np.inf, dtype=np.float32)
-        R[valid] = (len01[valid] * len12[valid] * len02[valid]) / (2 * area2[valid] + eps)
-        meets = valid & (R <= float(self.turn_inradius_threshold))
-
-        c = np.sign(cross * meets.astype(np.float32))
-        n = len(c)
-        if n < 5:
-            return 0
-
-        for k in range(0, n - 4): 
-            sum = np.sum(c[k:k + 5])
-            if sum == 5:
-                return 1
-            elif sum == -5: # 
-                return -1
-
+        left_vec = np.asarray([-heading_vec[1], heading_vec[0]], dtype=np.float32)
+        lateral_shift = float((self._path_xy[idx] - ego_xy) @ left_vec)
+        if lateral_shift >= self.lateral_offset:
+            return 1
+        if lateral_shift <= -self.lateral_offset:
+            return -1
         return 0
 
     @property
@@ -205,10 +173,16 @@ class NavigationObservation(BaseObservation, Randomizable):
             headings.append(float(frame["heading_theta"]))
         expert = np.asarray(expert, dtype=np.float32)
         headings = np.asarray(headings, dtype=np.float32)
-        anchors, anchor_headings = self._sparsify_expert_by_distance(expert, headings, self.snap_lane_interval)
+        if self.forecast_type == "step":
+            anchors, anchor_headings = expert, headings
+        else:
+            anchors, anchor_headings = self._sparsify_expert_by_distance(expert, headings, self.snap_lane_interval)
         snapped = []
         for point, heading in zip(anchors, anchor_headings):
-            snapped.append(self._snap_point_to_lane_center(point, heading))
+            snapped_point = self._snap_point_to_lane_center(point, heading)
+            if self.forecast_type == "step" and len(snapped) > 0 and np.array_equal(snapped_point, snapped[-1]):
+                continue
+            snapped.append(snapped_point)
         self._set_path(snapped, smooth=False)
         self._clear_expert_reference()
 

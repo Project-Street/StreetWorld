@@ -14,6 +14,7 @@ __all__ = [
     "OnSiteScenarioEnv",
     "StreetStudioScenarioEnv",
     "GrpcClientEnv",
+    "make_web_env",
 ]
 
 _MODULE_BY_NAME = {
@@ -22,6 +23,7 @@ _MODULE_BY_NAME = {
     "OnSiteScenarioEnv": "metadrive.envs.onsite_scenario_env",
     "StreetStudioScenarioEnv": "metadrive.envs.streetstudio_scenario_env",
     "GrpcClientEnv": "metadrive.envs.grpc_client_env",
+    "make_web_env": "metadrive.envs.web_env",
 }
 
 

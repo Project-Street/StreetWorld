@@ -1,6 +1,6 @@
 import copy
 
-from metadrive.default_config import BASE_DEFAULT_CONFIG
+from metadrive.configs.default_config import BASE_DEFAULT_CONFIG
 from metadrive.obs.assembly_obs import AssemblyObservation
 from metadrive.obs.state_obs import StateObservation
 from metadrive.obs.surrounding_obs import SurroundingObservation

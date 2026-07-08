@@ -38,7 +38,7 @@ from metadrive.obs.navigation_obs import NavigationObservation
 from metadrive.obs.assembly_obs import AssemblyObservation
 from metadrive.policy.replay_policy import ReplayPolicy
 from metadrive.config import Config
-from metadrive.default_config import BASE_DEFAULT_CONFIG
+from metadrive.configs.default_config import BASE_DEFAULT_CONFIG
 
 class BaseEnv(gym.Env):
     # Force to use this seed if necessary. Note that the recipient of the forced seed should be explicitly implemented.
@@ -405,11 +405,6 @@ class BaseEnv(gym.Env):
     @property
     def actor_controller(self):
         return self.agent_managers['actor'].controller
-
-
-    @property
-    def num_scenarios(self):
-        return self.config["num_scenarios"]
 
     @property
     def observations(self):
