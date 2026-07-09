@@ -1,5 +1,4 @@
 import copy
-import os
 import numpy as np
 import torch
 from metadrive.manager.base_manager import BaseManager
@@ -39,23 +38,24 @@ class ScenarioDataManager(BaseManager):
         self.eval_mode = False
 
         # self.store_data = engine.global_config["store_data"]
-        self.scene_config_list = self._build_scene_config_list()
+        scene_ids = self.base_config["scene_ids"]
+        if not isinstance(scene_ids, list):
+            raise TypeError(f"scene_ids must be a list, got {type(scene_ids).__name__}")
+        self.scene_ids = scene_ids
 
         self.start_scenario_index = self.base_config.get("start_scenario_index", 0)
         self.random_scenario = self.base_config.get("random_scenario", True)
         self.hotload = bool(self.base_config.get("hotload", False))
-        self.current_scenario_id = self.start_scenario_index - 1
+        self.current_scene_index = self.start_scenario_index - 1
 
         # for multi-worker
         # self._scenarios = {}
 
         if self.hotload:
             self.metadata = {}
-            self.idx2scene = [None] * len(self.scene_config_list)
-            self.num_scenarios = len(self.scene_config_list)
+            self.num_scenarios = len(scene_ids)
         else:
             self.read_metadata(loader)
-        self.base_config["num_scenarios"] = self.num_scenarios
 
         # sort scenario for curriculum training
         self.scenario_difficulty = None
@@ -67,31 +67,18 @@ class ScenarioDataManager(BaseManager):
     def _post_process_config(self, config):
         pass
 
-    def _build_scene_config_list(self):
-        scene_config_input = self.base_config.get("scene_config_list")
-        if scene_config_input is None:
-            scene_config_input = self.base_config.get("scene_config_directory")
-
-        if isinstance(scene_config_input, list):
-            return scene_config_input
-
-        return [
-            os.path.join(scene_config_input, config_file)
-            for config_file in sorted(os.listdir(scene_config_input))
-        ]
-
-    def _load_single_scene(self, cfg_path):
-        scene_name, cfg, timestamp_range, camera_params, ego_poses, participants, scene_mesh_path = self.loader(cfg_path)
-        ego_poses, camera_params = self._calibrate_ego_center(cfg, ego_poses, camera_params)
+    def _load_single_scene(self, scene_id):
+        timestamp_range, camera_params, ego_poses, participants, scene_mesh_path = self.loader(scene_id)
+        ego_poses, camera_params = self._calibrate_ego_center(ego_poses, camera_params)
         metadata = self.restructure_metadata(
-            config=cfg,
+            scene_id=scene_id,
             timestamp_range=timestamp_range,
             camera_params=camera_params,
             ego_poses=ego_poses,
             participants=participants,
         )
         metadata["scene_mesh_path"] = scene_mesh_path
-        return scene_name, metadata
+        return metadata
 
     def _ego_vehicle_height(self):
         actor_config = self.base_config["actor_config"]
@@ -100,8 +87,8 @@ class ScenarioDataManager(BaseManager):
             return float(vehicle_size[2])
         return float(actor_config["controller"].DEFAULT_HEIGHT)
 
-    def _calibrate_ego_center(self, config, ego_poses, camera_params):
-        ego_center_height = float(config.get("ego_center_height", 0))
+    def _calibrate_ego_center(self, ego_poses, camera_params):
+        ego_center_height = float(self.base_config.get("ego_center_height", 0))
         ego_origin_delta = np.eye(4, dtype=np.float32)
         ego_origin_delta[2, 3] = self._ego_vehicle_height() / 2 - ego_center_height
 
@@ -128,44 +115,30 @@ class ScenarioDataManager(BaseManager):
             order: If True, scenarios will be evaluated in order. If False, scenarios will be shuffled.
             repeat_per_scene: Number of times to repeat each scenario before moving to the next one.
         """
-        self.current_scenario_id = self.start_scenario_index - 1  # Reset to before the first scenario
+        self.current_scene_index = self.start_scenario_index - 1  # Reset to before the first scenario
         self.remain_queue = [idx for _ in range(repeat_per_scene) for idx in range(self.num_scenarios)]  # Create a queue of scenario indices based on repeat_per_scene
         self.random_scenario = not order
         self.eval_mode = True
 
     def read_metadata(self, loader):
-        self.metadata, self.idx2scene = {}, []
+        self.metadata = {}
         self.num_scenarios = 0
-        for cfg_path in self.scene_config_list:
-            scene_name, metadata = self._load_single_scene(cfg_path)
-            self.metadata[scene_name] = metadata
-            self.idx2scene.append(scene_name)
+        for scene_id in self.scene_ids:
+            metadata = self._load_single_scene(scene_id)
+            self.metadata[scene_id] = metadata
             self.num_scenarios += 1
 
-    def hotload_scenario(self, scenario_id):
-        cfg_path = self.scene_config_list[scenario_id]
-        scene_name, metadata = self._load_single_scene(cfg_path)
-        old_scene_name = self.idx2scene[scenario_id]
-        if old_scene_name is not None and old_scene_name != scene_name:
-            self.metadata.pop(old_scene_name)
-        self.idx2scene[scenario_id] = scene_name
-        self.metadata[scene_name] = metadata
-        return scene_name
+    def hotload_scene(self, scene_id):
+        if scene_id in self.scene_ids:
+            return self.scene_ids.index(scene_id)
+        metadata = self._load_single_scene(scene_id)
+        self.scene_ids.append(scene_id)
+        self.metadata[scene_id] = metadata
+        self.num_scenarios = len(self.scene_ids)
+        scene_index = self.num_scenarios - 1
+        return scene_index
 
-    def hotload_scene_name(self, scene_name):
-        if scene_name in self.idx2scene:
-            return self.idx2scene.index(scene_name)
-
-        for scenario_id in range(self.num_scenarios):
-            if self.idx2scene[scenario_id] is not None:
-                continue
-            loaded_scene_name = self.hotload_scenario(scenario_id)
-            if loaded_scene_name == scene_name:
-                return scenario_id
-
-        raise ValueError(f"Scene not found: {scene_name}")
-
-    def restructure_metadata(self, config, timestamp_range, camera_params, ego_poses, participants):
+    def restructure_metadata(self, scene_id, timestamp_range, camera_params, ego_poses, participants):
         init_state, agent_state = {}, {}
         ego_ts = sorted(int(ts) for ts in ego_poses.keys())
         timestamp_range[0] = min(ego_ts, key=lambda ts: abs(ts - timestamp_range[0]))
@@ -215,7 +188,7 @@ class ScenarioDataManager(BaseManager):
             cam_param['K'] = torch.tensor(cam_param['K'])
 
         return {
-            'scene_config': config,
+            'scene_id': scene_id,
             'camera_params':camera_params,
             'ego_poses': ego_poses,
             'participants': participants,
@@ -224,12 +197,12 @@ class ScenarioDataManager(BaseManager):
             'timestamp_range': timestamp_range
         }
 
-    def reset(self, scene_name=None):
+    def reset(self, scene_id=None):
         """
         Reset scenario data manager.
 
         Args:
-            scene_name: Name of the scene to load.
+            scene_id: ID of the scene to load.
                      If None, randomly select a scene (default behavior).
 
         Raises:
@@ -242,31 +215,25 @@ class ScenarioDataManager(BaseManager):
         # Support explicit scene selection for OnSite integration
         if self.eval_mode :
             if self.remain_queue:
-                self.current_scenario_id = self.remain_queue.pop(0)
+                self.current_scene_index = self.remain_queue.pop(0)
             else:
                 raise LookupError("No more scenarios to evaluate.")
             
-        elif scene_name is not None:
+        elif scene_id is not None:
             if self.hotload:
-                self.current_scenario_id = self.hotload_scene_name(scene_name)
+                self.current_scene_index = self.hotload_scene(scene_id)
             else:
-                self.current_scenario_id = self.idx2scene.index(scene_name)
+                self.current_scene_index = self.scene_ids.index(scene_id)
         elif self.random_scenario:
-            self.current_scenario_id = self.np_random.randint(0, self.num_scenarios)
+            self.current_scene_index = self.np_random.randint(0, self.num_scenarios)
         else:
-            self.current_scenario_id = (self.current_scenario_id + 1) % self.num_scenarios
-
-        if self.hotload and self.idx2scene[self.current_scenario_id] is None:
-            self.hotload_scenario(self.current_scenario_id)
+            self.current_scene_index = (self.current_scene_index + 1) % self.num_scenarios
 
         self.current_config = self.base_config.copy()
 
         config_dict=self.current_config["actor_config"]
         config_dict["controller"] = config_dict.get("controller", random_vehicle_type(self.np_random)) 
 
-        current_metadata = self.get_current_scenario_data()
-        config_dict=self.current_config["actor_config"]
-        config_dict["controller"] = config_dict.get("controller", random_vehicle_type(self.np_random)) 
         current_metadata = self.get_current_scenario_data()
         ego_poses = current_metadata['ego_poses']
         # average_ego_height =  np.mean([pose[2][3] for pose in ego_poses.values()])
@@ -283,15 +250,15 @@ class ScenarioDataManager(BaseManager):
         #     start_ts=start_ts
         # )
     def get_current_scenario_data(self):
-        return self.get_scenario_data(self.current_scenario_id)
+        return self.get_scenario_data(self.current_scene_index)
 
     def get_scenario_data(self, i, should_copy=False):
         assert 0 <= i < self.num_scenarios, \
             "scenario index exceeds range, scenario index: {}, worker_index: {}".format(i, self.worker_index)
-        if self.hotload and self.idx2scene[i] is None:
-            self.hotload_scenario(i)
-        scenario_name = self.idx2scene[i]
-        return self.metadata[scenario_name]
+        scene_id = self.scene_ids[i]
+        if self.hotload and scene_id not in self.metadata:
+            self.hotload_scene(scene_id)
+        return self.metadata[scene_id]
 
     @property
     def current_scenario_length(self):
@@ -309,9 +276,7 @@ class ScenarioDataManager(BaseManager):
         elif self.engine.max_level == 1:
             return
 
-        def _score(scenario_id):
-            file_path = self.scene_config_list[scenario_id]
-            scenario = read_scenario_data(file_path, centralize=True)
+        def _score(scene_index):
             obj_weight = 0
 
             # calculate curvature

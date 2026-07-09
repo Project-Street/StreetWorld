@@ -131,7 +131,7 @@ class BaseEnv(gym.Env):
     def eval(self, order=True, repeat_per_scene=1):
         self.data_manager.eval(order=order, repeat_per_scene=repeat_per_scene)
 
-    def reset(self, seed: Union[None, int] = None, scene_name: Union[None, str] = None):
+    def reset(self, seed: Union[None, int] = None, scene_id: Union[None, str] = None):
         # Update record replay
         self.replay_episode = True if self.config["replay_episode"] is not None else False
         self.record_episode = self.config["record_episode"]
@@ -165,14 +165,14 @@ class BaseEnv(gym.Env):
                 self.agent_managers[n].destroy()
                 self.agent_managers.pop(n)
 
-        self.data_manager.reset(scene_name=scene_name)
+        self.data_manager.reset(scene_id=scene_id)
         
         scenario_data = self.data_manager.get_current_scenario_data()
         self.step_manager.reset(**scenario_data)
         scene_map = self.map_manager.reset(config=self.config['map_config'], physics_world=self.physics_world, **scenario_data)
         self._reset_agents(scenario_data, scene_map)
 
-        print("=======>>> Reset scenario: {}, seed: {}".format(self.scene_name, self.current_seed))
+        print("=======>>> Reset scenario: {}, seed: {}".format(self.scene_id, self.current_seed))
 
         for mgr_n, manager in self.agent_managers.items() :
             manager.update_state()
@@ -263,7 +263,7 @@ class BaseEnv(gym.Env):
         _, cost_infos = self.cost_function()
 
         step_infos = concat_step_infos([done_infos, reward_infos, cost_infos])
-        step_infos["scene_name"] = self.scene_name
+        step_infos["scene_name"] = self.scene_id
         step_infos["current_timestamp"] = int(self.step_manager.current_timestamp)
         step_infos["relative_timestamp"] = int(self.step_manager.relative_timestamp)
 
@@ -349,7 +349,7 @@ class BaseEnv(gym.Env):
 
         step_infos["episode_reward"] = self.episode_rewards
         step_infos["episode_length"] = self.episode_lengths
-        step_infos["scene_name"] = self.scene_name
+        step_infos["scene_name"] = self.scene_id
         step_infos["current_timestamp"] = int(self.step_manager.current_timestamp)
         step_infos["relative_timestamp"] = int(self.step_manager.relative_timestamp)
 
@@ -395,8 +395,8 @@ class BaseEnv(gym.Env):
         self.logger.info("Image is saved at: {}".format(file_name))
     
     @property
-    def scene_name(self) -> str:
-        return self.data_manager.idx2scene[self.data_manager.current_scenario_id]
+    def scene_id(self) -> str:
+        return self.data_manager.scene_ids[self.data_manager.current_scene_index]
 
     @property
     def actor_manager(self):

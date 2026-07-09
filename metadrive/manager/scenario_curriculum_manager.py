@@ -57,8 +57,8 @@ class ScenarioCurriculumManager(BaseManager):
         self.target_success_rate = self.engine.global_config["target_success_rate"]
 
     def log_episode(self, success, route_completion):
-        self.recent_route_completion.put(self.engine.data_manager.current_scenario_id, route_completion)
-        self.recent_success.put(self.engine.data_manager.current_scenario_id, success)
+        self.recent_route_completion.put(self.engine.data_manager.current_scene_index, route_completion)
+        self.recent_success.put(self.engine.data_manager.current_scene_index, success)
 
     def before_reset(self):
         """

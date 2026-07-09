@@ -454,7 +454,7 @@
     }
 
     function takeOverAction() {
-      const steering = (keys.a ? -1 : 0) + (keys.d ? 1 : 0);
+      const steering = (keys.a ? 1 : 0) + (keys.d ? -1 : 0);
       const throttleBrake = (keys.w ? 1 : 0) + (keys.s ? -1 : 0);
       if (steering === 0 && throttleBrake === 0) return null;
       return [steering, throttleBrake];

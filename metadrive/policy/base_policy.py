@@ -46,7 +46,7 @@ class BasePolicy(Randomizable, Configurable):
         self.destination_speed = float(np.linalg.norm(np.asarray(last_state["velocity"], dtype=np.float32)[:2]))
         self.static = sum(
             [np.linalg.norm(traj["velocity"]) for traj in self.trajectory.values()]
-        ) / len(self.trajectory) < 0.1
+        ) / len(self.trajectory) < 0.01
 
     def act(self, *args, **kwargs):
         """

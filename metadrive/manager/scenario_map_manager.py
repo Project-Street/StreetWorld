@@ -27,12 +27,12 @@ class ScenarioMapManager(BaseManager):
         self.loader = loader
         self.ground = None
 
-    def reset(self, config, scene_config, physics_world, scene_mesh_path, **kwargs):
+    def reset(self, config, scene_id, physics_world, scene_mesh_path, **kwargs):
         self.config = config
         self.current_sdc_route = None
         self.sdc_dest_point = None
 
-        vec_map = self.loader(scene_config)
+        vec_map = self.loader(scene_id)
 
         if not scene_mesh_path:
             plane_params = kwargs['ground_plane']

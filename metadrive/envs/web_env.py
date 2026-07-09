@@ -49,7 +49,7 @@ def make_web_env(env_class):
 
         def reset(self, *args, **kwargs):
             if self._video_exporter.has_frames:
-                self._video_exporter.flush_episode(str(self.scene_name))
+                self._video_exporter.flush_episode(str(self.scene_id))
             with self._web_lock:
                 self._timestamp_history.clear()
                 self._speed_history.clear()
@@ -74,7 +74,7 @@ def make_web_env(env_class):
                     self._timestamp_history.clear()
                     self._speed_history.clear()
                     self._angular_velocity_history.clear()
-                self._video_exporter.flush_episode(str(self.scene_name))
+                self._video_exporter.flush_episode(str(self.scene_id))
             return obs, reward, terminated, truncated, info
 
         def _draw_web_state(self, image: np.ndarray, states: dict[str, Any], info: Any, action: Any) -> None:
@@ -204,7 +204,7 @@ def make_web_env(env_class):
 
         def close(self):
             if self._video_exporter.has_frames:
-                self._video_exporter.flush_episode(str(self.scene_name))
+                self._video_exporter.flush_episode(str(self.scene_id))
             self._video_exporter.shutdown()
             if self._web_server is not None:
                 self._web_server.should_exit = True

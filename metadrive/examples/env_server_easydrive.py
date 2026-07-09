@@ -10,6 +10,7 @@ import os
 
 import grpc
 from easydrive.models.scenes.simulator_interface import SimulatorInterface
+from metadrive.configs.diffusiondrive_config import DIFFUSIONDRIVE_CONFIG
 from metadrive.configs.stp3_config import STP3_CONFIG
 from metadrive.configs.transfuser_config import TRANSFUSER_CONFIG
 from metadrive.configs.uniad_vad_config import UNIAD_VAD_CONFIG
@@ -23,6 +24,7 @@ import metadrive.grpc.streetworld_grpc.service_pb2_grpc as service_pb2_grpc
 WebScenarioEnv = make_web_env(ScenarioEnv)
 AD_POLICY_CONFIGS = {
     "default": {},
+    "diffusiondrive": DIFFUSIONDRIVE_CONFIG,
     "stp3": STP3_CONFIG,
     "uniad": UNIAD_VAD_CONFIG,
     "vad": UNIAD_VAD_CONFIG,
@@ -38,6 +40,13 @@ def resolve_ad_policy_config(name: str) -> dict:
     return AD_POLICY_CONFIGS[name]
 
 
+def list_scene_ids(scene_config_directory: str) -> list[str]:
+    return [
+        os.path.join(scene_config_directory, config_file)
+        for config_file in sorted(os.listdir(scene_config_directory))
+    ]
+
+
 def serve(
     scene_config_directory: str = "",
     random_scenario: bool = True,
@@ -49,10 +58,11 @@ def serve(
     max_workers: int = 10,
     video_output_dir: str = "videos",
 ) -> None:
+    scene_ids = list_scene_ids(scene_config_directory)
     config = Config(copy.deepcopy(resolve_ad_policy_config(ad_policy_config)))
     config.merge_from(
         {
-            "scene_config_directory": scene_config_directory,
+            "scene_ids": scene_ids,
             "random_scenario": random_scenario,
             "web_host": web_host,
             "web_port": web_port,

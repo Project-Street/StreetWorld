@@ -1,7 +1,7 @@
 from metadrive.obs.navigation_obs import NavigationObservation
 
 
-UNIAD_VAD_CONFIG = dict(
+DIFFUSIONDRIVE_CONFIG = dict(
     decision_repeat=25,
     actor_config=dict(
         observer_config=dict(

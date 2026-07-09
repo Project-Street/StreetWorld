@@ -58,7 +58,7 @@ class ScenarioEnv(BaseEnv):
 
         def msg(reason):
             return "Episode ended! Scenario Index: {} Scenario id: {} Reason: {}.".format(
-                self.current_seed, self.data_manager.current_scenario_id, reason
+                self.current_seed, self.scene_id, reason
             )
         
         done = False
@@ -141,10 +141,10 @@ class ScenarioEnv(BaseEnv):
         step_info["cost"] = cost
         return cost, step_info
 
-    def reset(self, seed: Union[None, int] = None):
+    def reset(self, seed: Union[None, int] = None, scene_id: Union[None, str] = None):
         self._reset_reward_trackers()
         self.metric_tracker.reset()
-        obs, info = super().reset(seed=seed)
+        obs, info = super().reset(seed=seed, scene_id=scene_id)
         self.metric_tracker.update(info, obs, self)
         return obs, info
 
