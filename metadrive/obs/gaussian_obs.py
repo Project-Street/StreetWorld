@@ -11,6 +11,7 @@ class GaussianObservation(BaseObservation):
     Use only image info as input
     """
     STACK_SIZE = 3  # use continuous 3 image as the input
+    REQUIRED_CAMERA_PARAM_KEYS = ("K", "H", "W", "ego2camera")
 
     def __init__(self, config):
         super().__init__(config)
@@ -38,6 +39,10 @@ class GaussianObservation(BaseObservation):
 
     def build_camera_params(self, _camera_params):
         if not self.camera_configs:
+            for cam_name, params in _camera_params.items():
+                missing = [key for key in self.REQUIRED_CAMERA_PARAM_KEYS if key not in params]
+                if missing:
+                    raise ValueError(f"Camera {cam_name} missing required params: {missing}")
             self.params = _camera_params
             return
 
@@ -107,12 +112,16 @@ class GaussianObservation(BaseObservation):
         camera_info = {}
         for cam_name, params in self.params.items():
             extrinsics = params['ego2camera'] @ ego_pose
-            ret = self.render_fn(
+            render_kwargs = dict(
                 K=params['K'],
                 H=params['H'],
                 W=params['W'],
                 extrinsics=extrinsics,
             )
+            has_extra = "extra" in params
+            if has_extra:
+                render_kwargs["extra"] = params["extra"]
+            ret = self.render_fn(**render_kwargs)
             self.state[cam_name] = np.roll(self.state[cam_name], -1, axis=0)
             self.state[cam_name][-1] = ret
             camera_info[cam_name] = {
@@ -121,6 +130,8 @@ class GaussianObservation(BaseObservation):
                 'H': params['H'],
                 'W': params['W']
             }
+            if has_extra:
+                camera_info[cam_name]["extra"] = params["extra"]
 
         return {
             'camera_info': camera_info,

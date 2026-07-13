@@ -10,10 +10,14 @@ import os
 
 import grpc
 from easydrive.models.scenes.simulator_interface import SimulatorInterface
+from metadrive.configs.autovla_config import AUTOVLA_CONFIG
 from metadrive.configs.diffusiondrive_config import DIFFUSIONDRIVE_CONFIG
+from metadrive.configs.openemma_config import OPENEMMA_CONFIG
+from metadrive.configs.opendrivevla_config import OPENDRIVEVLA_CONFIG
 from metadrive.configs.stp3_config import STP3_CONFIG
 from metadrive.configs.transfuser_config import TRANSFUSER_CONFIG
-from metadrive.configs.uniad_vad_config import UNIAD_VAD_CONFIG
+from metadrive.configs.uniad_config import UNIAD_CONFIG
+from metadrive.configs.vad_config import VAD_CONFIG
 from metadrive.config import Config
 from metadrive.envs.env_servicer import EnvServicer
 from metadrive.envs.scenario_env import ScenarioEnv
@@ -23,11 +27,14 @@ import metadrive.grpc.streetworld_grpc.service_pb2_grpc as service_pb2_grpc
 
 WebScenarioEnv = make_web_env(ScenarioEnv)
 AD_POLICY_CONFIGS = {
+    "autovla": AUTOVLA_CONFIG,
     "default": {},
     "diffusiondrive": DIFFUSIONDRIVE_CONFIG,
+    "openemma": OPENEMMA_CONFIG,
+    "opendrivevla": OPENDRIVEVLA_CONFIG,
     "stp3": STP3_CONFIG,
-    "uniad": UNIAD_VAD_CONFIG,
-    "vad": UNIAD_VAD_CONFIG,
+    "uniad": UNIAD_CONFIG,
+    "vad": VAD_CONFIG,
     "transfuser": TRANSFUSER_CONFIG,
 }
 

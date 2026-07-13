@@ -17,6 +17,8 @@ dependencies = [
     "cuda-python<=12.8",
     "glfw",
     "gymnasium",
+    "grpcio",
+    "grpcio-tools",
     "imgui-bundle",
     "lxml",
     "mediapy",
@@ -26,6 +28,7 @@ dependencies = [
     "pygame",
     "PyOpenGL",
     "PyOpenGL_accelerate",
+    "protobuf",
     "rich",
     "shapely",
     "torch",
@@ -37,10 +40,18 @@ dependencies = [
 ]
 
 [tool.setuptools]
-packages = ["metadrive"]
+packages = [
+    "metadrive",
+    "metadrive.misc",
+    "metadrive.misc.nurec_interface",
+    "metadrive.misc.nurec_interface.nre",
+    "metadrive.misc.nurec_interface.nre.grpc",
+    "metadrive.misc.nurec_interface.nre.grpc.protos",
+]
 
 [tool.setuptools.package-dir]
 "metadrive" = "metadrive"
 
 [tool.setuptools.package-data]
 "metadrive" = ["*", "**/*"]
+"metadrive.misc.nurec_interface.nre.grpc.protos" = ["*.proto", "*.pyi"]
