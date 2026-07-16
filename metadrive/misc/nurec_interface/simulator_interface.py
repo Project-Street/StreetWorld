@@ -22,6 +22,7 @@ _DEFAULT_PINHOLE_LOGICAL_ID = "camera_front_tele_30fov"
 class SimulatorInterface:
     def __init__(
         self,
+        nurec_root: str | Path,
         zNear: float = 0.0001,
         zFar: float = 1000.0,
         grpc_host: str = "localhost",
@@ -32,6 +33,9 @@ class SimulatorInterface:
         self.zNear = zNear
         self.zFar = zFar
         self.resolution_scale = resolution_scale
+        self._nurec_root = Path(nurec_root).expanduser().resolve()
+        if not self._nurec_root.is_dir():
+            raise FileNotFoundError(f"NuRec release root does not exist: {self._nurec_root}")
         self._grpc = NurecOfficialGrpcClient(host=grpc_host, port=grpc_port, timeout_s=grpc_timeout_s)
         self._cached_ts: Optional[int] = None
         self._cached_object_poses: Dict[str, np.ndarray] = {}
@@ -41,7 +45,7 @@ class SimulatorInterface:
     def load_metadata(
         self, scene_id: str | Path
     ) -> Tuple[list[int], Dict[str, Dict[str, Any]], Dict[int, list[list[float]]], Dict[str, Dict[str, Any]], Optional[str]]:
-        cfg = self._load_cfg(Path(scene_id))
+        cfg = self._load_cfg(scene_id)
         self._scene_cfgs[cfg["scene_id"]] = cfg
 
         rig = json.loads(Path(cfg["rig_trajectories_path"]).read_text(encoding="utf-8"))
@@ -83,7 +87,7 @@ class SimulatorInterface:
         )
 
     def load_model(self, scene_id: str | Path) -> None:
-        cfg = self._scene_cfgs[str(Path(scene_id).expanduser().resolve())]
+        cfg = self._scene_cfgs[str(self._resolve_scene_root(scene_id))]
         rig = json.loads(Path(cfg["rig_trajectories_path"]).read_text(encoding="utf-8"))
         sim_world_to_map = compute_sim_world_to_xodr_map(
             rig_data=rig,
@@ -166,9 +170,23 @@ class SimulatorInterface:
     def close(self) -> None:
         self._grpc.close()
 
-    @staticmethod
-    def _load_cfg(scene_id: Path) -> Dict[str, Any]:
-        scene_root = scene_id.expanduser().resolve()
+    def _resolve_scene_root(self, scene_id: str | Path) -> Path:
+        scene_path = Path(scene_id)
+        parts = scene_path.parts
+        if (
+            scene_path.is_absolute()
+            or not parts
+            or not parts[0].startswith("Batch")
+            or not parts[0][len("Batch"):].isdigit()
+            or any(part in (".", "..") for part in parts)
+        ):
+            raise ValueError(
+                f"scene_id must be a relative NuRec path beginning with Batch<digits>, got {scene_id!r}"
+            )
+        return self._nurec_root.joinpath(scene_path)
+
+    def _load_cfg(self, scene_id: str | Path) -> Dict[str, Any]:
+        scene_root = self._resolve_scene_root(scene_id)
         usdz_paths = sorted(scene_root.glob("*.usdz"))
         if len(usdz_paths) != 1:
             raise ValueError(f"Expected exactly one .usdz file under scene_id={scene_root}, got {len(usdz_paths)}")

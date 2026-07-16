@@ -45,6 +45,11 @@ class EnvServicer(service_pb2_grpc.EnvServiceServicer):
             )
 
     def _serialize_observation(self, obs: Any) -> common_pb2.Observation:
+        if "collision_body" in obs:
+            obs = dict(obs)
+            # TODO: Add a binary gRPC contract for collision body images when remote use is required.
+            obs.pop("collision_body")
+
         if "gaussian" in obs:
             other_obs = dict(obs)
             gaussian_obs = other_obs.pop("gaussian")

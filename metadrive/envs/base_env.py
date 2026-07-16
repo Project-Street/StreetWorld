@@ -243,7 +243,8 @@ class BaseEnv(gym.Env):
                 'state': scenario_data['agent_state'][name],
                 'timestamp_range': scenario_data['timestamp_range'],
                 'trajdata_map': scene_map,
-                'collector': self._collect_all_object
+                'collector': self._collect_all_object,
+                'ground': self.map_manager.ground,
             }
             if cfg['controller'] in [Pedestrian, Cyclist]:
                 cfg['observer'] = DummyObservation

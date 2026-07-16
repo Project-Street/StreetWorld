@@ -38,7 +38,7 @@ class ScenarioMapManager(BaseManager):
             plane_params = kwargs['ground_plane']
             normal = plane_params.get('normal')
             constant = plane_params.get('constant')
-            self.spawn_object(
+            self.ground = self.spawn_object(
                 GroundPlane,
                 physics_world=physics_world, 
                 direction=normal,
@@ -46,7 +46,7 @@ class ScenarioMapManager(BaseManager):
                 random_seed=self.random_seed
             )
         else:   
-            self.spawn_object(
+            self.ground = self.spawn_object(
                 MeshTerrain,
                 model_path=scene_mesh_path,
                 physics_world=physics_world,
@@ -57,7 +57,10 @@ class ScenarioMapManager(BaseManager):
 
     def clear_object(self, object_id):
         obj = self.spawned_objects.pop(object_id)
-        obj.destroy()  
+        if obj is self.ground:
+            self.ground = None
+        obj.destroy()
+        return obj
 
 
     def destroy(self):
