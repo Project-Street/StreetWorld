@@ -68,7 +68,14 @@ class ScenarioDataManager(BaseManager):
         pass
 
     def _load_single_scene(self, scene_id):
-        timestamp_range, camera_params, ego_poses, participants, scene_mesh_path = self.loader(scene_id)
+        (
+            timestamp_range,
+            camera_params,
+            ego_poses,
+            participants,
+            scene_mesh_path,
+            scene_mesh_transform,
+        ) = self.loader(scene_id)
         ego_poses, camera_params = self._calibrate_ego_center(ego_poses, camera_params)
         metadata = self.restructure_metadata(
             scene_id=scene_id,
@@ -78,6 +85,7 @@ class ScenarioDataManager(BaseManager):
             participants=participants,
         )
         metadata["scene_mesh_path"] = scene_mesh_path
+        metadata["scene_mesh_transform"] = scene_mesh_transform
         return metadata
 
     def _ego_vehicle_height(self):

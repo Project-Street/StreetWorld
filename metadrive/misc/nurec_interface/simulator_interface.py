@@ -44,7 +44,14 @@ class SimulatorInterface:
 
     def load_metadata(
         self, scene_id: str | Path
-    ) -> Tuple[list[int], Dict[str, Dict[str, Any]], Dict[int, list[list[float]]], Dict[str, Dict[str, Any]], Optional[str]]:
+    ) -> Tuple[
+        list[int],
+        Dict[str, Dict[str, Any]],
+        Dict[int, list[list[float]]],
+        Dict[str, Dict[str, Any]],
+        str,
+        list[list[float]],
+    ]:
         cfg = self._load_cfg(scene_id)
         self._scene_cfgs[cfg["scene_id"]] = cfg
 
@@ -77,13 +84,13 @@ class SimulatorInterface:
                 "type": obj["type"],
             }
 
-        bk_ground_model_path = None
         return (
             timestamp_range,
             camera_params,
             ego_poses,
             tracking_data,
-            bk_ground_model_path,
+            cfg["ground_mesh_path"],
+            sim_world_to_map.tolist(),
         )
 
     def load_model(self, scene_id: str | Path) -> None:
@@ -204,4 +211,5 @@ class SimulatorInterface:
             "rig_trajectories_path": str(scene_dir / "rig_trajectories.json"),
             "sequence_tracks_path": str(scene_dir / "sequence_tracks.json"),
             "map_path": str(scene_dir / "map.xodr"),
+            "ground_mesh_path": str(scene_dir / "mesh_ground.ply"),
         }

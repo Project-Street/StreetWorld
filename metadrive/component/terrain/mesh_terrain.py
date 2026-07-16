@@ -8,7 +8,7 @@ from metadrive.constants import MetaDriveType, CollisionGroup
 
 from metadrive.base_class.base_object import BaseObject
 from metadrive.engine.physics_node import BaseRigidBodyNode
-from metadrive.utils.mesh_utils import load_triangle_obj
+from metadrive.utils.mesh_utils import load_triangle_mesh
 
 
 class MeshTerrain(BaseObject):
@@ -19,6 +19,7 @@ class MeshTerrain(BaseObject):
         self,
         physics_world,
         model_path: str,
+        transform=None,
         position=(0, 0, 0),
         scale=1.0,
         friction=0.8,
@@ -46,11 +47,20 @@ class MeshTerrain(BaseObject):
                 f"Ground mesh position must contain three finite values, got {position}"
             )
 
-        vertices, faces, vertex_normals = load_triangle_obj(model_path)
+        vertices, faces, vertex_normals = load_triangle_mesh(model_path)
+        if transform is not None:
+            transform = np.asarray(transform, dtype=np.float32)
+            if transform.shape != (4, 4) or not np.isfinite(transform).all():
+                raise ValueError(
+                    f"Ground mesh transform must be a finite 4x4 matrix, got {transform}"
+                )
+            vertices = vertices @ transform[:3, :3].T + transform[:3, 3]
+            vertex_normals = vertex_normals @ transform[:3, :3].T
+
         self.model_path = str(model_path)
         self.vertices = np.ascontiguousarray(vertices * scale + position)
         self.faces = faces
-        self.vertex_normals = vertex_normals
+        self.vertex_normals = np.ascontiguousarray(vertex_normals)
 
         bullet_mesh = BulletTriangleMesh()
         for a, b, c in self.faces:

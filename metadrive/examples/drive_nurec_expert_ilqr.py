@@ -76,6 +76,7 @@ def _build_policy(env: ScenarioEnv, control_dt_s: float, lookahead_index: int) -
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Closed-loop expert-following ScenarioEnv driver")
+    parser.add_argument("--nurec-root", type=str, required=True)
     parser.add_argument("--scene_config_directory", type=str, required=True)
     parser.add_argument("--scene_name", type=str, default=None)
     parser.add_argument("--grpc-host", type=str, default="localhost")
@@ -89,7 +90,7 @@ def main() -> None:
     args = parser.parse_args()
 
     print(HELP_MESSAGE)
-    model = SimulatorInterface()
+    model = SimulatorInterface(nurec_root=args.nurec_root)
     env = ScenarioEnv(
         model,
         {

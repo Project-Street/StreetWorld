@@ -6,6 +6,14 @@ from typing import Any, Dict, List
 import numpy as np
 
 
+CRASH_REASONS = {
+    "crash_vehicle",
+    "crash_human",
+    "crash_object",
+    "crash_world",
+}
+
+
 @dataclass
 class ScenarioMetricTracker:
     ttc_threshold: float = 5.0
@@ -21,6 +29,10 @@ class ScenarioMetricTracker:
     com_hits: int = 0
     route_progress: float = 0.0
     route_length: float = 0.0
+    route_start_progress: float | None = None
+    route_end_progress: float | None = None
+    route_start_time: float | None = None
+    route_end_time: float | None = None
 
     def reset(self) -> None:
         self.collision = False
@@ -31,9 +43,13 @@ class ScenarioMetricTracker:
         self.com_hits = 0
         self.route_progress = 0.0
         self.route_length = 0.0
+        self.route_start_progress = None
+        self.route_end_progress = None
+        self.route_start_time = None
+        self.route_end_time = None
 
     def update(self, info: Dict[str, Any], obs: Dict[str, Any], env) -> None:
-        self.collision |= bool(info["collision"])
+        self.collision |= info["reason"] in CRASH_REASONS
 
         states = obs["states"]
         self.dac_total += 1
@@ -52,6 +68,12 @@ class ScenarioMetricTracker:
 
         self.route_progress = float(env._last_progress_value)
         self.route_length = float(np.asarray(obs["navigation"]["cummulative_length"], dtype=np.float32)[-1])
+        timestamp = float(info["relative_timestamp"]) * 1e-6
+        if self.route_start_progress is None:
+            self.route_start_progress = self.route_progress
+            self.route_start_time = timestamp
+        self.route_end_progress = self.route_progress
+        self.route_end_time = timestamp
 
     def finalize(self) -> Dict[str, float]:
         if self.dac_total == 0:
@@ -62,6 +84,16 @@ class ScenarioMetricTracker:
             raise RuntimeError("COM has no samples.")
         if self.route_length <= 0.0:
             raise RuntimeError("RC route length must be positive.")
+        if (
+            self.route_start_progress is None
+            or self.route_end_progress is None
+            or self.route_start_time is None
+            or self.route_end_time is None
+        ):
+            raise RuntimeError("ProgressSpeed requires route progress and timestamp samples.")
+        elapsed = self.route_end_time - self.route_start_time
+        if elapsed <= 0.0:
+            raise RuntimeError(f"ProgressSpeed requires positive elapsed time, got {elapsed}.")
 
         metric = {
             "NC": 0.0 if self.collision else 1.0,
@@ -69,6 +101,7 @@ class ScenarioMetricTracker:
             "TTC": float(np.mean(self.ttc_flags)),
             "COM": self.com_hits / self.com_total,
             "RC": float(np.clip(self.route_progress / self.route_length, 0.0, 1.0)),
+            "ProgressSpeed": float((self.route_end_progress - self.route_start_progress) / elapsed),
         }
         self.completed_scene_metrics.append(metric)
         return metric
