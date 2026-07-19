@@ -173,7 +173,7 @@ class AgentManager(BaseManager):
         if self.state == AgentState.ALIVE:
             # crash checks from controller
             if not self.is_static and self.check_crash and isinstance(self.controller, BaseVehicle):
-                self.controller.crash_check()
+                self.controller.check_crash_world()
                 
                 if self.controller.crash_human:
                     self.clear_all_objects()

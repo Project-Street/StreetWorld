@@ -284,38 +284,23 @@ class BaseVehicle(BaseObject, BaseVehicleState):
         self.energy_consumption += step_energy  # L/100 km
         return step_energy, self.energy_consumption
     
-    def crash_check(self):
-        """
-        Check States and filter to update info
-        """
-        # result_1 = self.physics_world.static_world.contactTest(self.body, True)
-        result_2 = self.physics_world.dynamic_world.contactTest(self.body, False)
-        contact_infos = set()
+    def check_crash_world(self):
+        if not self.config["check_crash_world"]:
+            return
+
+        contacts = self.physics_world.dynamic_world.contactTest(self.body, False)
         ground_contact = list()
-        for contact in result_2.getContacts():
-            node0 = contact.getNode0()
+        for contact in contacts.getContacts():
             node1 = contact.getNode1()
-            name = node1.getName()
-            if name == MetaDriveType.VEHICLE:
-                self.crash_vehicle = True
-            elif name in [MetaDriveType.PEDESTRIAN, MetaDriveType.CYCLIST]:
-                self.crash_human = True
-            elif name == MetaDriveType.GROUND:
+            if node1.getName() == MetaDriveType.GROUND:
                 maniP = contact.getManifoldPoint()
                 pos = maniP.getPositionWorldOnB()
                 ground_contact.append(torch.tensor([pos.x, pos.y, pos.z]))
-            else:
-                continue
-            contact_infos.add(name)
-        
-        if len(ground_contact) > 0:
-            ground_contact = torch.stack(ground_contact).cuda().float()
-            if self._is_crash_world(ground_contact):
-                self.crash_world = True
 
-        self.contact_results.update(contact_infos)
+        if not ground_contact:
+            return
 
-    def _is_crash_world(self, contact_points):
+        contact_points = torch.stack(ground_contact).cuda().float()
         wheel_centers = []
         for i in range(self.vehicle.getNumWheels()):
             wheel = self.vehicle.getWheel(i)
@@ -330,8 +315,7 @@ class BaseVehicle(BaseObject, BaseVehicleState):
         nearest_z = wheel_centers[nearest_idx, 2]                        # [N]
 
         if (contact_points[:, 2] - nearest_z > 0).any().item():
-            return True
-        return False
+            self.crash_world = True
 
     """------------------------------------------- act -------------------------------------------------"""
 
@@ -404,6 +388,7 @@ class BaseVehicle(BaseObject, BaseVehicleState):
         # assert self.WIDTH < BaseVehicle.MAX_WIDTH, "Vehicle is too large!"
 
         chassis = BaseRigidBodyNode(self.name, MetaDriveType.VEHICLE, self.MASS)
+        chassis.base_object = self
 
         chassis_shape = BulletBoxShape(Vec3(self.WIDTH / 2, self.LENGTH / 2, self.HEIGHT / 2))
         chassis_shape.setMargin(0.03)
@@ -447,6 +432,7 @@ class BaseVehicle(BaseObject, BaseVehicleState):
     def destroy(self):
         super(BaseVehicle, self).destroy()
         self.detachDyWld()
+        self.body.base_object = None
         self.origin = None
         self.vehicle = None
         self.wheels = None
