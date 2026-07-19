@@ -38,6 +38,7 @@ def make_web_env(env_class):
             self._web_lock = threading.Lock()
             self._snapshot_data: Optional[dict[str, Any]] = None
             self._sequence = 0
+            self._metrics: list[dict[str, Any]] = []
             self._take_over_action: Optional[list[float]] = None
             self._web_server = None
             self._web_thread = None
@@ -48,6 +49,7 @@ def make_web_env(env_class):
                 self._start_web_server()
 
         def reset(self, *args, **kwargs):
+            self._stop_async_step_loop()
             if self._video_exporter.has_frames:
                 self._video_exporter.flush_episode(str(self.scene_id))
             with self._web_lock:
@@ -58,12 +60,12 @@ def make_web_env(env_class):
                 self._sequence += 1
             return super().reset(*args, **kwargs)
 
-        def step(self, action):
+        def _step(self, action):
             with self._web_lock:
                 if self._take_over_action is not None:
                     action = list(self._take_over_action)
 
-            obs, reward, terminated, truncated, info = super().step(action)
+            obs, reward, terminated, truncated, info = super()._step(action)
             gaussian_obs = obs["gaussian"]
             image = compose_image_layout(gaussian_obs["image"], self.config["image_layout"])
             states = obs["states"]
@@ -71,6 +73,8 @@ def make_web_env(env_class):
             self._video_exporter.draw(image=image, states=states, info=info, action=action)
             if terminated or truncated:
                 with self._web_lock:
+                    if not self.data_manager.remain_queue:
+                        self._metrics.append({"manual": self.get_average_metric()})
                     self._timestamp_history.clear()
                     self._speed_history.clear()
                     self._angular_velocity_history.clear()
@@ -171,6 +175,9 @@ def make_web_env(env_class):
                     while True:
                         with self._web_lock:
                             snapshot = None if self._snapshot_data is None else (self._sequence, self._snapshot_data)
+                            metrics = self._metrics.pop(0) if self._metrics else None
+                        if metrics is not None:
+                            await websocket.send_json({"type": "metrics", "metrics": metrics})
                         if snapshot is None:
                             if not waiting_sent:
                                 await websocket.send_json({"type": "waiting"})
@@ -203,6 +210,7 @@ def make_web_env(env_class):
             return app
 
         def close(self):
+            self._stop_async_step_loop()
             if self._video_exporter.has_frames:
                 self._video_exporter.flush_episode(str(self.scene_id))
             self._video_exporter.shutdown()

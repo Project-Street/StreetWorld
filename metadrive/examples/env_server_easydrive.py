@@ -64,6 +64,7 @@ def serve(
     web_port: int = 8080,
     max_workers: int = 10,
     video_output_dir: str = "videos",
+    async_mode: bool = False,
 ) -> None:
     scene_ids = list_scene_ids(scene_config_directory)
     config = Config(copy.deepcopy(resolve_ad_policy_config(ad_policy_config)))
@@ -74,6 +75,7 @@ def serve(
             "web_host": web_host,
             "web_port": web_port,
             "video_output_dir": video_output_dir,
+            "async_mode": async_mode,
         }
     )
     env = WebScenarioEnv(SimulatorInterface(), config)
@@ -155,6 +157,11 @@ def main():
         default="videos",
         help="Directory for env video recordings (default: videos)",
     )
+    parser.add_argument(
+        "--async-mode",
+        action="store_true",
+        help="Run simulation in the fixed-period asynchronous mode",
+    )
     args = parser.parse_args()
 
     if not os.path.isdir(args.scene_config_directory):
@@ -171,6 +178,7 @@ def main():
         web_port=args.web_port,
         max_workers=args.max_workers,
         video_output_dir=args.video_output_dir,
+        async_mode=args.async_mode,
     )
     return 0
 

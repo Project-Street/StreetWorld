@@ -1,4 +1,5 @@
 import logging
+import threading
 import time
 from collections import defaultdict
 from typing import Union, Dict, AnyStr, Optional, Tuple, Callable
@@ -64,11 +65,88 @@ class BaseEnv(gym.Env):
         # press p to stop
         self.in_stop = False
 
+        self._init_async_state()
+
         # scenarios
 
         self.model = model
 
         self.setup(default_config)
+        self._async_mode = bool(self.config["async_mode"])
+
+    def _init_async_state(self):
+        self._async_condition = threading.Condition()
+        self._async_stop_event = threading.Event()
+        self._async_thread = None
+        self._async_latest_action = [0.0, 0.0]
+        self._async_last_step_result = None
+        self._async_step_running = False
+        self._async_exception = None
+
+    def _reset_async_state(self):
+        with self._async_condition:
+            self._async_stop_event.clear()
+            self._async_latest_action = [0.0, 0.0]
+            self._async_last_step_result = None
+            self._async_step_running = False
+            self._async_exception = None
+            self._async_condition.notify_all()
+
+    def _start_async_step_loop(self):
+        with self._async_condition:
+            if self._async_thread is not None:
+                raise RuntimeError("Async step loop is already running.")
+            self._async_thread = threading.Thread(target=self.async_step_loop, name="BaseEnvAsyncStepLoop", daemon=True)
+            self._async_thread.start()
+
+    def _stop_async_step_loop(self):
+        with self._async_condition:
+            self._async_stop_event.set()
+            self._async_condition.notify_all()
+            thread = self._async_thread
+
+        if thread is not None and thread is not threading.current_thread():
+            thread.join()
+
+        with self._async_condition:
+            if self._async_thread is thread:
+                self._async_thread = None
+
+    def async_step_loop(self):
+        period = self.config["decision_repeat"] * self.config["physics_world_step_size"] * 1e-6
+        if self._async_stop_event.wait(period):
+            return
+
+        while not self._async_stop_event.is_set():
+            with self._async_condition:
+                if self._async_stop_event.is_set():
+                    return
+                action = self._async_latest_action
+                self._async_step_running = True
+
+            started_at = time.perf_counter()
+            try:
+                step_result = self._step(action)
+            except BaseException as exc:
+                with self._async_condition:
+                    self._async_step_running = False
+                    self._async_exception = exc
+                    self._async_condition.notify_all()
+                return
+
+            elapsed = time.perf_counter() - started_at
+            terminated = step_result[2]
+            truncated = step_result[3]
+            with self._async_condition:
+                self._async_step_running = False
+                self._async_last_step_result = step_result
+                if terminated or truncated:
+                    self._async_condition.notify_all()
+                    return
+                self._async_condition.notify_all()
+
+            if self._async_stop_event.wait(period - elapsed):
+                return
 
     # def _post_process_config(self, config):
     #     """Add more special process to merged config"""
@@ -132,6 +210,9 @@ class BaseEnv(gym.Env):
         self.data_manager.eval(order=order, repeat_per_scene=repeat_per_scene)
 
     def reset(self, seed: Union[None, int] = None, scene_id: Union[None, str] = None):
+        self._stop_async_step_loop()
+        self._reset_async_state()
+
         # Update record replay
         self.replay_episode = True if self.config["replay_episode"] is not None else False
         self.record_episode = self.config["record_episode"]
@@ -183,7 +264,12 @@ class BaseEnv(gym.Env):
             new_step_infos = manager.observe()
             step_infos[mgr_n] = new_step_infos
 
-        return self._get_reset_return(step_infos)
+        reset_return = self._get_reset_return(step_infos)
+        self._async_mode = bool(self.config["async_mode"])
+        if self._async_mode:
+            self._async_last_step_result = (reset_return[0], 0.0, False, False, reset_return[1])
+            self._start_async_step_loop()
+        return reset_return
 
     def _reset_global_seed(self, force_seed=None):
         if force_seed is not None:
@@ -272,6 +358,18 @@ class BaseEnv(gym.Env):
 
     # ===== Run-time =====
     def step(self, actions: Union[Union[np.ndarray, list], Dict[AnyStr, Union[list, np.ndarray]], int]):
+        if not self._async_mode:
+            return self._step(actions)
+
+        with self._async_condition:
+            self._async_latest_action = actions
+            while self._async_step_running:
+                self._async_condition.wait()
+            if self._async_exception is not None:
+                raise self._async_exception
+            return self._async_last_step_result
+
+    def _step(self, actions: Union[Union[np.ndarray, list], Dict[AnyStr, Union[list, np.ndarray]], int]):
         for manager in self.agent_managers.values():
             manager.decide_action(actions)
 
@@ -366,6 +464,8 @@ class BaseEnv(gym.Env):
         raise NotImplementedError
     
     def close(self):
+        self._stop_async_step_loop()
+
         agent_managers = getattr(self, "agent_managers", None)
         if isinstance(agent_managers, dict):
             for manager in list(agent_managers.values()):

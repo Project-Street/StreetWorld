@@ -108,6 +108,7 @@ BASE_DEFAULT_CONFIG = dict(
     # Physics world step is in microsecond (0.02s) and will be repeated for decision_repeat times per env.step()
     physics_world_step_size=2e4,
     decision_repeat=5,
+    async_mode=False,
 
     # Disable collision detection in physics world
     disable_collision=False,

@@ -142,14 +142,15 @@ class ScenarioEnv(BaseEnv):
         return cost, step_info
 
     def reset(self, seed: Union[None, int] = None, scene_id: Union[None, str] = None):
+        self._stop_async_step_loop()
         self._reset_reward_trackers()
         self.metric_tracker.reset()
         obs, info = super().reset(seed=seed, scene_id=scene_id)
         self.metric_tracker.update(info, obs, self)
         return obs, info
 
-    def step(self, actions):
-        obs, reward, terminated, truncated, info = super().step(actions)
+    def _step(self, actions):
+        obs, reward, terminated, truncated, info = super()._step(actions)
         self.metric_tracker.update(info, obs, self)
         if terminated or truncated:
             self.metric_tracker.finalize()

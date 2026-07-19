@@ -159,7 +159,7 @@ class NavigationObservation(BaseObservation, Randomizable):
             accum_length += self._seg_len(next_lane.center.xy).sum()
             curr_lane = next_lane
         
-        path_pts = self._concat_centerlines(lanes, spawn_xyz, spawn_yaw)
+        path_pts = self._concat_centerlines(lanes, spawn_xyz[:2], spawn_yaw)
         self._set_path(path_pts)
         self._clear_expert_reference()
 
@@ -346,8 +346,8 @@ class NavigationObservation(BaseObservation, Randomizable):
 
     def _concat_centerlines(self, lane_seq, start_xy, start_heading):
         pts = []
-        for idx, lane_id in enumerate(lane_seq):
-            cl = np.asarray(self.trajdata_map.lane_centerline(lane_id), dtype=np.float32)
+        for idx, lane in enumerate(lane_seq):
+            cl = np.asarray(lane.center.xy, dtype=np.float32)
             if idx == 0:
                 heading_vec = np.array([math.cos(start_heading), math.sin(start_heading)], dtype=np.float32)
                 start_idx = nearest_front_index(cl, np.asarray(start_xy), heading_vec)
