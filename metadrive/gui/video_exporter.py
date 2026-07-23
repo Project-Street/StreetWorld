@@ -19,9 +19,6 @@ logger = logging.getLogger(__name__)
 
 
 def extract_video_payload(image: np.ndarray, states: dict[str, Any], info: Any, action: Sequence[float]):
-    if len(action) != 2:
-        raise ValueError(f"Expected action with length 2, got {len(action)}")
-
     velocity = np.asarray(states["linear_velocity"], dtype=np.float32).reshape(-1)
     speed = float(np.linalg.norm(velocity[:2]))
     angular_velocity = np.asarray(states["angular_velocity"], dtype=np.float32).reshape(-1)
@@ -33,8 +30,8 @@ def extract_video_payload(image: np.ndarray, states: dict[str, Any], info: Any, 
     return {
         "image": image,
         "timestamp": timestamp,
-        "steering": float(action[0]),
-        "throttle_brake": float(action[1]),
+        "steering": float(info["steering"]),
+        "throttle_brake": float(info["throttle_brake"]),
         "speed": speed,
         "angular_velocity": yaw_rate,
     }
@@ -166,7 +163,7 @@ class VideoExporter:
     def flush_episode(self, scene_name: str) -> None:
         if self.episode_frames:
             current_time = datetime.now().strftime("%Y%m%d_%H%M%S")
-            output_path = self.output_dir / f"{current_time}_{scene_name}.mp4"
+            output_path = self.output_dir / f"{current_time}_{str(scene_name).replace('/', '_')}.mp4"
             image_list_to_video(str(output_path), self.episode_frames, code="mp4v", fps=self.fps)
             logger.info("Exported video for scene %s to %s.", scene_name, output_path)
         self.episode_frames.clear()

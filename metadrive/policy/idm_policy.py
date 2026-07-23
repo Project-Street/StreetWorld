@@ -5,9 +5,9 @@ from typing import Dict, List, Optional, Sequence, Set, Tuple
 
 import numpy as np
 
-from metadrive.component.vehicle.PID_controller import PIDController
 from metadrive.policy.base_policy import BasePolicy
 from metadrive.type import MetaDriveType
+from metadrive.utils.PID import PIDController
 
 
 class IDMRouteInitializationError(RuntimeError):
@@ -211,6 +211,8 @@ class IDMPolicy(BasePolicy):
         self.last_action = [0.0, 0.0]
 
     def act(self, observation, *args, **kwargs):
+        if not self.step_manager.key_step:
+            return self.last_action
         if observation is None:
             raise ValueError("IDMPolicy requires observation with states and surrounding.")
         if "states" not in observation or "surrounding" not in observation:
@@ -680,8 +682,8 @@ class IDMPolicy(BasePolicy):
     def _steering_control(self, ego: EgoState, target_lane) -> float:
         long, lat, _ = self._project_to_lane(target_lane, ego.position)
         lane_heading = self._heading_at_s(target_lane, long + 1.0)
-        steering_angle = self.heading_pid.get_result(-self._wrap_to_pi(lane_heading - ego.heading_theta))
-        steering_angle += self.lateral_pid.get_result(lat)
+        steering_angle = self.heading_pid.step(self._wrap_to_pi(lane_heading - ego.heading_theta))
+        steering_angle += self.lateral_pid.step(-lat)
         return self._normalize_steering(steering_angle)
 
     def _acceleration(self, ego: EgoState, front_obj: Optional[ObjectState], dist_to_front: Optional[float]) -> float:

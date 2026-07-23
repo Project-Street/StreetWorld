@@ -6,6 +6,7 @@ WEB_ENV_CONFIG = dict(
         ["FRONT_LEFT", "FRONT", "FRONT_RIGHT"],
         ["BACK_LEFT", "BACK", "BACK_RIGHT"],
     ],
+    project_trajectory_on_camera=None,
     history_size=200,
     jpeg_quality=85,
     max_image_edge=1200,

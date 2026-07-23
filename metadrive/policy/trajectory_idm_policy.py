@@ -35,8 +35,11 @@ class TrajectoryIDMPolicy(BasePolicy):
         super().reset(controller, seed, state, init_state, **kwargs)
         self.path, self.cumlen = self._build_path_from_trajectory()
         self.curve_radius = self._curve_radius(self.path)
+        self.last_action = (0.0, 0.0)
 
     def act(self, observation, *args, **kwargs):
+        if not self.step_manager.key_step:
+            return self.last_action
         if observation is None or "surrounding" not in observation:
             raise KeyError("IDMPolicy requires observation['surrounding'].")
         surround = observation["surrounding"]
@@ -125,7 +128,8 @@ class TrajectoryIDMPolicy(BasePolicy):
                 ang_limit = math.radians(float(self.controller.max_steering))
                 steering = float(np.clip(ang / ang_limit, -1.0, 1.0))
 
-        return steering, throttle_brake
+        self.last_action = (steering, throttle_brake)
+        return self.last_action
 
     def _build_path_from_trajectory(self):
         points = []

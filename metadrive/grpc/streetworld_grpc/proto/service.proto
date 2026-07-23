@@ -5,7 +5,7 @@ import "common.proto";
 
 // Step request
 message StepRequest {
-    repeated float action = 1;  // [steering, throttle] normalized to [-1, 1]
+    repeated float action = 1;  // [steering, throttle] or flattened N x 2 relative trajectory
 }
 
 // Step response

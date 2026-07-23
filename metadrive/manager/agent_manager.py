@@ -143,21 +143,14 @@ class AgentManager(BaseManager):
         # self.dest_pos = init_state['destination']
         return obj
 
-    def decide_action(self, action=None):
-        if self.is_static:
-            return
-
-        if self.state != AgentState.ALIVE:
-            return
-        self.step_action = self.policy.act(action=action, observation=self.last_observation)
-
-    def step(self):
+    def step(self, action):
         if self.is_static:
             return
         if self.state != AgentState.ALIVE:
             return
 
-        self.controller.move(self.step_action)
+        action = self.policy.act(action=action, observation=self.last_observation)
+        self.controller.move(action)
         return
 
     def update_state(self):

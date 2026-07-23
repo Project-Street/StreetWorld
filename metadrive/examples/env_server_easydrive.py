@@ -1,41 +1,63 @@
 #!/usr/bin/env python
-"""
-CLI entry for the EasyDrive environment server.
-"""
+"""Serve EasyDrive or NuRec scenarios through the StreetWorld gRPC API."""
+
+from __future__ import annotations
 
 import argparse
-import copy
 import concurrent.futures
+import contextlib
+import copy
 import os
+import sys
+from pathlib import Path
+from typing import Sequence
 
 import grpc
-from easydrive.models.scenes.simulator_interface import SimulatorInterface
+from rich.console import Console
+from rich.live import Live
+
+import metadrive.grpc.streetworld_grpc.service_pb2_grpc as service_pb2_grpc
+from metadrive.config import Config
+from metadrive.configs.alpamayo_config import ALPAMAYO_CONFIG
 from metadrive.configs.autovla_config import AUTOVLA_CONFIG
 from metadrive.configs.diffusiondrive_config import DIFFUSIONDRIVE_CONFIG
+from metadrive.configs.epona_config import EPONA_CONFIG
 from metadrive.configs.openemma_config import OPENEMMA_CONFIG
 from metadrive.configs.opendrivevla_config import OPENDRIVEVLA_CONFIG
 from metadrive.configs.stp3_config import STP3_CONFIG
 from metadrive.configs.transfuser_config import TRANSFUSER_CONFIG
 from metadrive.configs.uniad_config import UNIAD_CONFIG
 from metadrive.configs.vad_config import VAD_CONFIG
-from metadrive.config import Config
 from metadrive.envs.env_servicer import EnvServicer
 from metadrive.envs.scenario_env import ScenarioEnv
 from metadrive.envs.web_env import make_web_env
-import metadrive.grpc.streetworld_grpc.service_pb2_grpc as service_pb2_grpc
+from metadrive.examples.easydrive_tui import (
+    BACKENDS,
+    LifecycleAwareEnv,
+    TuiRuntimeState,
+    build_runtime_renderable,
+    resolve_scene_config,
+    select_catalog_scenes,
+)
+from metadrive.misc.nurec_interface.simulator_interface import SimulatorInterface as NurecSimulatorInterface
 
 
 WebScenarioEnv = make_web_env(ScenarioEnv)
+NUREC_ROOT = Path(__file__).resolve().parents[2] / "data/processed/benchmark/NuRec/sample_set/25.07_release"
+NUREC_CAMERA_CONFIG = Path(__file__).resolve().parents[2] / "tmp/nurec_web_controller.yaml"
 AD_POLICY_CONFIGS = {
+    "alpamayo1": ALPAMAYO_CONFIG,
+    "alpamayo1_5": ALPAMAYO_CONFIG,
     "autovla": AUTOVLA_CONFIG,
     "default": {},
     "diffusiondrive": DIFFUSIONDRIVE_CONFIG,
+    "epona": EPONA_CONFIG,
     "openemma": OPENEMMA_CONFIG,
     "opendrivevla": OPENDRIVEVLA_CONFIG,
     "stp3": STP3_CONFIG,
+    "transfuser": TRANSFUSER_CONFIG,
     "uniad": UNIAD_CONFIG,
     "vad": VAD_CONFIG,
-    "transfuser": TRANSFUSER_CONFIG,
 }
 
 
@@ -47,141 +69,200 @@ def resolve_ad_policy_config(name: str) -> dict:
     return AD_POLICY_CONFIGS[name]
 
 
-def list_scene_ids(scene_config_directory: str) -> list[str]:
-    return [
-        os.path.join(scene_config_directory, config_file)
-        for config_file in sorted(os.listdir(scene_config_directory))
-    ]
+def build_environment(
+    *,
+    backend: str,
+    scene_ids: Sequence[str],
+    ad_policy_config: str,
+    nurec_root: Path,
+    nurec_grpc_host: str,
+    nurec_grpc_port: int,
+    nurec_grpc_timeout: float,
+    web_host: str,
+    web_port: int,
+    video_output_dir: str,
+    async_mode: bool,
+):
+    config_values = {
+        "scene_ids": list(scene_ids),
+        "random_scenario": False,
+        "async_mode": async_mode,
+        "web_host": web_host,
+        "web_port": web_port,
+        "video_output_dir": video_output_dir,
+        "eval_mode": True,
+        "eval_order": True,
+        "eval_repeat_per_scene": 1,
+    }
+    if backend == "easydrive":
+        from easydrive.models.scenes.simulator_interface import SimulatorInterface as EasyDriveSimulatorInterface
+
+        config = Config(copy.deepcopy(resolve_ad_policy_config(ad_policy_config)))
+        config.merge_from(config_values)
+        return WebScenarioEnv(EasyDriveSimulatorInterface(), config)
+    if backend == "nurec":
+        config = Config(config_values)
+        config.merge_from(Config.fromfile(str(NUREC_CAMERA_CONFIG)).to_dict())
+        return WebScenarioEnv(
+            NurecSimulatorInterface(
+                nurec_root=nurec_root,
+                grpc_host=nurec_grpc_host,
+                grpc_port=nurec_grpc_port,
+                grpc_timeout_s=nurec_grpc_timeout,
+            ),
+            config,
+        )
+    raise ValueError(f"Unknown backend {backend!r}.")
 
 
 def serve(
-    scene_config_directory: str = "",
-    random_scenario: bool = True,
-    ad_policy_config: str = "default",
-    host: str = "0.0.0.0",
-    port: int = 50052,
-    web_host: str = "127.0.0.1",
-    web_port: int = 8080,
-    max_workers: int = 10,
-    video_output_dir: str = "videos",
-    async_mode: bool = False,
+    *,
+    backend: str,
+    scene_ids: Sequence[str],
+    ad_policy_config: str,
+    host: str,
+    port: int,
+    nurec_root: Path,
+    nurec_grpc_host: str,
+    nurec_grpc_port: int,
+    nurec_grpc_timeout: float,
+    web_host: str,
+    web_port: int,
+    max_workers: int,
+    video_output_dir: str,
+    async_mode: bool,
+    show_tui: bool,
 ) -> None:
-    scene_ids = list_scene_ids(scene_config_directory)
-    config = Config(copy.deepcopy(resolve_ad_policy_config(ad_policy_config)))
-    config.merge_from(
-        {
-            "scene_ids": scene_ids,
-            "random_scenario": random_scenario,
-            "web_host": web_host,
-            "web_port": web_port,
-            "video_output_dir": video_output_dir,
-            "async_mode": async_mode,
-        }
+    state = TuiRuntimeState(backend, scene_ids)
+    runtime = (
+        Live(
+            get_renderable=lambda: build_runtime_renderable(state.snapshot()),
+            console=Console(file=sys.__stdout__),
+            screen=True,
+            refresh_per_second=8,
+            vertical_overflow="crop",
+        )
+        if show_tui
+        else contextlib.nullcontext()
     )
-    env = WebScenarioEnv(SimulatorInterface(), config)
-    server = grpc.server(
-        concurrent.futures.ThreadPoolExecutor(max_workers=max_workers),
-        options=[
-            ("grpc.max_send_message_length", 200 * 1024 * 1024),
-            ("grpc.max_receive_message_length", 200 * 1024 * 1024),
-        ],
-    )
-    service_pb2_grpc.add_EnvServiceServicer_to_server(EnvServicer(env), server)
-    server.add_insecure_port(f"{host}:{port}")
-    server.start()
-    print(f"EasyDrive ScenarioEnv gRPC server started on {host}:{port}")
-    print(f"Scene config directory: {scene_config_directory}")
-    print(f"AD policy config: {ad_policy_config}")
-    print(f"Video output directory: {video_output_dir}")
-    print("Press Ctrl+C to stop...")
-    try:
-        server.wait_for_termination()
-    finally:
-        server.stop(0)
-        env.close()
+    with runtime:
+        if show_tui:
+            with open(os.devnull, "w", encoding="utf-8") as output:
+                with contextlib.redirect_stdout(output), contextlib.redirect_stderr(output):
+                    raw_env = build_environment(
+                        backend=backend,
+                        scene_ids=scene_ids,
+                        ad_policy_config=ad_policy_config,
+                        nurec_root=nurec_root,
+                        nurec_grpc_host=nurec_grpc_host,
+                        nurec_grpc_port=nurec_grpc_port,
+                        nurec_grpc_timeout=nurec_grpc_timeout,
+                        web_host=web_host,
+                        web_port=web_port,
+                        video_output_dir=video_output_dir,
+                        async_mode=async_mode,
+                    )
+        else:
+            raw_env = build_environment(
+                backend=backend,
+                scene_ids=scene_ids,
+                ad_policy_config=ad_policy_config,
+                nurec_root=nurec_root,
+                nurec_grpc_host=nurec_grpc_host,
+                nurec_grpc_port=nurec_grpc_port,
+                nurec_grpc_timeout=nurec_grpc_timeout,
+                web_host=web_host,
+                web_port=web_port,
+                video_output_dir=video_output_dir,
+                async_mode=async_mode,
+            )
+        env = LifecycleAwareEnv(raw_env, state, scene_ids)
+        server = grpc.server(
+            concurrent.futures.ThreadPoolExecutor(max_workers=max_workers),
+            options=[
+                ("grpc.max_send_message_length", 200 * 1024 * 1024),
+                ("grpc.max_receive_message_length", 200 * 1024 * 1024),
+            ],
+        )
+        service_pb2_grpc.add_EnvServiceServicer_to_server(EnvServicer(env), server)
+        if server.add_insecure_port(f"{host}:{port}") == 0:
+            raise RuntimeError(f"Could not bind StreetWorld gRPC server to {host}:{port}")
+        try:
+            server.start()
+            state.mark_waiting()
+            if not show_tui:
+                print(f"StreetWorld gRPC server started on {host}:{port}")
+                print("Press Ctrl-C to stop.")
+            while state.failure() is None:
+                server.wait_for_termination(timeout=0.1)
+            error = state.failure()
+            raise error.with_traceback(error.__traceback__)
+        except KeyboardInterrupt:
+            pass
+        finally:
+            state.mark_finished()
+            server.stop(0)
+            env.close()
 
 
-def main():
-    parser = argparse.ArgumentParser(description="EasyDrive ScenarioEnv gRPC server with browser WebUI")
-    parser.add_argument(
-        "-c", "--scene_config_directory",
-        type=str,
-        required=True,
-        help="Scenario config directory",
-    )
-    parser.add_argument(
-        "--host",
-        type=str,
-        default="127.0.0.1",
-        help="Server bind address (default: 127.0.0.1)",
-    )
-    parser.add_argument(
-        "--port",
-        type=int,
-        default=50052,
-        help="gRPC server port (default: 50052)",
-    )
-    parser.add_argument(
-        "--web-host",
-        type=str,
-        default="127.0.0.1",
-        help="WebUI bind address (default: 127.0.0.1)",
-    )
-    parser.add_argument(
-        "--web-port",
-        type=int,
-        default=8080,
-        help="WebUI port (default: 8080)",
-    )
-    parser.add_argument(
-        "--max-workers",
-        type=int,
-        default=10,
-        help="Max concurrent RPC handlers (default: 10)",
-    )
-    parser.add_argument(
-        "--ordered-scenario",
-        action="store_true",
-        help="Use ordered scenarios instead of random sampling",
-    )
-    parser.add_argument(
-        "--ad-policy-config",
-        type=str.lower,
-        default="default",
-        choices=sorted(AD_POLICY_CONFIGS),
-        help="AD policy observation/config preset used by the EasyDrive server",
-    )
-    parser.add_argument(
-        "--video-output-dir",
-        type=str,
-        default="videos",
-        help="Directory for env video recordings (default: videos)",
-    )
-    parser.add_argument(
-        "--async-mode",
-        action="store_true",
-        help="Run simulation in the fixed-period asynchronous mode",
-    )
-    args = parser.parse_args()
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="StreetWorld EasyDrive/NuRec environment server")
+    parser.add_argument("-c", "--scene-config", type=Path, help="Scene config directory or YAML list")
+    parser.add_argument("--backend", choices=BACKENDS, help="Backend required with --scene-config")
+    parser.add_argument("--host", default="127.0.0.1", help="StreetWorld gRPC bind address")
+    parser.add_argument("--port", type=int, default=50052, help="StreetWorld gRPC bind port")
+    parser.add_argument("--web-host", default="127.0.0.1", help="WebUI bind address")
+    parser.add_argument("--web-port", type=int, default=18080, help="WebUI bind port")
+    parser.add_argument("--max-workers", type=int, default=10, help="Maximum gRPC handler workers")
+    parser.add_argument("--ad-policy-config", type=str.lower, default="default", choices=sorted(AD_POLICY_CONFIGS))
+    parser.add_argument("--video-output-dir", default="videos", help="Directory for environment video recordings")
+    parser.add_argument("--async-mode", action="store_true", help="Run simulation in fixed-period asynchronous mode")
+    parser.add_argument("--no-tui", action="store_true", help="Disable the Rich interface; requires --scene-config")
+    parser.add_argument("--nurec-root", type=Path, default=NUREC_ROOT, help="NuRec release root")
+    parser.add_argument("--nurec-grpc-host", default="127.0.0.1", help="NuRec renderer address")
+    parser.add_argument("--nurec-grpc-port", type=int, default=8080, help="NuRec renderer port")
+    parser.add_argument("--nurec-grpc-timeout", type=float, default=600.0, help="NuRec renderer timeout in seconds")
+    return parser
 
-    if not os.path.isdir(args.scene_config_directory):
-        print(f"Error: scene_config_directory not found: {args.scene_config_directory}")
-        return 1
+
+def main(argv: Sequence[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
+    if args.scene_config is None:
+        if args.no_tui:
+            raise ValueError("--no-tui requires --scene-config.")
+        if args.backend is not None:
+            raise ValueError("--backend is determined by catalog mode; omit it when --scene-config is omitted.")
+        try:
+            selection = select_catalog_scenes()
+        except KeyboardInterrupt:
+            return 130
+        backend = selection.backend
+        scene_ids = list(selection.scenes)
+    else:
+        if args.backend is None:
+            raise ValueError("--backend is required when --scene-config is supplied.")
+        backend = args.backend
+        scene_ids = resolve_scene_config(args.scene_config, backend)
 
     serve(
-        scene_config_directory=args.scene_config_directory,
-        random_scenario=not args.ordered_scenario,
+        backend=backend,
+        scene_ids=scene_ids,
         ad_policy_config=args.ad_policy_config,
         host=args.host,
         port=args.port,
+        nurec_root=args.nurec_root,
+        nurec_grpc_host=args.nurec_grpc_host,
+        nurec_grpc_port=args.nurec_grpc_port,
+        nurec_grpc_timeout=args.nurec_grpc_timeout,
         web_host=args.web_host,
         web_port=args.web_port,
         max_workers=args.max_workers,
         video_output_dir=args.video_output_dir,
         async_mode=args.async_mode,
+        show_tui=not args.no_tui,
     )
     return 0
 
 
 if __name__ == "__main__":
-    exit(main())
+    raise SystemExit(main())

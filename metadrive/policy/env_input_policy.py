@@ -23,12 +23,22 @@ class EnvInputPolicy(BasePolicy):
         self.throttle_unit = 2.0 / (self.discrete_throttle_dim - 1)
 
         self.enable_expert = enable_expert
+        self.last_action = (0.0, 0.0)
+
+    def reset(self, controller, seed, state, init_state, **kwargs):
+        super().reset(controller, seed, state, init_state, **kwargs)
+        self.last_action = (0.0, 0.0)
 
     def act(self, action, *args, **kwargs):
+        if not self.step_manager.key_step:
+            return self.last_action
+        if isinstance(action, np.ndarray) and action.ndim == 2:
+            action = action[0]
         if self.config["action_check"]:
             assert self.get_input_space().contains(action), "Input {} is not compatible with action space {}!".format(action, self.get_input_space())
         if self.discrete_action:
             action=self._convert_to_continuous_action(action)
+        self.last_action = action
         self.action_info["action"] = action
         return action
 

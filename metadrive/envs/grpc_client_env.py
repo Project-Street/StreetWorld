@@ -86,14 +86,11 @@ class GrpcClientEnv(gym.Env):
         return obs, reset_info
 
     def step(
-        self, action: np.ndarray
+        self, action: Optional[np.ndarray]
     ) -> Tuple[Any, float, bool, bool, Dict[str, Any]]:
-        act = np.asarray(action, dtype=np.float32).reshape(-1)
-        if act.size != 2:
-            raise ValueError(f"Action must have shape (2,), got {act.shape}")
 
         response = self.stub.Step(
-            service_pb2.StepRequest(action=act[:2].tolist()),
+            service_pb2.StepRequest(action=[] if action is None else np.asarray(action).reshape(-1).tolist()),
             timeout=self.timeout_sec,
             wait_for_ready=True,
         )
@@ -143,13 +140,13 @@ class GrpcClientEnv(gym.Env):
         if has_images and has_other:
             obs = self._struct_to_builtin(observation.other_observation)
             obs["gaussian"] = self._deserialize_gaussian_observation(observation.images_observation)
-            return obs
+            return self._restore_numeric_lists(obs)
 
         if has_images:
             return self._deserialize_gaussian_observation(observation.images_observation)
 
         if has_other:
-            return self._struct_to_builtin(observation.other_observation)
+            return self._restore_numeric_lists(self._struct_to_builtin(observation.other_observation))
 
         raise ValueError("Observation payload is empty.")
 
@@ -159,17 +156,29 @@ class GrpcClientEnv(gym.Env):
 
         for camera_image in images_observation:
             cam_name = camera_image.camera_name
-            cam_info = self._struct_to_builtin(camera_image.camera_info)
+            cam_info = self._restore_numeric_lists(self._struct_to_builtin(camera_image.camera_info))
             h = int(cam_info["H"])
             w = int(cam_info["W"])
-            frame = np.frombuffer(camera_image.image_data, dtype=np.uint8).reshape(h, w, 3)
+            frame = np.ascontiguousarray(np.frombuffer(camera_image.image_data, dtype=np.uint8).reshape(h, w, 3))
             camera_info[cam_name] = cam_info
-            image[cam_name] = np.expand_dims(frame, axis=0)
+            image[cam_name] = frame
 
         return {
             "camera_info": camera_info,
             "image": image,
         }
+
+    @staticmethod
+    def _restore_numeric_lists(value: Any) -> Any:
+        if isinstance(value, dict):
+            return {key: GrpcClientEnv._restore_numeric_lists(item) for key, item in value.items()}
+        if isinstance(value, list):
+            items = [GrpcClientEnv._restore_numeric_lists(item) for item in value]
+            array = np.asarray(items)
+            if np.issubdtype(array.dtype, np.number):
+                return array
+            return items
+        return value
 
     @staticmethod
     def _struct_to_builtin(struct_msg: Any) -> Any:

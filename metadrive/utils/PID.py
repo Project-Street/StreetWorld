@@ -1,22 +1,20 @@
+from collections import deque
+
+import numpy as np
+
+
 class PIDController:
-    def __init__(self, k_p: float, k_i: float, k_d: float):
+    def __init__(self, k_p, k_i, k_d):
         self.k_p = k_p
         self.k_i = k_i
         self.k_d = k_d
-        self.p_error = 0
-        self.i_error = 0
-        self.d_error = 0
+        self.errors = deque([0.0] * 50, maxlen=50)
 
-    def _update_error(self, current_error: float):
-        self.i_error += current_error
-        self.d_error = current_error - self.p_error
-        self.p_error = current_error
-
-    def get_result(self, current_error: float, make_up_coefficient=1.0):
-        self._update_error(current_error)
-        return (-self.k_p * self.p_error - self.k_i * self.i_error - self.k_d * self.d_error) * make_up_coefficient
+    def step(self, error):
+        self.errors.append(error)
+        integral = np.mean(self.errors)
+        derivative = self.errors[-1] - self.errors[-2]
+        return self.k_p * error + self.k_i * integral + self.k_d * derivative
 
     def reset(self):
-        self.p_error = 0
-        self.i_error = 0
-        self.d_error = 0
+        self.errors = deque([0.0] * 50, maxlen=50)

@@ -33,7 +33,8 @@ class EnvServicer(service_pb2_grpc.EnvServiceServicer):
 
     def Step(self, request: service_pb2.StepRequest, context) -> service_pb2.StepResponse:
         with self._lock:
-            obs, reward, terminated, truncated, info = self.env.step(list(request.action))
+            action = None if not request.action else np.asarray(request.action).reshape(-1, 2)
+            obs, reward, terminated, truncated, info = self.env.step(action)
             return service_pb2.StepResponse(
                 status=False,
                 message="",
@@ -72,7 +73,9 @@ class EnvServicer(service_pb2_grpc.EnvServiceServicer):
     ) -> List[common_pb2.CameraImage]:
         images = []
         for cam_name, stacked in gaussian_images.items():
-            frame = stacked[-1] if stacked.ndim == 4 else stacked
+            if stacked.ndim != 4 or stacked.shape[0] != 1:
+                raise ValueError(f"gRPC camera image for {cam_name} must have shape (1, H, W, 3), got {stacked.shape}")
+            frame = stacked[0]
             images.append(
                 common_pb2.CameraImage(
                     camera_name=cam_name,

@@ -370,15 +370,12 @@ class BaseEnv(gym.Env):
             return self._async_last_step_result
 
     def _step(self, actions: Union[Union[np.ndarray, list], Dict[AnyStr, Union[list, np.ndarray]], int]):
-        for manager in self.agent_managers.values():
-            manager.decide_action(actions)
-
         for i in range(self.config["decision_repeat"]):
             # simulate or replay
-            self.step_manager.step()
             for manager in self.agent_managers.values():
-                manager.step()
+                manager.step(actions)
             self.physics_world.step()
+            self.step_manager.step()
             for manager in self.agent_managers.values():
                 manager.update_state()
             # the recording should happen after step physics world
@@ -451,6 +448,9 @@ class BaseEnv(gym.Env):
         step_infos["scene_name"] = self.scene_id
         step_infos["current_timestamp"] = int(self.step_manager.current_timestamp)
         step_infos["relative_timestamp"] = int(self.step_manager.relative_timestamp)
+        steering, throttle_brake = self.actor_controller.current_action
+        step_infos["steering"] = steering
+        step_infos["throttle_brake"] = throttle_brake
 
         return obses, rewards, terminateds, truncateds, step_infos
 

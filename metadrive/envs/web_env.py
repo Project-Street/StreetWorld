@@ -3,7 +3,7 @@ import base64
 import threading
 import time
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Mapping, Optional
 
 import cv2
 import numpy as np
@@ -11,6 +11,39 @@ import numpy as np
 from metadrive.configs.web_env_config import WEB_ENV_CONFIG
 from metadrive.gui.video_exporter import VideoExporter
 from metadrive.utils.image_layout import compose_image_layout
+
+
+TRAJECTORY_HEIGHT_BELOW_EGO_M = 1.0
+TRAJECTORY_COLOR_RGB = (64, 255, 64)
+
+
+def _draw_projected_trajectory(image: np.ndarray, trajectory: np.ndarray, camera_info: Mapping[str, Any]) -> None:
+    k = np.asarray(camera_info["K"], dtype=np.float32)
+    if k.shape != (3, 3):
+        raise ValueError(f"Camera K must be 3x3, got {k.shape}")
+    e2c = np.asarray(camera_info["ego2camera"], dtype=np.float32)
+    if e2c.shape != (4, 4):
+        raise ValueError(f"Camera ego2camera must be 4x4, got {e2c.shape}")
+
+    x_forward = trajectory[:, 0]
+    y_left = trajectory[:, 1]
+    z_up = np.full_like(x_forward, -TRAJECTORY_HEIGHT_BELOW_EGO_M)
+    ego_points = np.stack([x_forward, y_left, z_up], axis=1)
+    camera_points = (e2c[:3, :3] @ ego_points.T + e2c[:3, 3:4]).T
+    camera_points = camera_points[camera_points[:, 2] > 1e-6]
+    if not camera_points.size:
+        return
+
+    pixels = (k @ (camera_points / camera_points[:, 2:3]).T).T
+    height, width = image.shape[:2]
+    visible = (pixels[:, 0] >= 0) & (pixels[:, 0] < width) & (pixels[:, 1] >= 0) & (pixels[:, 1] < height)
+    points = np.rint(pixels[visible, :2]).astype(np.int32)
+    if not len(points):
+        return
+    for point in points:
+        cv2.circle(image, tuple(point), radius=2, color=TRAJECTORY_COLOR_RGB, thickness=-1, lineType=cv2.LINE_AA)
+    if len(points) > 1:
+        cv2.polylines(image, [points], isClosed=False, color=TRAJECTORY_COLOR_RGB, thickness=2, lineType=cv2.LINE_AA)
 
 
 def make_web_env(env_class):
@@ -32,6 +65,7 @@ def make_web_env(env_class):
             self._history_size = int(self.config["history_size"])
             self._jpeg_quality = int(self.config["jpeg_quality"])
             self._max_image_edge = int(self.config["max_image_edge"])
+            self._project_trajectory_on_camera = self.config["project_trajectory_on_camera"]
             self._timestamp_history: list[int] = []
             self._speed_history: list[float] = []
             self._angular_velocity_history: list[float] = []
@@ -67,7 +101,8 @@ def make_web_env(env_class):
 
             obs, reward, terminated, truncated, info = super()._step(action)
             gaussian_obs = obs["gaussian"]
-            image = compose_image_layout(gaussian_obs["image"], self.config["image_layout"])
+            image_stacks = self._with_projected_trajectory(gaussian_obs, action)
+            image = compose_image_layout(image_stacks, self.config["image_layout"])
             states = obs["states"]
             self._draw_web_state(image=image, states=states, info=info, action=action)
             self._video_exporter.draw(image=image, states=states, info=info, action=action)
@@ -81,9 +116,28 @@ def make_web_env(env_class):
                 self._video_exporter.flush_episode(str(self.scene_id))
             return obs, reward, terminated, truncated, info
 
+        def _with_projected_trajectory(self, gaussian_obs: Mapping[str, Any], action: Any) -> Mapping[str, np.ndarray]:
+            if self._project_trajectory_on_camera is None or action is None:
+                return gaussian_obs["image"]
+
+            trajectory = np.asarray(action, dtype=np.float32)
+            if trajectory.ndim == 1:
+                return gaussian_obs["image"]
+            if trajectory.ndim != 2 or trajectory.shape[1] != 2:
+                raise ValueError(f"Trajectory must have shape (N, 2), got {trajectory.shape}")
+            if len(trajectory) < 2:
+                return gaussian_obs["image"]
+
+            camera_name = self._project_trajectory_on_camera
+            image_stacks = dict(gaussian_obs["image"])
+            image_stack = np.array(image_stacks[camera_name], copy=True)
+            _draw_projected_trajectory(image_stack[-1], trajectory, gaussian_obs["camera_info"][camera_name])
+            image_stacks[camera_name] = image_stack
+            return image_stacks
+
         def _draw_web_state(self, image: np.ndarray, states: dict[str, Any], info: Any, action: Any) -> None:
-            if len(action) != 2:
-                raise ValueError(f"Expected action with length 2, got {len(action)}")
+            steering = info["steering"]
+            throttle_brake = info["throttle_brake"]
 
             velocity = np.asarray(states["linear_velocity"], dtype=np.float32).reshape(-1)
             if velocity.shape[0] < 2:
@@ -123,8 +177,8 @@ def make_web_env(env_class):
                 self._snapshot_data = {
                     "image": "data:image/jpeg;base64," + base64.b64encode(encoded).decode("ascii"),
                     "timestamp": timestamp,
-                    "steering": float(action[0]),
-                    "throttle_brake": float(action[1]),
+                    "steering": float(steering),
+                    "throttle_brake": float(throttle_brake),
                     "speed": speed,
                     "angular_velocity": yaw_rate,
                     "timestamp_history": list(self._timestamp_history),
