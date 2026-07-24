@@ -1,4 +1,5 @@
 import math
+
 import numpy as np
 import gymnasium as gym
 from trajdata import VectorMap
@@ -16,7 +17,8 @@ class NavigationObservation(BaseObservation, Randomizable):
         Randomizable.__init__(self, None)
         self.navigating_type = config.get("navigating_type", "expert_following")  # lane_following, expert_following, snap_lane
         self.forecast_type = config.get("forecast_type", "distance")
-        self.forecast_value = float(config.get("forecast_value", 20.0))
+        self.forecast_value = config.get("forecast_value", 20.0)
+        self.carla_style_target = config.get("carla_style_target")
         self.path_interval = config.get("path_interval")
         self.lateral_offset = float(config.get("lateral_offset", 2.0))
         self.current_lane_max_dist = float(config.get("current_lane_max_dist", 2.25))
@@ -31,6 +33,8 @@ class NavigationObservation(BaseObservation, Randomizable):
         self._expert_speed = None
         self._expert_angular_velocity = None
         self._expert_heading = None
+        self._carla_route_xy = None
+        self._carla_route_cursor = None
 
     def reset(self, trajdata_map: VectorMap, init_state, state, controller, seed=None, **kwargs):
         if self.navigating_type == "lane_following":
@@ -44,6 +48,8 @@ class NavigationObservation(BaseObservation, Randomizable):
         self.init_state = init_state
         self.state = state
         self._clear_expert_reference()
+        self._carla_route_xy = None
+        self._carla_route_cursor = None
 
         if self.navigating_type == "expert_following":
             self._build_expert_path()
@@ -58,13 +64,16 @@ class NavigationObservation(BaseObservation, Randomizable):
 
     def observe(self):
         turn_signal, target_waypoint = self._get_turn_signal_and_target_waypoint()
-        return {
+        observation = {
             'navigating_type': self.navigating_type,
             'turn_signal': turn_signal,
             'waypoint': self._path_xy,
             'cummulative_length': self._path_cumlen,
             'target_waypoint': target_waypoint,
         }
+        if self.carla_style_target is not None:
+            observation['carla_style_target'] = self._carla_target_waypoint(self._vehicle_xy(self.controller))
+        return observation
 
     def _clear_expert_reference(self):
         self._expert_speed = None
@@ -109,6 +118,8 @@ class NavigationObservation(BaseObservation, Randomizable):
         self.trajdata_map = None
         self.init_state = None
         self.state = None
+        self._carla_route_xy = None
+        self._carla_route_cursor = None
         self._clear_expert_reference()
 
     # ---------- path builders ----------
@@ -221,6 +232,9 @@ class NavigationObservation(BaseObservation, Randomizable):
             if self.forecast_type == "step" and len(snapped) > 0 and np.array_equal(snapped_point, snapped[-1]):
                 continue
             snapped.append(snapped_point)
+        if self.carla_style_target is not None:
+            self._carla_route_xy = self._build_carla_route(snapped)
+            self._carla_route_cursor = 0
         self._set_path(snapped, smooth=False)
         self._clear_expert_reference()
 
@@ -249,7 +263,7 @@ class NavigationObservation(BaseObservation, Randomizable):
             pts = np.column_stack([px, py])
 
         path = pts
-        if len(path) < 3:
+        if len(path) == 0:
             self._path_xy = None
             self._path_cumlen = None
             return
@@ -261,6 +275,84 @@ class NavigationObservation(BaseObservation, Randomizable):
             len(self._expert_speed) != len(self._path_xy)
         ):
             self._clear_expert_reference()
+
+    def _build_carla_route(self, sparse_points):
+        points = np.asarray(sparse_points, dtype=np.float32)
+        keep = np.concatenate([[True], np.linalg.norm(points[1:] - points[:-1], axis=1) > 1e-6])
+        points = points[keep]
+
+        hop_resolution = self.carla_style_target["hop_resolution"]
+        # Turn type only marks downsampling boundaries; model command comes from target lateral offset.
+        segment_vectors = points[1:] - points[:-1]
+        segment_headings = np.arctan2(segment_vectors[:, 1], segment_vectors[:, 0])
+        heading_changes = np.arctan2(
+            np.sin(segment_headings[1:] - segment_headings[:-1]),
+            np.cos(segment_headings[1:] - segment_headings[:-1]),
+        )
+        angle_threshold = np.deg2rad(self.carla_style_target["road_option_angle_threshold"])
+        segment_turn_types = np.zeros(len(segment_vectors), dtype=np.int8)
+        segment_turn_types[1:][heading_changes > angle_threshold] = 1
+        segment_turn_types[1:][heading_changes < -angle_threshold] = -1
+
+        dense_points = [points[0]]
+        dense_turn_types = [segment_turn_types[0]]
+        for segment_index, (start, end) in enumerate(zip(points[:-1], points[1:])):
+            delta = end - start
+            length = np.linalg.norm(delta)
+            direction = delta / length
+            for offset in np.arange(hop_resolution, length, hop_resolution):
+                dense_points.append(start + direction * offset)
+                dense_turn_types.append(segment_turn_types[segment_index])
+            dense_points.append(end)
+            next_segment = min(segment_index + 1, len(segment_turn_types) - 1)
+            dense_turn_types.append(segment_turn_types[next_segment])
+
+        dense_points = np.asarray(dense_points, dtype=np.float32)
+        sample_factor = self.carla_style_target["sample_factor"]
+        sampled_indices = []
+        previous_turn_type = None
+        distance = 0.0
+        for index, turn_type in enumerate(dense_turn_types):
+            if previous_turn_type is None:
+                sampled_indices.append(index)
+                distance = 0.0
+            elif turn_type != previous_turn_type:
+                sampled_indices.append(index)
+                distance = 0.0
+            elif distance > sample_factor:
+                sampled_indices.append(index)
+                distance = 0.0
+            elif index == len(dense_points) - 1:
+                sampled_indices.append(index)
+                distance = 0.0
+            else:
+                distance += np.linalg.norm(dense_points[index] - dense_points[index - 1])
+            previous_turn_type = turn_type
+
+        return dense_points[sampled_indices]
+
+    def _carla_target_waypoint(self, ego_xy):
+        cursor = self._carla_route_cursor
+        route = self._carla_route_xy
+        if len(route) == 1:
+            return route[0]
+
+        to_pop = 0
+        farthest_in_range = -np.inf
+        cumulative_distance = 0.0
+        for index in range(cursor + 1, len(route)):
+            if cumulative_distance > self.carla_style_target["max_distance"]:
+                break
+            cumulative_distance += np.linalg.norm(route[index] - route[index - 1])
+            distance = np.linalg.norm(route[index] - ego_xy)
+            if distance <= self.carla_style_target["min_distance"] and distance > farthest_in_range:
+                farthest_in_range = distance
+                to_pop = index - cursor
+
+        max_to_pop = len(route) - cursor - 2
+        self._carla_route_cursor += min(to_pop, max_to_pop)
+        target_index = self._carla_route_cursor + 1
+        return route[target_index]
 
     @staticmethod
     def _sample_axis(total, interval):
@@ -349,7 +441,7 @@ class NavigationObservation(BaseObservation, Randomizable):
         target = cumlen[i0] + max(0.0, ahead_len)
         idx = np.searchsorted(cumlen, target, side="right")
         return int(idx)
-    
+
     @staticmethod
     def _ego_heading_vec(vehicle):
         h = vehicle.heading  # (cos, sin)

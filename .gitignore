@@ -19,6 +19,9 @@ configs
 !/metadrive/configs/*.py
 rl_outputs*
 tests*
+!tests/
+tests/*
+!tests/test_easydrive_tui.py
 tmp*
 .codex
 install.log
@@ -26,3 +29,8 @@ mm*
 videos*
 VAD
 TransFuser
+alpama*
+!metadrive/configs/alpamayo_config.py
+AutoVLA
+DiffusionDrive
+Alpamayo*

@@ -22,8 +22,11 @@ from metadrive.configs.alpamayo_config import ALPAMAYO_CONFIG
 from metadrive.configs.autovla_config import AUTOVLA_CONFIG
 from metadrive.configs.diffusiondrive_config import DIFFUSIONDRIVE_CONFIG
 from metadrive.configs.epona_config import EPONA_CONFIG
+from metadrive.configs.genad_config import GENAD_CONFIG
+from metadrive.configs.momad_config import MOMAD_CONFIG
 from metadrive.configs.openemma_config import OPENEMMA_CONFIG
 from metadrive.configs.opendrivevla_config import OPENDRIVEVLA_CONFIG
+from metadrive.configs.sparsedrive_config import SPARSEDRIVE_CONFIG
 from metadrive.configs.stp3_config import STP3_CONFIG
 from metadrive.configs.transfuser_config import TRANSFUSER_CONFIG
 from metadrive.configs.uniad_config import UNIAD_CONFIG
@@ -52,8 +55,11 @@ AD_POLICY_CONFIGS = {
     "default": {},
     "diffusiondrive": DIFFUSIONDRIVE_CONFIG,
     "epona": EPONA_CONFIG,
+    "genad": GENAD_CONFIG,
+    "momad": MOMAD_CONFIG,
     "openemma": OPENEMMA_CONFIG,
     "opendrivevla": OPENDRIVEVLA_CONFIG,
+    "sparsedrive": SPARSEDRIVE_CONFIG,
     "stp3": STP3_CONFIG,
     "transfuser": TRANSFUSER_CONFIG,
     "uniad": UNIAD_CONFIG,

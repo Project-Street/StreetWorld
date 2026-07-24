@@ -32,6 +32,13 @@ TRANSFUSER_CONFIG = dict(
             navigation=dict(
                 forecast_type="distance",
                 forecast_value=7.5,
+                carla_style_target=dict(
+                    hop_resolution=1.0,
+                    sample_factor=50.0,
+                    min_distance=7.5,
+                    max_distance=50.0,
+                    road_option_angle_threshold=35.0,
+                ),
             ),
         ),
     ),

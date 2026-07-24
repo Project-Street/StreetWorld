@@ -164,7 +164,7 @@ class VideoExporter:
         if self.episode_frames:
             current_time = datetime.now().strftime("%Y%m%d_%H%M%S")
             output_path = self.output_dir / f"{current_time}_{str(scene_name).replace('/', '_')}.mp4"
-            image_list_to_video(str(output_path), self.episode_frames, code="mp4v", fps=self.fps)
+            image_list_to_video(str(output_path), self.episode_frames, fps=self.fps)
             logger.info("Exported video for scene %s to %s.", scene_name, output_path)
         self.episode_frames.clear()
         self.timestamp_history.clear()
