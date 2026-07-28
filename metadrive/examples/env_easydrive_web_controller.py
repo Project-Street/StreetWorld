@@ -10,10 +10,10 @@ import time
 from easydrive.models.scenes.simulator_interface import SimulatorInterface
 from metadrive.config import Config
 from metadrive.envs.scenario_env import ScenarioEnv
-from metadrive.envs.web_env import make_web_env
+from metadrive.envs.interactive_env import make_interactive_env
 
 
-WebScenarioEnv = make_web_env(ScenarioEnv)
+InteractiveScenarioEnv = make_interactive_env(ScenarioEnv)
 
 
 def list_scene_ids(scene_config_directory: str) -> list[str]:
@@ -44,7 +44,7 @@ def main() -> int:
             "eval_repeat_per_scene": 1,
         }
     )
-    env = WebScenarioEnv(SimulatorInterface(), config)
+    env = InteractiveScenarioEnv(SimulatorInterface(), config)
     try:
         while True:
             env.reset()

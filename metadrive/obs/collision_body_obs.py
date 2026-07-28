@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from queue import Queue
+from threading import Thread
 from typing import Any, Dict, Mapping
 
 import gymnasium as gym
@@ -32,7 +34,6 @@ from scipy.spatial.transform import Rotation
 from metadrive.component.terrain.ground import GroundPlane
 from metadrive.component.terrain.mesh_terrain import MeshTerrain
 from metadrive.obs.observation_base import BaseObservation
-from metadrive.third_party.procedural3d.box import BoxMaker
 from metadrive.type import MetaDriveType
 
 
@@ -148,6 +149,41 @@ def _parse_camera_configs(config: Mapping[str, Any]) -> Dict[str, _CameraConfig]
     return parsed
 
 
+def _copy_camera_configs(cameras: Mapping[str, _CameraConfig]) -> Dict[str, _CameraConfig]:
+    return {
+        name: _CameraConfig(
+            height=camera.height,
+            width=camera.width,
+            focal=camera.focal,
+            offset=camera.offset.copy(),
+            panda_camera_to_ego=camera.panda_camera_to_ego.copy(),
+        )
+        for name, camera in cameras.items()
+    }
+
+
+def _snapshot_ground(ground: Any) -> dict[str, Any]:
+    if isinstance(ground, GroundPlane):
+        shape = ground.body.get_shape(0)
+        normal = np.asarray(shape.get_plane_normal(), dtype=np.float32)
+        normal_length = float(np.linalg.norm(normal))
+        if normal_length == 0.0:
+            raise ValueError("GroundPlane normal must have non-zero length")
+        return {
+            "kind": "plane",
+            "normal": normal / normal_length,
+            "constant": float(shape.get_plane_constant()),
+        }
+    if isinstance(ground, MeshTerrain):
+        return {
+            "kind": "mesh",
+            "vertices": ground.vertices,
+            "faces": ground.faces,
+            "normals": ground.vertex_normals,
+        }
+    raise TypeError(f"Unsupported collision body ground type: {type(ground).__name__}")
+
+
 class _CollisionBodySceneRenderer:
     def __init__(self, cameras: Mapping[str, _CameraConfig]):
         loadPrcFileData(
@@ -256,28 +292,23 @@ class _CollisionBodySceneRenderer:
             camera.buffer, lens=lens, scene=self.render_root
         )
 
-    def set_ground(self, ground: Any) -> None:
+    def set_ground(self, ground: Mapping[str, Any]) -> None:
         if self._ground_node is not None:
             self._ground_node.remove_node()
         self._ground_node = None
         self._ground_plane = None
 
-        if isinstance(ground, GroundPlane):
-            shape = ground.body.get_shape(0)
-            normal = np.asarray(shape.get_plane_normal(), dtype=np.float32)
-            normal_length = float(np.linalg.norm(normal))
-            if normal_length == 0.0:
-                raise ValueError("GroundPlane normal must have non-zero length")
-            normal /= normal_length
-            self._ground_plane = (normal, float(shape.get_plane_constant()))
-            node = BoxMaker(
-                center=(0.0, 0.0, -0.01),
+        if ground["kind"] == "plane":
+            normal = ground["normal"]
+            self._ground_plane = (normal, ground["constant"])
+            node = self._make_box_node(
                 width=_FAR_CLIP * 2.0,
                 depth=_FAR_CLIP * 2.0,
                 height=0.02,
-                vertex_color=_GROUND_COLOR,
-                has_uvs=False,
-            ).generate()
+                color=_GROUND_COLOR,
+                name="collision-body-ground-plane",
+                center=(0.0, 0.0, -0.01),
+            )
             self._ground_node = self.render_root.attach_new_node(node)
             reference = (
                 np.asarray([0.0, 0.0, 1.0], dtype=np.float32)
@@ -292,21 +323,19 @@ class _CollisionBodySceneRenderer:
             self._ground_node.set_mat(_numpy_to_panda_matrix(ground_transform))
             return
 
-        if isinstance(ground, MeshTerrain):
+        if ground["kind"] == "mesh":
             self._ground_node = self.render_root.attach_new_node(
                 self._make_triangle_node(
-                    ground.vertices,
-                    ground.faces,
-                    ground.vertex_normals,
+                    ground["vertices"],
+                    ground["faces"],
+                    ground["normals"],
                     _GROUND_COLOR,
                     "collision-body-ground-mesh",
                 )
             )
             return
 
-        raise TypeError(
-            f"Unsupported collision body ground type: {type(ground).__name__}"
-        )
+        raise ValueError(f"Unsupported collision body ground kind: {ground['kind']}")
 
     @staticmethod
     def _make_triangle_node(
@@ -339,9 +368,60 @@ class _CollisionBodySceneRenderer:
         node.add_geom(geom)
         return node
 
-    def _sync_objects(
-        self, objects: Mapping[str, Mapping[str, Any]], ego_controller: Any
-    ) -> None:
+    @classmethod
+    def _make_box_node(
+        cls,
+        width: float,
+        depth: float,
+        height: float,
+        color: tuple[float, float, float, float],
+        name: str,
+        center: tuple[float, float, float] = (0.0, 0.0, 0.0),
+    ) -> GeomNode:
+        half_width, half_depth, half_height = np.asarray(
+            (width, depth, height), dtype=np.float32
+        ) * 0.5
+        vertices = np.asarray(
+            (
+                (-half_width, -half_depth, -half_height),
+                (half_width, -half_depth, -half_height),
+                (half_width, half_depth, -half_height),
+                (-half_width, half_depth, -half_height),
+                (-half_width, -half_depth, half_height),
+                (half_width, -half_depth, half_height),
+                (half_width, half_depth, half_height),
+                (-half_width, half_depth, half_height),
+            ),
+            dtype=np.float32,
+        ) + np.asarray(center, dtype=np.float32)
+        faces = (
+            ((0, 4, 7, 3), (-1.0, 0.0, 0.0)),
+            ((1, 2, 6, 5), (1.0, 0.0, 0.0)),
+            ((0, 1, 5, 4), (0.0, -1.0, 0.0)),
+            ((3, 7, 6, 2), (0.0, 1.0, 0.0)),
+            ((0, 3, 2, 1), (0.0, 0.0, -1.0)),
+            ((4, 5, 6, 7), (0.0, 0.0, 1.0)),
+        )
+        face_vertices = np.concatenate(
+            [vertices[list(indices)] for indices, _ in faces]
+        )
+        normals = np.repeat(
+            np.asarray([normal for _, normal in faces], dtype=np.float32), 4, axis=0
+        )
+        triangles = np.asarray(
+            [
+                (base, base + 1, base + 2)
+                for base in range(0, len(face_vertices), 4)
+            ]
+            + [
+                (base, base + 2, base + 3)
+                for base in range(0, len(face_vertices), 4)
+            ],
+            dtype=np.int32,
+        )
+        return cls._make_triangle_node(face_vertices, triangles, normals, color, name)
+
+    def _sync_objects(self, objects: Mapping[str, Mapping[str, Any]], ego_object_id: str) -> None:
         active_ids = set(objects)
         for object_id in set(self._object_nodes) - active_ids:
             self._object_nodes.pop(object_id).remove_node()
@@ -357,20 +437,20 @@ class _CollisionBodySceneRenderer:
                     f"Object {object_id} has invalid transform: shape={transform.shape}"
                 )
 
-            object_type = state["type"]
+            color = state["color"]
             if object_id not in self._object_nodes:
-                node = BoxMaker(
+                node = self._make_box_node(
                     width=float(size[0]),
                     depth=float(size[1]),
                     height=float(size[2]),
-                    vertex_color=self._object_color(object_type),
-                    has_uvs=False,
-                ).generate()
+                    color=color,
+                    name=f"collision-body-{object_id}",
+                )
                 self._object_nodes[object_id] = self.render_root.attach_new_node(node)
 
             object_node = self._object_nodes[object_id]
             object_node.set_mat(_numpy_to_panda_matrix(transform))
-            if state["controller"] is ego_controller:
+            if object_id == ego_object_id:
                 self._ego_node = object_node
 
         if self._ego_node is None:
@@ -378,24 +458,15 @@ class _CollisionBodySceneRenderer:
                 "Collision body observation collector did not include the ego controller"
             )
 
-    @staticmethod
-    def _object_color(object_type: str) -> tuple[float, float, float, float]:
-        if MetaDriveType.is_vehicle(object_type):
-            return _VEHICLE_COLOR
-        if object_type == MetaDriveType.PEDESTRIAN:
-            return _PEDESTRIAN_COLOR
-        if object_type == MetaDriveType.CYCLIST:
-            return _CYCLIST_COLOR
-        raise ValueError(f"Unsupported collision body object type: {object_type}")
-
     def render(
         self,
-        ego_controller: Any,
+        ego_transform: np.ndarray,
         objects: Mapping[str, Mapping[str, Any]],
+        ego_object_id: str,
         show_ego: Mapping[str, bool],
     ) -> Dict[str, np.ndarray]:
-        self._sync_objects(objects, ego_controller)
-        ego_transform = np.asarray(ego_controller.transform, dtype=np.float32)
+        self._sync_objects(objects, ego_object_id)
+        ego_transform = np.asarray(ego_transform, dtype=np.float32)
         ego_position = ego_transform[:3, 3]
         self._update_shadow_camera(ego_position)
 
@@ -462,6 +533,76 @@ class _CollisionBodySceneRenderer:
         self.base = None
 
 
+class _CollisionBodyRenderThread:
+    def __init__(self, cameras: Mapping[str, _CameraConfig]) -> None:
+        self._requests = Queue()
+        self._ready = Queue(maxsize=1)
+        self._thread = Thread(
+            target=self._run,
+            args=(_copy_camera_configs(cameras),),
+            name="CollisionBodyRenderer",
+            daemon=True,
+        )
+        self._thread.start()
+        result = self._ready.get()
+        if isinstance(result, BaseException):
+            self._thread.join()
+            raise result
+
+    def set_ground(self, ground: Mapping[str, Any]) -> None:
+        self._request("set_ground", ground)
+
+    def render(
+        self,
+        ego_transform: np.ndarray,
+        objects: Mapping[str, Mapping[str, Any]],
+        ego_object_id: str,
+        show_ego: Mapping[str, bool],
+    ) -> Dict[str, np.ndarray]:
+        return self._request("render", ego_transform, objects, ego_object_id, show_ego)
+
+    def close(self) -> None:
+        self._request("close")
+        self._thread.join()
+
+    def _request(self, operation: str, *args: Any) -> Any:
+        response = Queue(maxsize=1)
+        self._requests.put((operation, args, response))
+        result = response.get()
+        if isinstance(result, BaseException):
+            raise result
+        return result
+
+    def _run(self, cameras: Mapping[str, _CameraConfig]) -> None:
+        try:
+            renderer = _CollisionBodySceneRenderer(cameras)
+        except BaseException as error:
+            self._ready.put(error)
+            return
+        self._ready.put(None)
+
+        try:
+            while True:
+                operation, args, response = self._requests.get()
+                try:
+                    if operation == "set_ground":
+                        result = renderer.set_ground(*args)
+                    elif operation == "render":
+                        result = renderer.render(*args)
+                    elif operation == "close":
+                        result = None
+                    else:
+                        raise ValueError(f"Unknown collision body render operation: {operation}")
+                except BaseException as error:
+                    response.put(error)
+                else:
+                    response.put(result)
+                if operation == "close":
+                    return
+        finally:
+            renderer.destroy()
+
+
 class CollisionBodyObservation(BaseObservation):
     """
     Render MetaDrive collision bodies from ego-relative pinhole cameras.
@@ -482,8 +623,8 @@ class CollisionBodyObservation(BaseObservation):
         self.controller = controller
         self.collector = collector
         if self._renderer is None:
-            self._renderer = _CollisionBodySceneRenderer(self.cameras)
-        self._renderer.set_ground(ground)
+            self._renderer = _CollisionBodyRenderThread(self.cameras)
+        self._renderer.set_ground(_snapshot_ground(ground))
 
         half_size = (
             np.asarray(
@@ -516,15 +657,45 @@ class CollisionBodyObservation(BaseObservation):
             raise RuntimeError(
                 "CollisionBodyObservation.observe() called before reset()"
             )
+        objects = self.collector()
+        scene_objects = {}
+        ego_object_id = None
+        for object_id, state in objects.items():
+            scene_object = state["controller"]
+            scene_objects[object_id] = {
+                "size": state["size"],
+                "transform": state["transform"],
+                "color": self._object_color(scene_object),
+            }
+            if scene_object is self.controller:
+                ego_object_id = object_id
+        if ego_object_id is None:
+            raise RuntimeError("Collision body observation collector did not include the ego controller")
         return self._renderer.render(
-            ego_controller=self.controller,
-            objects=self.collector(),
+            ego_transform=self.controller.transform,
+            objects=scene_objects,
+            ego_object_id=ego_object_id,
             show_ego=self._show_ego,
         )
 
+    @staticmethod
+    def _object_color(scene_object: Any) -> tuple[float, float, float, float]:
+        object_type = scene_object.metadrive_type
+        if MetaDriveType.is_vehicle(object_type):
+            color = _VEHICLE_COLOR
+        elif object_type == MetaDriveType.PEDESTRIAN:
+            color = _PEDESTRIAN_COLOR
+        elif object_type == MetaDriveType.CYCLIST:
+            color = _CYCLIST_COLOR
+        else:
+            raise ValueError(f"Unsupported collision body object type: {object_type}")
+        if scene_object.body.isStatic():
+            return tuple((channel + 1.0) * 0.5 for channel in color[:3]) + (color[3],)
+        return color
+
     def destroy(self) -> None:
         if self._renderer is not None:
-            self._renderer.destroy()
+            self._renderer.close()
         self._renderer = None
         self.controller = None
         self.collector = None

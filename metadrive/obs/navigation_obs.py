@@ -45,6 +45,7 @@ class NavigationObservation(BaseObservation, Randomizable):
 
         self.controller = controller
         self.trajdata_map = trajdata_map
+        self.location = trajdata_map.location
         self.init_state = init_state
         self.state = state
         self._clear_expert_reference()
@@ -70,6 +71,7 @@ class NavigationObservation(BaseObservation, Randomizable):
             'waypoint': self._path_xy,
             'cummulative_length': self._path_cumlen,
             'target_waypoint': target_waypoint,
+            'location': self.location,
         }
         if self.carla_style_target is not None:
             observation['carla_style_target'] = self._carla_target_waypoint(self._vehicle_xy(self.controller))
@@ -116,6 +118,7 @@ class NavigationObservation(BaseObservation, Randomizable):
         self._path_cumlen = None
         self.controller = None
         self.trajdata_map = None
+        self.location = None
         self.init_state = None
         self.state = None
         self._carla_route_xy = None

@@ -153,7 +153,9 @@ class VideoExporter:
             del container[0]
 
     def draw(self, image: np.ndarray, states: dict[str, Any], info: Any, action: Sequence[float]) -> None:
-        payload = extract_video_payload(image, states, info, action)
+        self.draw_payload(extract_video_payload(image, states, info, action))
+
+    def draw_payload(self, payload: dict[str, Any]) -> None:
         self._append_history(self.timestamp_history, payload["timestamp"])
         self._append_history(self.speed_history, payload["speed"])
         self._append_history(self.angular_velocity_history, payload["angular_velocity"])

@@ -22,10 +22,7 @@ message StepResponse {
 
 
 // Reset request
-message ResetRequest {
-    string transforms_json_path = 1;
-    string render_server_url = 2;  // HTTP address of Gaussian renderer
-}
+message ResetRequest {}
 
 // Reset response
 message ResetResponse {

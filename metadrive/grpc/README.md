@@ -38,7 +38,7 @@ from streetworld_grpc import control_pb2
 - **StepResponse**: Step response with reward, termination status, images, and info
 
 **service.proto** - Service definitions:
-- **ResetRequest**: Reset request with scene config path and render server URL
+- **ResetRequest**: Empty reset request
 - **ResetResponse**: Reset response with success status, scene name, and initial observation
 
 ### Service

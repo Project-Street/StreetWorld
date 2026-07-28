@@ -61,15 +61,9 @@ class GrpcClientEnv(gym.Env):
         seed: Optional[int] = None,
         options: Optional[Dict[str, Any]] = None,
     ) -> Tuple[Any, Dict[str, Any]]:
-        del seed
+        del seed, options
 
-        if options is None:
-            request = service_pb2.ResetRequest()
-        else:
-            request = service_pb2.ResetRequest(
-                transforms_json_path=options["transforms_json_path"],
-                render_server_url=options["render_server_url"],
-            )
+        request = service_pb2.ResetRequest()
 
         # Reset often includes heavy scene/model initialization, so allow a longer RPC deadline.
         response = self.stub.Reset(

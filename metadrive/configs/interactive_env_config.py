@@ -1,4 +1,4 @@
-WEB_ENV_CONFIG = dict(
+INTERACTIVE_ENV_CONFIG = dict(
     web_host="127.0.0.1",
     web_port=8080,
     video_output_dir="videos",
@@ -13,5 +13,6 @@ WEB_ENV_CONFIG = dict(
     eval_mode=True,
     eval_order=True,
     eval_repeat_per_scene=1,
-    start_web_server=True,
+    tui=False,
+    webui=True,
 )

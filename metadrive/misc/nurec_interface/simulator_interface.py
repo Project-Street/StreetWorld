@@ -17,12 +17,13 @@ from .nurec_parser import (
 logger = logging.getLogger(__name__)
 _NO_EXTRA = object()
 _DEFAULT_PINHOLE_LOGICAL_ID = "camera_front_tele_30fov"
+_DEFAULT_NUREC_ROOT = Path(__file__).resolve().parents[3] / "data/processed/benchmark/NuRec/sample_set/25.07_release"
 
 
 class SimulatorInterface:
     def __init__(
         self,
-        nurec_root: str | Path,
+        nurec_root: str | Path = _DEFAULT_NUREC_ROOT,
         zNear: float = 0.0001,
         zFar: float = 1000.0,
         grpc_host: str = "localhost",

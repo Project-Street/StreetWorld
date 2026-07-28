@@ -7,16 +7,12 @@ compiles the proto files if necessary.
 """
 
 import sys
-import os
 from pathlib import Path
 from typing import List, Tuple
-
-from grpc_tools import protoc
 
 # Determine package directories
 _PACKAGE_DIR = Path(__file__).parent.resolve()
 _PROTO_DIR = _PACKAGE_DIR / "proto"
-PROTO_INCLUDE = os.path.dirname(protoc.__file__) + '/_proto'
 
 def _find_proto_files() -> List[Path]:
     """Find all .proto files in the proto directory."""
@@ -50,13 +46,15 @@ def _check_compilation_needed(proto_file: Path) -> bool:
 def _compile_proto(proto_file: Path) -> bool:
     """Compile a proto file using grpc_tools.protoc."""
 
+    from grpc_tools import protoc
+
     pb2_file, pb2_grpc_file = _get_generated_files(proto_file)
 
     args = [
         "-I",
         str(_PROTO_DIR),
         "-I",
-        PROTO_INCLUDE,
+        str(Path(protoc.__file__).parent / "_proto"),
         "--python_out",
         str(_PACKAGE_DIR),
         "--grpc_python_out",
