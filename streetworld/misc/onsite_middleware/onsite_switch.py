@@ -109,6 +109,7 @@ class OnSiteSwitch:
         self._vts_map_module = None
         self._rlsl_map = None
         self._target_position_xodr = None
+        self._last_sent_roles = {}
         # Initialize channels
 
         self.initialize_channels()
@@ -489,6 +490,7 @@ class OnSiteSwitch:
             session_id = prepare_msg.session_id
             actor_id = prepare_msg.actor_id
             self.actor_id = actor_id
+            self._last_sent_roles = {}
             scene_name = self.parse_scene_name_from_archive_id(prepare_msg.archive_info.id)
 
             brief_data = json.loads(prepare_msg.archive_info.brief_data)
@@ -806,6 +808,7 @@ class OnSiteSwitch:
         role_states = self._extract_role_states_from_obs(obs)
         if self._is_actor_near_target_xodr(role_states[self.actor_id]):
             role_states = {self.actor_id: role_states[self.actor_id]}
+        missing_role_ids = self._last_sent_roles.keys() - role_states.keys()
 
         msg = PubRole()
         msg.session_id = str(session_id)
@@ -815,9 +818,20 @@ class OnSiteSwitch:
         msg.header.send_ts = int(time.time() * 1000)
         msg.header.seq_no = pub_role_seq
     
+        current_roles = {}
         for role_id, state in role_states.items():
             role = self._agent_state_to_single_role(role_id, state, last_received_pub_role, current_timestamp, pub_role_seq)
             msg.s_roles.append(role)
+            current_roles[role_id] = role
+
+        for role_id in missing_role_ids:
+            role = msg.s_roles.add()
+            role.CopyFrom(self._last_sent_roles[role_id])
+            role.box.bottom_center.x = 0.0
+            role.box.bottom_center.y = 0.0
+            role.box.bottom_center.z = 0.0
+            role.report_ts = ts_us // 1000
+            role.seq_no = pub_role_seq
 
         data = msg.SerializeToString()
         ret, put_ms = self._timed_put(self.channel_map["pubrole"].put, MT_PUBROLE, len(data), data)
@@ -827,6 +841,8 @@ class OnSiteSwitch:
 
         if ret != 0:
             logger.error(f"Failed to send PubRole, ret: {ret}")
+        if ret == 0 and ret_enc == 0:
+            self._last_sent_roles = current_roles
 
 
     def send_vehicle_feedback(self, obs, current_timestamp, last_received_feedback=None):

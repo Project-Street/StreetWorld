@@ -8,6 +8,7 @@ import re
 import signal
 import socket
 import subprocess
+import sys
 import time
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional, Tuple
@@ -113,9 +114,23 @@ class SimulatorInterface:
         self._simple_nurec_log_fp = _simple_nurec_log_path.open("a", encoding="utf-8", buffering=1)
 
         parent_pid = os.getpid()
+        simple_nurec_dir = Path(__file__).resolve().parents[3] / "simple-nurec-viewer"
+        simple_nurec_pythonpath = os.pathsep.join(
+            [
+                str(simple_nurec_dir),
+                str(simple_nurec_dir / "grpc"),
+            ]
+        )
+        env = os.environ.copy()
+        if env.get("PYTHONPATH"):
+            simple_nurec_pythonpath = os.pathsep.join([simple_nurec_pythonpath, env["PYTHONPATH"]])
+        env["PYTHONPATH"] = simple_nurec_pythonpath
+
         self._local_server_proc = subprocess.Popen(
             [
-                "simple-nurec",
+                sys.executable,
+                "-m",
+                "simple_nurec_viewer",
                 "server",
                 "--host",
                 self._grpc_host,
@@ -124,6 +139,7 @@ class SimulatorInterface:
             ],
             stdout=self._simple_nurec_log_fp,
             stderr=subprocess.STDOUT,
+            env=env,
             start_new_session=True,
             preexec_fn=_bind_child_to_parent(parent_pid),
         )
@@ -148,7 +164,16 @@ class SimulatorInterface:
 
     def load_metadata(
         self, cfg_path: str | Path
-    ) -> Tuple[str, Any, list[int], Dict[str, Dict[str, Any]], Dict[int, list[list[float]]], Dict[str, Dict[str, Any]], Optional[str]]:
+    ) -> Tuple[
+        str,
+        Any,
+        list[int],
+        Dict[str, Dict[str, Any]],
+        Dict[int, list[list[float]]],
+        Dict[str, Dict[str, Any]],
+        str,
+        list[list[float]],
+    ]:
         cfg_path = Path(cfg_path)
         self.ensure_scene_config(cfg_path)
         cfg = self._load_cfg(cfg_path)
@@ -172,7 +197,10 @@ class SimulatorInterface:
                 "size": obj.get("size", [4.5, 2.0, 1.5]),
                 "type": obj.get("type", "vehicle"),
             }
-        bk_ground_model_path = None
+        sim_world_to_map = compute_sim_world_to_xodr_map(
+            rig_data=rig,
+            xodr_path=Path(cfg["map_path"]),
+        )
         return (
             cfg["scene_name"],
             cfg,
@@ -180,7 +208,8 @@ class SimulatorInterface:
             camera_params,
             ego_poses,
             tracking_data,
-            bk_ground_model_path,
+            cfg["ground_mesh_path"],
+            sim_world_to_map.tolist(),
         )
 
     def ensure_scene_config(self, cfg_path: Path) -> None:
@@ -326,6 +355,7 @@ class SimulatorInterface:
         data["rig_trajectories_path"] = str(scene_dir / "rig_trajectories.json")
         data["sequence_tracks_path"] = str(scene_dir / "sequence_tracks.json")
         data["map_path"] = str(scene_dir / "map.xodr")
+        data["ground_mesh_path"] = str(scene_dir / "mesh_ground.ply")
         data["ckpt_path"] = str(scene_dir / "checkpoint.ckpt")
         data["ego_pose_path"] = str(ego_pose_path)
         data["trajectory_path"] = str(trajectory_path)

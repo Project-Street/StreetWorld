@@ -27,7 +27,7 @@ class ScenarioMapManager(BaseManager):
         self.loader = loader
         self.ground = None
 
-    def reset(self, config, scene_config, physics_world, scene_mesh_path, **kwargs):
+    def reset(self, config, scene_config, physics_world, scene_mesh_path, scene_mesh_transform, **kwargs):
         self.config = config
         self.current_sdc_route = None
         self.sdc_dest_point = None
@@ -49,6 +49,7 @@ class ScenarioMapManager(BaseManager):
             self.spawn_object(
                 MeshTerrain,
                 model_path=scene_mesh_path,
+                transform=scene_mesh_transform,
                 physics_world=physics_world,
                 random_seed=self.random_seed
             )
