@@ -14,13 +14,16 @@ import os
 import sys
 import time
 import traceback
+from pathlib import Path
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(PROJECT_ROOT))
 
 from rich.console import Console
 from rich.live import Live
 
 from streetworld.misc.onsite_middleware import OnSiteSwitch, OnSiteScenarioEnv, TERMINAL_TYPE, SIM_STATE
 from streetworld.manager.agent_manager import AgentState
-from streetworld.misc.nurec_interface.simulator_interface import SimulatorInterface
 from streetworld.onstite_config import ONSITE_DEFAULT_CONFIG
 from streetworld.utils.logger import setup_entrypoint_logging
 from streetworld.utils.updater import update_streetworld_if_needed
@@ -62,6 +65,8 @@ obs, info = None, None
 
 
 def run_launcher(args, top_bar_state: LauncherTopBarState):
+    from streetworld.misc.nurec_interface.simulator_interface import SimulatorInterface
+
     model = None
     env = None
     middleware = None

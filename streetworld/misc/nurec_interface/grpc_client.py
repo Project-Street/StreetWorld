@@ -1,18 +1,10 @@
 from __future__ import annotations
 
-import sys
-from pathlib import Path
 from typing import Any, Dict, Optional
 
 import grpc
 
-
-try:
-    from .simple_nurec_grpc import render_pb2, render_pb2_grpc
-except Exception as exc:  # pragma: no cover
-    raise ImportError(
-        "simple_nurec_grpc not available. Install grpc package in simple-nurec-viewer/grpc."
-    ) from exc
+from .simple_nurec_grpc import render_pb2, render_pb2_grpc
 
 
 class NurecGrpcClient:
