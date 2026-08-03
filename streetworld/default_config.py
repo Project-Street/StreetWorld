@@ -41,42 +41,42 @@ BASE_DEFAULT_CONFIG = dict(
                 stack_size=6,
                 cameras={ # an example of selfdefined camera config
                     'front_cam': {
-                        'offset': [0.5, 0, 1.6], # in ego frame (+x front)
+                        'offset': [0.5, 0, 1.0], # in ego frame (+x front)
                         'hpr': [0, 0, 0], # orientation
                         'H': 900,
                         'W': 1600,
                         'focal': 2500, # in pixel
                     },
                     'front_right_cam': {
-                        'offset': [0.3, -0.2, 1.6], # in ego frame (+x front)
+                        'offset': [0.3, -0.2, 1.0], # in ego frame (+x front)
                         'hpr': [-60, 0, 0], # orientation
                         'H': 900,
                         'W': 1600,
                         'focal': 2500, # in pixel
                     },
                     'front_left_cam': {
-                        'offset': [0.3, 0.2, 1.6], # in ego frame (+x front)
+                        'offset': [0.3, 0.2, 1.0], # in ego frame (+x front)
                         'hpr': [60, 0, 0], # orientation
                         'H': 900,
                         'W': 1600,
                         'focal': 2500, # in pixel
                     },
                     'back_cam': {
-                        'offset': [-0.5, 0, 1.6], # in ego frame (+x front)
+                        'offset': [-0.5, 0, 1.0], # in ego frame (+x front)
                         'hpr': [180, 0, 0], # orientation
                         'H': 900,
                         'W': 1600,
                         'focal': 2500, # in pixel
                     },
                     'back_left_cam': {
-                        'offset': [-0.3, 0.2, 1.6], # in ego frame (+x front)
+                        'offset': [-0.3, 0.2, 1.0], # in ego frame (+x front)
                         'hpr': [120, 0, 0], # orientation
                         'H': 900,
                         'W': 1600,
                         'focal': 2500, # in pixel
                     },
                     'back_right_cam': {
-                        'offset': [-0.3, -0.2, 1.6],
+                        'offset': [-0.3, -0.2, 1.0],
                         'hpr': [-120, 0, 0], # orientation
                         'H': 900,
                         'W': 1600,
