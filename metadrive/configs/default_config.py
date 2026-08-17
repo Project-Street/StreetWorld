@@ -66,6 +66,7 @@ BASE_DEFAULT_CONFIG = dict(
             discrete_throttle_dim=5,
             action_check=False,
         ),
+        warmup_step=None,
         # dont set it, the controller will be random vehicle every turn
         controller=DefaultVehicle,
         controller_config=dict(

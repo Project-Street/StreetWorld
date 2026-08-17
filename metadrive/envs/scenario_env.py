@@ -144,8 +144,8 @@ class ScenarioEnv(BaseEnv):
     def reset(self, seed: Union[None, int] = None, scene_id: Union[None, str] = None):
         self._stop_async_step_loop()
         self._reset_reward_trackers()
-        self.metric_tracker.reset()
         obs, info = super().reset(seed=seed, scene_id=scene_id)
+        self.metric_tracker.reset(warmup_step=self.agent_managers["actor"].warmup_step)
         self.metric_tracker.update(info, obs, self)
         return obs, info
 

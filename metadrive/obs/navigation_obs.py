@@ -6,6 +6,7 @@ from trajdata import VectorMap
 from metadrive.obs.observation_base import BaseObservation
 from metadrive.base_class.randomizable import Randomizable
 from metadrive.utils.navigation_utils import nearest_front_index
+from metadrive.utils.scenario_utils import vehicle_bottom_center
 
 lane_follow_length = 200.0
 
@@ -174,8 +175,9 @@ class NavigationObservation(BaseObservation, Randomizable):
             self._clear_expert_reference()
 
     def _build_lane_follow_path(self):
-        spawn_xyz = np.array(self.init_state["spawn_position"])
         spawn_yaw = float(self.init_state["spawn_yaw"])
+        spawn_transform = self.state[min(self.state)]["transform"]
+        spawn_xyz = vehicle_bottom_center(spawn_transform, self.controller.HEIGHT)
 
         xyzh = np.asarray([float(spawn_xyz[0]), float(spawn_xyz[1]), float(spawn_xyz[2]), spawn_yaw], dtype=np.float32)
         lanes = self.trajdata_map.get_current_lane(
@@ -211,8 +213,7 @@ class NavigationObservation(BaseObservation, Randomizable):
         for ts in sorted(self.state.keys()):
             frame = self.state[ts]
             timestamps.append(ts)
-            pos = frame["position"]
-            expert.append([float(pos[0]), float(pos[1])])
+            expert.append(vehicle_bottom_center(frame["transform"], self.controller.HEIGHT))
             headings.append(float(frame["heading_theta"]))
         if self.path_interval is None:
             anchors, anchor_headings = expert, headings
@@ -367,7 +368,10 @@ class NavigationObservation(BaseObservation, Randomizable):
     @staticmethod
     def _interpolate_path(points, source_axis, sample_axis, values=None, headings=None):
         sampled_points = np.stack(
-            [np.interp(sample_axis, source_axis, points[:, 0]), np.interp(sample_axis, source_axis, points[:, 1])],
+            [
+                np.interp(sample_axis, source_axis, points[:, dim])
+                for dim in range(points.shape[1])
+            ],
             axis=1,
         )
         sampled_values = None
@@ -413,13 +417,13 @@ class NavigationObservation(BaseObservation, Randomizable):
     def _snap_point_to_lane_center(self, point, heading):
         lane = self._lane_for_point(point, heading)
         if lane is None:
-            return np.asarray(point)
-        query = np.asarray([[point[0], point[1], 0.0, heading]])
+            return np.asarray(point)[:2]
+        query = np.asarray([[point[0], point[1], point[2], heading]])
         return lane.center.project_onto(query)[0, :2]
 
     def _lane_for_point(self, point, heading):
         assert isinstance(self.trajdata_map, VectorMap), "trajdata_map must be provided for snap_lane navigation type."
-        query = np.asarray([point[0], point[1], 0.0, heading])
+        query = np.asarray([point[0], point[1], point[2], heading])
         lanes = self.trajdata_map.get_current_lane(
             query,
             max_dist=self.current_lane_max_dist,

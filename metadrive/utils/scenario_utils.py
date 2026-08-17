@@ -23,6 +23,18 @@ MIN_LENGTH_RATIO = 0.8
 logger = get_logger()
 
 
+def vehicle_bottom_center(transform: np.ndarray, height: float) -> np.ndarray:
+    """Return the bottom-face center used for 3D lane-map queries.
+
+    ScenarioDataManager calibrates trajectory poses to the ego center, and
+    parse_object_state exposes ``transform[:3, 3]`` as ``state["position"]``.
+    XODR lane z is the road surface, so callers must pass the center 4x4 pose
+    and the controller's actual ``HEIGHT`` instead of querying with position.
+    """
+    transform = np.asarray(transform, dtype=np.float32)
+    return transform[:3, 3] - transform[:3, 2] * (float(height) / 2.0)
+
+
 def dict_recursive_remove_array_and_set(d):
     if isinstance(d, np.ndarray):
         return d.tolist()
@@ -216,7 +228,9 @@ def parse_object_state(poses, idx, check_last_state=True, include_z_position=Fal
 
     current_matrix = poses[ts_list[idx]]
 
-    # Extract position from translation column
+    # `position` is the center translation from the input 4x4 pose. Ego poses
+    # are calibrated to the ego center by ScenarioDataManager; XODR queries
+    # must instead call vehicle_bottom_center(pose, controller.HEIGHT).
     position = current_matrix[:3, 3]
     if not include_z_position:
         position = position[:2]
@@ -255,4 +269,3 @@ def parse_object_state(poses, idx, check_last_state=True, include_z_position=Fal
     }
 
     return ret
-

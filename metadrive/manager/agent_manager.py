@@ -6,8 +6,10 @@ from metadrive.component.vehicle.base_vehicle import BaseVehicle
 from metadrive.manager.base_manager import BaseManager
 from metadrive.obs.navigation_obs import NavigationObservation
 from metadrive.policy.idm_policy import IDMRouteInitializationError
+from metadrive.policy.expert_ilqr_policy import ExpertILQRPolicy
 from metadrive.policy.replay_policy import ReplayPolicy
 from metadrive.policy.trajectory_idm_policy import TrajectoryIDMPolicy
+from metadrive.utils.scenario_utils import vehicle_bottom_center
 logger = get_logger()
 
 
@@ -52,15 +54,22 @@ class AgentManager(BaseManager):
         self.step_manager = step_manager
         self.observer = None
         self.policy = None
+        self.expert_policy = None
         self.step_action = None
         self.trajectory = None
         self.init_state = None
         self.trajdata_map = None
         self.out_of_road_threshold = float(config.get("policy_config", {}).get("out_of_road_threshold", 5))
+        self.warmup_step = config.get("warmup_step")
         
     def lazy_init(self):
         self.observer = self.config['observer'](self.config['observer_config'])
         self.policy = self.config['policy'](step_manager=self.step_manager, config=self.config['policy_config'])
+        if self.warmup_step is not None:
+            self.expert_policy = ExpertILQRPolicy(
+                step_manager=self.step_manager,
+                config=self.config['policy_config'],
+            )
         self.INITIALIZED = True
         
     def reset(self, config=None, **kwargs):
@@ -83,7 +92,7 @@ class AgentManager(BaseManager):
 
         if not self.INITIALIZED:
             self.lazy_init()
-        
+
         self.controller = self._create_agent(**kwargs)
         self.state = AgentState.NOT_SPAWN
 
@@ -101,10 +110,14 @@ class AgentManager(BaseManager):
 
             self.policy.destroy()
             if expert_distance < 5.0:
-                self.policy = ReplayPolicy(step_manager=self.step_manager, config=self.config["policy_config"])
+                fallback_policy = ReplayPolicy(step_manager=self.step_manager, config=self.config["policy_config"])
             else:
-                self.policy = TrajectoryIDMPolicy(step_manager=self.step_manager, config=self.config["policy_config"])
+                fallback_policy = TrajectoryIDMPolicy(step_manager=self.step_manager, config=self.config["policy_config"])
+            self.policy = fallback_policy
             self.policy.reset(controller=self.controller, seed=self.generate_seed(), **kwargs)
+
+        if self.expert_policy is not None:
+            self.expert_policy.reset(controller=self.controller, seed=self.generate_seed(), **kwargs)
 
         if self._is_out_of_road():
             self.clear_all_objects()
@@ -116,8 +129,10 @@ class AgentManager(BaseManager):
 
         if isinstance(self.observer, NavigationObservation):
             self.policy.destination = self.observer.destination
+            if self.expert_policy is not None:
+                self.expert_policy.destination = self.observer.destination
 
-        if self.step_manager.key_step and math.isclose(self.policy.spawn_timestamp, self.step_manager.current_timestamp):
+        if self.step_manager.key_step and math.isclose(self.active_policy.spawn_timestamp, self.step_manager.current_timestamp):
             self.controller.attachDyWld()
         
         assert isinstance(self.get_action_spaces(), Space)
@@ -149,7 +164,7 @@ class AgentManager(BaseManager):
         if self.state != AgentState.ALIVE:
             return
 
-        action = self.policy.act(action=action, observation=self.last_observation)
+        action = self.active_policy.act(action=action, observation=self.last_observation)
         self.controller.move(action)
         return
 
@@ -158,7 +173,7 @@ class AgentManager(BaseManager):
         Derive and cache the agent's discrete state.
         """
         # Not spawned yet
-        if self.state == AgentState.NOT_SPAWN and self.step_manager.key_step and self.policy.is_spawned:
+        if self.state == AgentState.NOT_SPAWN and self.step_manager.key_step and self.active_policy.is_spawned:
             self.controller.attachDyWld()
             self.state = AgentState.ALIVE
             return
@@ -195,15 +210,15 @@ class AgentManager(BaseManager):
                 self.state = AgentState.OUT_OF_ROAD
                 return
 
-            if self.policy.is_arrive:
+            if self.active_policy.is_arrive:
                 self.clear_all_objects()
                 self.state = AgentState.SUCCESS
                 return
 
     def _is_out_of_road(self):
         if self.trajdata_map is not None:
-            position = np.asarray(self.controller.position, dtype=np.float32)
-            lanes = self.trajdata_map.get_lanes_within(position[:3], self.out_of_road_threshold)
+            map_position = vehicle_bottom_center(self.controller.transform, self.controller.HEIGHT)
+            lanes = self.trajdata_map.get_lanes_within(map_position, self.out_of_road_threshold)
             if len(lanes) == 0:
                 return True
             return False
@@ -265,17 +280,18 @@ class AgentManager(BaseManager):
         length = self.controller.LENGTH
         width = self.controller.WIDTH
         height = self.controller.HEIGHT
+        map_position = vehicle_bottom_center(transform, height)
         current_lane = None
         covered_lanes = None
         if self.trajdata_map is not None:
             xyzh = np.asarray(
-                [float(position[0]), float(position[1]), float(position[2]), float(self.controller.heading_theta)],
+                [float(map_position[0]), float(map_position[1]), float(map_position[2]), float(self.controller.heading_theta)],
                 dtype=np.float32,
             )
             lanes = self.trajdata_map.get_current_lane(xyzh, max_heading_error=np.inf, max_dist=2.25)
             if len(lanes) > 0:
                 current_lane = lanes[0]
-            covered_lanes = self._covered_lanes(position, float(self.controller.heading_theta), length, width)
+            covered_lanes = self._covered_lanes(map_position, float(self.controller.heading_theta), length, width)
         if self.is_static:
             velocity = np.zeros(3, dtype=np.float32)
             acceleration = np.zeros(3, dtype=np.float32)
@@ -302,12 +318,12 @@ class AgentManager(BaseManager):
             "type": self.controller.metadrive_type
         }
 
-    def _covered_lanes(self, position, heading_theta, length, width):
+    def _covered_lanes(self, map_position, heading_theta, length, width):
         half_length = float(length) * 0.5
         half_width = float(width) * 0.5
         forward = np.asarray([math.cos(heading_theta), math.sin(heading_theta)], dtype=np.float32)
         left = np.asarray([-forward[1], forward[0]], dtype=np.float32)
-        center = np.asarray(position, dtype=np.float32)[:2]
+        center = np.asarray(map_position, dtype=np.float32)[:2]
         corners = [
             center + forward * half_length + left * half_width,
             center + forward * half_length - left * half_width,
@@ -318,7 +334,7 @@ class AgentManager(BaseManager):
         covered_lane_ids = set()
         for corner in corners:
             xyzh = np.asarray(
-                [float(corner[0]), float(corner[1]), float(position[2]), heading_theta],
+                [float(corner[0]), float(corner[1]), float(map_position[2]), heading_theta],
                 dtype=np.float32,
             )
             for lane in self.trajdata_map.get_current_lane(xyzh, max_heading_error=np.inf, max_dist=2.25):
@@ -331,7 +347,7 @@ class AgentManager(BaseManager):
         return self.observer.observation_space
 
     def get_action_spaces(self):
-        return self.policy.get_input_space()
+        return self.active_policy.get_input_space()
 
     def get_state(self):
         ret = super().get_state()
@@ -346,13 +362,26 @@ class AgentManager(BaseManager):
         self.clear_all_objects()
         self.observer.destroy()
         self.policy.destroy()
+        if self.expert_policy is not None:
+            self.expert_policy.destroy()
 
         self.controller = None
         self.observer = None
         self.policy = None
+        self.expert_policy = None
 
         self.INITIALIZED = False
 
     @property
     def is_static(self):
-        return hasattr(self.policy, "static") and self.policy.static
+        return hasattr(self.active_policy, "static") and self.active_policy.static
+
+    @property
+    def active_policy(self):
+        if self.is_warmup_step:
+            return self.expert_policy
+        return self.policy
+
+    @property
+    def is_warmup_step(self):
+        return self.expert_policy is not None and self.step_manager.eposide_step < self.warmup_step

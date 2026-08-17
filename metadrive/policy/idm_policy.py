@@ -8,6 +8,7 @@ import numpy as np
 from metadrive.policy.base_policy import BasePolicy
 from metadrive.type import MetaDriveType
 from metadrive.utils.PID import PIDController
+from metadrive.utils.scenario_utils import vehicle_bottom_center
 
 
 class IDMRouteInitializationError(RuntimeError):
@@ -189,7 +190,6 @@ class IDMPolicy(BasePolicy):
             raise ValueError("IDMPolicy requires trajdata_map from ScenarioMapManager.")
 
         self.trajdata_map = trajdata_map
-        spawn_position = np.asarray(init_state["spawn_position"], dtype=np.float32)
         spawn_yaw = float(init_state["spawn_yaw"])
         self.heading_pid.reset()
         self.lateral_pid.reset()
@@ -201,7 +201,7 @@ class IDMPolicy(BasePolicy):
         self.route_lane_ids = []
         self.route_road_ids = []
         if not self.static:
-            start_lane = self._lane_for_pose(spawn_position, spawn_yaw, route_initialization=True)
+            start_lane = self._lane_for_pose(self.controller.transform, spawn_yaw, route_initialization=True)
             target_lane = self._target_lane_from_trajectory(state)
             self.route_road_ids = self._build_route_road_ids(
                 self._road_id_for_lane(start_lane),
@@ -292,9 +292,10 @@ class IDMPolicy(BasePolicy):
             ret.append(obj_state)
         return ret
 
-    def _lane_for_pose(self, xyz, heading_theta=None, route_initialization=False):
+    def _lane_for_pose(self, center_transform, heading_theta=None, route_initialization=False):
         heading = 0.0 if heading_theta is None else float(heading_theta)
-        xyzh = np.asarray([float(xyz[0]), float(xyz[1]), float(xyz[2]), heading], dtype=np.float32)
+        map_xyz = vehicle_bottom_center(center_transform, self.controller.HEIGHT)
+        xyzh = np.asarray([float(map_xyz[0]), float(map_xyz[1]), float(map_xyz[2]), heading], dtype=np.float32)
         lanes = self.trajdata_map.get_current_lane(
             xyzh,
             max_dist=self.current_lane_max_dist,
@@ -312,7 +313,7 @@ class IDMPolicy(BasePolicy):
         if len(trajectory) == 0:
             raise IDMRouteInitializationError(f"IDMPolicy cannot build route from empty trajectory for {self.controller.name}.")
         state = trajectory[max(trajectory.keys())]
-        return self._lane_for_pose(state["position"], float(state["heading_theta"]), route_initialization=True)
+        return self._lane_for_pose(state["transform"], float(state["heading_theta"]), route_initialization=True)
 
     def _build_route_road_ids(self, start_road_id: str, target_road_id: str) -> List[str]:
         route = self._road_bfs(start_road_id, target_road_id)
