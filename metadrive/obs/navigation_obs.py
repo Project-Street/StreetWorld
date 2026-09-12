@@ -46,7 +46,7 @@ class NavigationObservation(BaseObservation, Randomizable):
 
         self.controller = controller
         self.trajdata_map = trajdata_map
-        self.location = trajdata_map.location
+        self.location = trajdata_map.location if trajdata_map is not None else None
         self.init_state = init_state
         self.state = state
         self._clear_expert_reference()

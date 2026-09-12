@@ -6,6 +6,8 @@ from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
 import numpy as np
+from trajdata import VectorMap
+from trajdata.dataset_specific.xodr.vector_map_export import populate_vector_map_from_xodr
 
 from .official_grpc_client import NurecOfficialGrpcClient
 from .nurec_parser import (
@@ -94,7 +96,7 @@ class SimulatorInterface:
             sim_world_to_map.tolist(),
         )
 
-    def load_model(self, scene_id: str | Path) -> None:
+    def load_model(self, scene_id: str | Path) -> VectorMap:
         cfg = self._scene_cfgs[str(self._resolve_scene_root(scene_id))]
         rig = json.loads(Path(cfg["rig_trajectories_path"]).read_text(encoding="utf-8"))
         sim_world_to_map = compute_sim_world_to_xodr_map(
@@ -107,7 +109,14 @@ class SimulatorInterface:
             "map_to_sim_world": np.linalg.inv(sim_world_to_map),
         }
         self._cached_object_poses = {}
-        return None
+
+        vector_map = VectorMap(f"xodr:{cfg['scene_uuid']}")
+        populate_vector_map_from_xodr(
+            vector_map,
+            Path(cfg["map_path"]).read_text(encoding="utf-8"),
+        )
+        vector_map.compute_search_indices()
+        return vector_map
 
     def update_scene(self, timestamp: int, object_poses: Dict[str, Any]) -> None:
         self._cached_ts = int(timestamp)

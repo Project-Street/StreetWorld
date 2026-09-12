@@ -16,7 +16,6 @@ from metadrive.configs.epona_config import EPONA_CONFIG
 from metadrive.configs.genad_config import GENAD_CONFIG
 from metadrive.configs.momad_config import MOMAD_CONFIG
 from metadrive.configs.nurec_config import NUREC_CONFIG
-from metadrive.configs.omnidrive_config import OMNIDRIVE_CONFIG
 from metadrive.configs.openemma_config import OPENEMMA_CONFIG
 from metadrive.configs.opendrivevla_config import OPENDRIVEVLA_CONFIG
 from metadrive.configs.sparsedrive_config import SPARSEDRIVE_CONFIG
@@ -45,7 +44,6 @@ AD_POLICY_CONFIGS = {
     "epona": EPONA_CONFIG,
     "genad": GENAD_CONFIG,
     "momad": MOMAD_CONFIG,
-    "omnidrive": OMNIDRIVE_CONFIG,
     "openemma": OPENEMMA_CONFIG,
     "opendrivevla": OPENDRIVEVLA_CONFIG,
     "sparsedrive": SPARSEDRIVE_CONFIG,

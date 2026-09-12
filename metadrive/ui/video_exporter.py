@@ -133,10 +133,12 @@ class VideoExporter:
         history_size: int = 200,
         output_dir: str = "videos",
         fps: float = 40.0,
+        hud: bool = True,
     ):
         self.history_size = int(history_size)
         self.output_dir = Path(output_dir)
         self.fps = float(fps)
+        self.hud = bool(hud)
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.timestamp_history: list[int] = []
         self.speed_history: list[float] = []
@@ -156,6 +158,9 @@ class VideoExporter:
         self.draw_payload(extract_video_payload(image, states, info, action))
 
     def draw_payload(self, payload: dict[str, Any]) -> None:
+        if not self.hud:
+            self.episode_frames.append(np.ascontiguousarray(payload["image"]))
+            return
         self._append_history(self.timestamp_history, payload["timestamp"])
         self._append_history(self.speed_history, payload["speed"])
         self._append_history(self.angular_velocity_history, payload["angular_velocity"])

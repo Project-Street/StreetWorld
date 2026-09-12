@@ -176,7 +176,6 @@ class AgentManager(BaseManager):
         if self.state == AgentState.NOT_SPAWN and self.step_manager.key_step and self.active_policy.is_spawned:
             self.controller.attachDyWld()
             self.state = AgentState.ALIVE
-            return
 
         if self.state == AgentState.ALIVE:
             # crash checks from controller

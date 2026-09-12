@@ -58,7 +58,11 @@ def make_interactive_env(env_class):
                 video_fps = 1e6 / (
                     float(self.config["physics_world_step_size"]) * float(self.config["decision_repeat"])
                 )
-                self._video_exporter = VideoExporter(output_dir=self.config["video_output_dir"], fps=video_fps)
+                self._video_exporter = VideoExporter(
+                    output_dir=self.config["video_output_dir"],
+                    fps=video_fps,
+                    hud=self.config.get("video_hud", True),
+                )
             if self.config["webui"]:
                 self._web_ui = WebUI(
                     host=self.config["web_host"],
