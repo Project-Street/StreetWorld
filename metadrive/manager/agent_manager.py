@@ -204,7 +204,7 @@ class AgentManager(BaseManager):
                 self.state = AgentState.OUT_OF_STEP
                 return
 
-            if self._is_out_of_road():
+            if self.step_manager.key_step and self._is_out_of_road():
                 self.clear_all_objects()
                 self.state = AgentState.OUT_OF_ROAD
                 return

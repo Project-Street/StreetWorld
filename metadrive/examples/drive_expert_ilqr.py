@@ -8,7 +8,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from easydrive.models.scenes.simulator_interface import SimulatorInterface
+from st_renderer import SimulatorInterface
 
 from metadrive.config import Config
 from metadrive.constants import HELP_MESSAGE

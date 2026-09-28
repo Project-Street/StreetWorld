@@ -16,7 +16,6 @@ class AssemblyObservation(BaseObservation):
         'gaussian': {
             'observer_class': GaussianObservation,
             'clip_rgb': False,
-            'stack_size': 3,
         },
         'navigation': {
             'observer_class': NavigationObservation,

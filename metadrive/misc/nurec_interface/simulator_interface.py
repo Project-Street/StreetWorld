@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Optional, Sequence, Tuple
 
 import numpy as np
 from trajdata import VectorMap
@@ -17,7 +17,6 @@ from .nurec_parser import (
 )
 
 logger = logging.getLogger(__name__)
-_NO_EXTRA = object()
 _DEFAULT_PINHOLE_LOGICAL_ID = "camera_front_tele_30fov"
 _DEFAULT_NUREC_ROOT = Path(__file__).resolve().parents[3] / "data/processed/benchmark/NuRec/sample_set/25.07_release"
 
@@ -130,57 +129,52 @@ class SimulatorInterface:
             object_poses_render[str(object_id)] = map_to_sim_world @ pose_np
         self._cached_object_poses = object_poses_render
 
-    def render(self, K: Any, H: int, W: int, extrinsics: Any, extra: Any = _NO_EXTRA) -> Any:
+    def render(
+        self,
+        K: Any,
+        H: Any,
+        W: Any,
+        extrinsics: Any,
+        extra: Optional[Sequence[Any]] = None,
+    ) -> list[np.ndarray]:
         if self._cached_ts is None:
             raise ValueError("render() called before update_scene(); timestamp is required")
         if self._scene_model is None:
             raise RuntimeError("Scene model is not initialized. load_model() must be called before render().")
 
-        k_mat = np.asarray(K, dtype=np.float64)
-        if k_mat.shape != (3, 3):
-            raise ValueError(f"K must have shape (3, 3), got {k_mat.shape}")
-
-        map_to_camera = np.asarray(extrinsics, dtype=np.float64)
-
-        sim_world_to_camera = map_to_camera @ self._scene_model["sim_world_to_map"]
-        sensor_pose = NurecOfficialGrpcClient.pose_from_matrix(np.linalg.inv(sim_world_to_camera))
+        k_mats = np.asarray(K, dtype=np.float64)
+        map_to_cameras = np.asarray(extrinsics, dtype=np.float64)
+        extras = [None] * len(k_mats) if extra is None else extra
         dynamic_objects = [
             NurecOfficialGrpcClient.dynamic_object_from_matrix(track_id, pose)
             for track_id, pose in self._cached_object_poses.items()
         ]
 
-        if extra is _NO_EXTRA:
-            return self._grpc.render_pinhole_rgb(
-                scene_id=self._scene_model["scene_id"],
-                camera_name=_DEFAULT_PINHOLE_LOGICAL_ID,
-                K=k_mat,
-                height=int(H),
-                width=int(W),
-                timestamp_us=int(self._cached_ts),
-                sensor_pose=sensor_pose,
-                dynamic_objects=dynamic_objects,
+        cameras = []
+        for k_mat, height, width, map_to_camera, camera_extra in zip(
+            k_mats,
+            H,
+            W,
+            map_to_cameras,
+            extras,
+        ):
+            sim_world_to_camera = map_to_camera @ self._scene_model["sim_world_to_map"]
+            sensor_pose = NurecOfficialGrpcClient.pose_from_matrix(np.linalg.inv(sim_world_to_camera))
+            cameras.append(
+                {
+                    "camera_name": _DEFAULT_PINHOLE_LOGICAL_ID
+                    if camera_extra is None else str(camera_extra["logical_id"]),
+                    "K": k_mat,
+                    "height": int(height),
+                    "width": int(width),
+                    "sensor_pose": sensor_pose,
+                    "extra": camera_extra,
+                }
             )
-        if extra.get("type") == "ftheta":
-            return self._grpc.render_ftheta_rgb(
-                scene_id=self._scene_model["scene_id"],
-                camera_name=extra["logical_id"],
-                extra=extra,
-                height=int(H),
-                width=int(W),
-                timestamp_us=int(self._cached_ts),
-                sensor_pose=sensor_pose,
-                dynamic_objects=dynamic_objects,
-            )
-        if extra.get("type") not in (None, "pinhole"):
-            raise ValueError(f"Unsupported camera extra.type: {extra['type']}")
-        return self._grpc.render_pinhole_rgb(
+        return self._grpc.render_batch_rgb(
             scene_id=self._scene_model["scene_id"],
-            camera_name=extra["logical_id"],
-            K=k_mat,
-            height=int(H),
-            width=int(W),
+            cameras=cameras,
             timestamp_us=int(self._cached_ts),
-            sensor_pose=sensor_pose,
             dynamic_objects=dynamic_objects,
         )
 

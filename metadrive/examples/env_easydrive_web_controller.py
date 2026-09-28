@@ -7,7 +7,7 @@ import argparse
 import os
 import time
 
-from easydrive.models.scenes.simulator_interface import SimulatorInterface
+from st_renderer import SimulatorInterface
 from metadrive.config import Config
 from metadrive.envs.scenario_env import ScenarioEnv
 from metadrive.envs.interactive_env import make_interactive_env

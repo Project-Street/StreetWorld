@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Iterable
+from typing import Any, Iterable, Sequence
 
 import cv2
 import grpc
@@ -22,19 +22,14 @@ class NurecOfficialGrpcClient:
         self._channel = grpc.insecure_channel(f"{host}:{int(port)}", options=options)
         self._stub = sensorsim_pb2_grpc.SensorsimServiceStub(self._channel)
 
-    def render_pinhole_rgb(
-        self,
-        *,
-        scene_id: str,
+    @staticmethod
+    def _pinhole_camera_spec(
         camera_name: str,
         K: np.ndarray,
         height: int,
         width: int,
-        timestamp_us: int,
-        sensor_pose: common_pb2.Pose,
-        dynamic_objects: Iterable[sensorsim_pb2.DynamicObject],
-    ) -> np.ndarray:
-        camera_intrinsics = sensorsim_pb2.CameraSpec(
+    ) -> sensorsim_pb2.CameraSpec:
+        return sensorsim_pb2.CameraSpec(
             logical_id=str(camera_name),
             resolution_h=int(height),
             resolution_w=int(width),
@@ -49,28 +44,9 @@ class NurecOfficialGrpcClient:
                 thin_prism_coeffs=[0.0] * 4,
             ),
         )
-        return self._render_rgb(
-            scene_id=scene_id,
-            camera_intrinsics=camera_intrinsics,
-            height=height,
-            width=width,
-            timestamp_us=timestamp_us,
-            sensor_pose=sensor_pose,
-            dynamic_objects=dynamic_objects,
-        )
 
-    def render_ftheta_rgb(
-        self,
-        *,
-        scene_id: str,
-        camera_name: str,
-        extra: dict,
-        height: int,
-        width: int,
-        timestamp_us: int,
-        sensor_pose: common_pb2.Pose,
-        dynamic_objects: Iterable[sensorsim_pb2.DynamicObject],
-    ) -> np.ndarray:
+    @staticmethod
+    def _ftheta_camera_spec(extra: dict) -> sensorsim_pb2.CameraSpec:
         if extra["type"] != "ftheta":
             raise ValueError(f"extra.type must be 'ftheta', got: {extra['type']}")
         params = extra["parameters"]
@@ -97,7 +73,7 @@ class NurecOfficialGrpcClient:
                     linear_d=float(linear_cde[1]),
                     linear_e=float(linear_cde[2]),
                 )
-        )
+            )
         camera_kwargs = {}
         intrinsics_width, intrinsics_height = params["resolution"]
         if params.get("external_distortion_parameters") is not None:
@@ -113,7 +89,7 @@ class NurecOfficialGrpcClient:
                 horizontal_poly_inverse=[float(v) for v in distortion_params["horizontal_poly_inverse"]],
                 vertical_poly_inverse=[float(v) for v in distortion_params["vertical_poly_inverse"]],
             )
-        camera_intrinsics = sensorsim_pb2.CameraSpec(
+        return sensorsim_pb2.CameraSpec(
             logical_id=str(extra["logical_id"]),
             resolution_h=int(intrinsics_height),
             resolution_w=int(intrinsics_width),
@@ -121,43 +97,59 @@ class NurecOfficialGrpcClient:
             ftheta_param=ftheta_param,
             **camera_kwargs,
         )
-        return self._render_rgb(
-            scene_id=scene_id,
-            camera_intrinsics=camera_intrinsics,
-            height=height,
-            width=width,
-            timestamp_us=timestamp_us,
-            sensor_pose=sensor_pose,
-            dynamic_objects=dynamic_objects,
-        )
 
-    def _render_rgb(
+    def render_batch_rgb(
         self,
         *,
         scene_id: str,
-        camera_intrinsics: sensorsim_pb2.CameraSpec,
-        height: int,
-        width: int,
+        cameras: Sequence[dict[str, Any]],
         timestamp_us: int,
-        sensor_pose: common_pb2.Pose,
         dynamic_objects: Iterable[sensorsim_pb2.DynamicObject],
-    ) -> np.ndarray:
-        pose_pair = sensorsim_pb2.PosePair(start_pose=sensor_pose, end_pose=sensor_pose)
-        request = sensorsim_pb2.RGBRenderRequest(
-            scene_id=str(scene_id),
-            resolution_h=int(height),
-            resolution_w=int(width),
-            camera_intrinsics=camera_intrinsics,
-            frame_start_us=int(timestamp_us),
-            frame_end_us=int(timestamp_us) + 1,
-            sensor_pose=pose_pair,
-            dynamic_objects=list(dynamic_objects),
-            image_format=sensorsim_pb2.JPEG,
-            image_quality=95.0,
-            insert_ego_mask=False,
+    ) -> list[np.ndarray]:
+        dynamic_objects = list(dynamic_objects)
+        items = []
+        for camera in cameras:
+            height = int(camera["height"])
+            width = int(camera["width"])
+            extra = camera["extra"]
+            camera_name = str(camera["camera_name"])
+            if extra is None:
+                camera_intrinsics = self._pinhole_camera_spec(camera_name, camera["K"], height, width)
+            elif extra.get("type") == "ftheta":
+                camera_intrinsics = self._ftheta_camera_spec(extra)
+            elif extra.get("type") in (None, "pinhole"):
+                camera_intrinsics = self._pinhole_camera_spec(camera_name, camera["K"], height, width)
+            else:
+                raise ValueError(f"Unsupported camera extra.type: {extra['type']}")
+            request = sensorsim_pb2.RGBRenderRequest(
+                scene_id=str(scene_id),
+                resolution_h=height,
+                resolution_w=width,
+                camera_intrinsics=camera_intrinsics,
+                frame_start_us=int(timestamp_us),
+                frame_end_us=int(timestamp_us) + 1,
+                sensor_pose=sensorsim_pb2.PosePair(
+                    start_pose=camera["sensor_pose"], end_pose=camera["sensor_pose"]
+                ),
+                dynamic_objects=dynamic_objects,
+                image_format=sensorsim_pb2.JPEG,
+                image_quality=95.0,
+                insert_ego_mask=False,
+            )
+            items.append(sensorsim_pb2.BatchRGBRenderRequestItem(camera_name=camera_name, request=request))
+
+        response = self._stub.batch_render_rgb(
+            sensorsim_pb2.BatchRGBRenderRequest(items=items),
+            timeout=self._timeout_s,
         )
-        response = self._stub.render_rgb(request, timeout=self._timeout_s)
-        encoded = np.frombuffer(response.image_bytes, dtype=np.uint8)
+        return [
+            self._decode_rgb(item.result.image_bytes, camera["height"], camera["width"])
+            for item, camera in zip(response.items, cameras)
+        ]
+
+    @staticmethod
+    def _decode_rgb(image_bytes: bytes, height: int, width: int) -> np.ndarray:
+        encoded = np.frombuffer(image_bytes, dtype=np.uint8)
         bgr = cv2.imdecode(encoded, cv2.IMREAD_COLOR)
         if bgr is None:
             raise ValueError("NuRec render_rgb returned undecodable image bytes")

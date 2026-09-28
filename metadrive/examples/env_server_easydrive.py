@@ -77,6 +77,7 @@ def build_environment(
     tui: bool,
 ):
     config_values = {
+        "backend": backend,
         "scene_ids": list(scene_ids),
         "random_scenario": False,
         "async_mode": async_mode,
@@ -89,11 +90,11 @@ def build_environment(
         "tui": tui,
     }
     if backend == "easydrive":
-        from easydrive.models.scenes.simulator_interface import SimulatorInterface as EasyDriveSimulatorInterface
+        from st_renderer import SimulatorInterface
 
         config = Config(resolve_ad_policy_config(ad_policy_config))
         config.merge_from(config_values)
-        return InteractiveScenarioEnv(EasyDriveSimulatorInterface(), config)
+        return InteractiveScenarioEnv(SimulatorInterface(), config)
     if backend == "nurec":
         config = Config(config_values)
         config.merge_from(NUREC_CONFIG)

@@ -37,7 +37,6 @@ BASE_DEFAULT_CONFIG = dict(
             gaussian = dict(
                 observer_class=GaussianObservation,
                 clip_rgb=False,
-                stack_size=1,
             ),
             navigation = dict(
                 observer_class=NavigationObservation,

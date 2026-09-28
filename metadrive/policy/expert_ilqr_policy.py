@@ -1,7 +1,6 @@
 import numpy as np
 
 from metadrive.policy.env_input_ilqr_policy import EnvInputILQRPolicy
-from metadrive.utils.navigation_utils import nearest_front_index
 
 
 class ExpertILQRPolicy(EnvInputILQRPolicy):
@@ -16,6 +15,8 @@ class ExpertILQRPolicy(EnvInputILQRPolicy):
         if self.trajectory_steps < 1:
             raise ValueError("trajectory_steps must be positive")
         self._expert_path = None
+        self._expert_timestamps = None
+        self._arrived = False
 
     def reset(self, controller, seed, state, init_state, **kwargs):
         super().reset(controller, seed, state, init_state, **kwargs)
@@ -38,6 +39,8 @@ class ExpertILQRPolicy(EnvInputILQRPolicy):
             dtype=np.int64,
         )
         resample_timestamps = np.append(resample_timestamps, expert_timestamps[-1])
+        self._expert_timestamps = resample_timestamps
+        self._arrived = False
         self._expert_path = np.column_stack(
             (
                 np.interp(resample_timestamps, expert_timestamps, expert_points[:, 0]),
@@ -46,13 +49,15 @@ class ExpertILQRPolicy(EnvInputILQRPolicy):
         ).astype(np.float32)
 
     def act(self, action=None, *args, **kwargs):
-        front_idx = self._front_index()
-        if front_idx == len(self._expert_path):
-            if self.step_manager.current_timestamp < self.terminate_timestamp:
-                raise RuntimeError("ExpertILQRPolicy found no forward expert waypoint")
+        front_idx = int(np.searchsorted(self._expert_timestamps, self.step_manager.current_timestamp, side="right"))
+        future_path = self._expert_path[front_idx:]
+        ego_xy = np.asarray(self.controller.position, dtype=np.float32)[:2]
+        heading_vec = np.asarray(self.controller.heading, dtype=np.float32)[:2]
+        if len(future_path) == 0 or not np.any((future_path - ego_xy) @ heading_vec >= 0.0):
+            self._arrived = True
             return self.last_action
 
-        expert_waypoints = self._expert_path[front_idx : front_idx + self.trajectory_steps]
+        expert_waypoints = future_path[: self.trajectory_steps]
         if len(expert_waypoints) == 1:
             expert_waypoints = np.vstack((expert_waypoints, expert_waypoints))
         world_to_ego = np.linalg.inv(self._xy_transform())
@@ -64,9 +69,4 @@ class ExpertILQRPolicy(EnvInputILQRPolicy):
 
     @property
     def is_arrive(self):
-        return self.step_manager.current_timestamp >= self.terminate_timestamp
-
-    def _front_index(self):
-        ego_xy = np.asarray(self.controller.position, dtype=np.float32)[:2]
-        heading_vec = np.asarray(self.controller.heading, dtype=np.float32)[:2]
-        return nearest_front_index(self._expert_path, ego_xy, heading_vec)
+        return self._arrived or self.step_manager.current_timestamp >= self.terminate_timestamp

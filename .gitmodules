@@ -4,3 +4,10 @@
 [submodule "UniAD_SIM"]
 	path = UniAD_SIM
 	url = https://github.com/hyzhou404/UniAD_SIM.git
+[submodule "submodules/st-renderer"]
+	path = submodules/st-renderer
+	url = git@github.com:lllcccfff/st-renderer.git
+[submodule "submodules/fast-gauss-paral"]
+	path = submodules/fast-gauss-paral
+	url = git@github.com:lllcccfff/fast-gauss-paral.git
+	branch = codex/fastgauss-batch-opt
