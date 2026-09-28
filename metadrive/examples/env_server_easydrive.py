@@ -4,8 +4,6 @@
 from __future__ import annotations
 
 import argparse
-import copy
-from pathlib import Path
 from typing import Sequence
 
 from metadrive.config import Config
@@ -26,11 +24,7 @@ from metadrive.configs.vad_config import VAD_CONFIG
 from metadrive.envs.env_servicer import serve
 from metadrive.envs.scenario_env import ScenarioEnv
 from metadrive.envs.interactive_env import make_interactive_env
-from metadrive.examples.easydrive_tui import (
-    BACKENDS,
-    resolve_scene_config,
-    select_catalog_scenes,
-)
+from metadrive.examples.easydrive_tui import select_catalog_scenes
 from metadrive.misc.nurec_interface.simulator_interface import SimulatorInterface as NurecSimulatorInterface
 
 
@@ -65,6 +59,7 @@ def resolve_ad_policy_config(name: str) -> dict:
 def build_environment(
     *,
     backend: str,
+    dataset: str,
     scene_ids: Sequence[str],
     ad_policy_config: str,
     nurec_grpc_host: str,
@@ -94,7 +89,7 @@ def build_environment(
 
         config = Config(resolve_ad_policy_config(ad_policy_config))
         config.merge_from(config_values)
-        return InteractiveScenarioEnv(SimulatorInterface(), config)
+        return InteractiveScenarioEnv(SimulatorInterface(dataset), config)
     if backend == "nurec":
         config = Config(config_values)
         config.merge_from(NUREC_CONFIG)
@@ -111,8 +106,6 @@ def build_environment(
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="StreetWorld EasyDrive/NuRec environment server")
-    parser.add_argument("-c", "--scene-config", type=Path, help="Scene config directory or YAML list")
-    parser.add_argument("--backend", choices=BACKENDS, help="Backend required with --scene-config")
     parser.add_argument("--host", default="127.0.0.1", help="StreetWorld gRPC bind address")
     parser.add_argument("--port", type=int, default=50052, help="StreetWorld gRPC bind port")
     parser.add_argument("--web-host", default="127.0.0.1", help="WebUI bind address")
@@ -121,7 +114,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--ad-policy-config", type=str.lower, default="default", choices=sorted(AD_POLICY_CONFIGS))
     parser.add_argument("--video-output-dir", default="videos", help="Directory for environment video recordings")
     parser.add_argument("--async-mode", action="store_true", help="Run simulation in fixed-period asynchronous mode")
-    parser.add_argument("--no-tui", action="store_true", help="Disable the Rich interface; requires --scene-config")
     parser.add_argument("--nurec-grpc-host", default="127.0.0.1", help="NuRec renderer address")
     parser.add_argument("--nurec-grpc-port", type=int, default=8080, help="NuRec renderer port")
     parser.add_argument("--nurec-grpc-timeout", type=float, default=600.0, help="NuRec renderer timeout in seconds")
@@ -130,25 +122,17 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    if args.scene_config is None:
-        if args.no_tui:
-            raise ValueError("--no-tui requires --scene-config.")
-        if args.backend is not None:
-            raise ValueError("--backend is determined by catalog mode; omit it when --scene-config is omitted.")
-        try:
-            selection = select_catalog_scenes()
-        except KeyboardInterrupt:
-            return 130
-        backend = selection.backend
-        scene_ids = list(selection.scenes)
-    else:
-        if args.backend is None:
-            raise ValueError("--backend is required when --scene-config is supplied.")
-        backend = args.backend
-        scene_ids = resolve_scene_config(args.scene_config, backend)
+    try:
+        selection = select_catalog_scenes()
+    except KeyboardInterrupt:
+        return 130
+    backend = selection.backend
+    dataset = selection.dataset.lower()
+    scene_ids = list(selection.scenes)
 
     env = build_environment(
         backend=backend,
+        dataset=dataset,
         scene_ids=scene_ids,
         ad_policy_config=args.ad_policy_config,
         nurec_grpc_host=args.nurec_grpc_host,
@@ -158,7 +142,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         web_port=args.web_port,
         video_output_dir=args.video_output_dir,
         async_mode=args.async_mode,
-        tui=not args.no_tui,
+        tui=True,
     )
     serve(env, host=args.host, port=args.port, max_workers=args.max_workers)
     return 0

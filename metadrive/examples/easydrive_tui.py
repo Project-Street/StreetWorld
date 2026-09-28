@@ -23,7 +23,6 @@ from rich.text import Text
 from metadrive.ui.tui import RuntimeSnapshot
 
 
-BACKENDS = ("easydrive", "nurec")
 CATALOGS = {
     "nuScenes": ("easydrive", "nuScenes.yaml"),
     "Waymo": ("easydrive", "Waymo.yaml"),
@@ -76,23 +75,6 @@ def filter_catalog_scenes(
     return scenes or []
 
 
-def resolve_scene_config(scene_config: str | Path, backend: str) -> list[str]:
-    config_path = Path(scene_config).expanduser().resolve()
-    if backend == "nurec":
-        return yaml.safe_load(config_path.read_text(encoding="utf-8"))
-    if config_path.is_dir():
-        return [str(path) for path in sorted(config_path.iterdir()) if path.is_file() and path.suffix.lower() in YAML_SUFFIXES]
-    return _easydrive_paths(yaml.safe_load(config_path.read_text(encoding="utf-8")))
-
-
-def _easydrive_paths(scenes: Sequence[str]) -> list[str]:
-    paths = [Path(scene).expanduser().resolve() for scene in scenes]
-    for path in paths:
-        if not path.is_file():
-            raise FileNotFoundError(f"EasyDrive scene config does not exist: {path}")
-    return [str(path) for path in paths]
-
-
 def select_catalog_scenes() -> CatalogSelection:
     """Interactively select a dataset and tags, returning a non-empty queue."""
     dataset_page = _SelectionPage(
@@ -121,8 +103,8 @@ def select_catalog_scenes() -> CatalogSelection:
                 selected_tags = {category: tuple(page.selected) for category, page in zip(catalog, tag_pages, strict=True)}
                 scenes = filter_catalog_scenes(catalog, selected_tags)
                 if scenes:
-                    resolved_scenes = scenes if backend == "nurec" else _easydrive_paths(scenes)
-                    return CatalogSelection(dataset, backend, tuple(resolved_scenes))
+                    scene_names = scenes if backend == "nurec" else [Path(scene).stem for scene in scenes]
+                    return CatalogSelection(dataset, backend, tuple(scene_names))
                 retry = _run_selection_page(
                     _SelectionPage(detail="No scenarios match the selected tags", options=())
                 )

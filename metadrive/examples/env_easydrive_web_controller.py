@@ -4,8 +4,8 @@ Run every EasyDrive scenario with browser WASD control.
 """
 
 import argparse
-import os
 import time
+from pathlib import Path
 
 from st_renderer import SimulatorInterface
 from metadrive.config import Config
@@ -17,15 +17,13 @@ InteractiveScenarioEnv = make_interactive_env(ScenarioEnv)
 
 
 def list_scene_ids(scene_config_directory: str) -> list[str]:
-    return [
-        os.path.join(scene_config_directory, config_file)
-        for config_file in sorted(os.listdir(scene_config_directory))
-    ]
+    return [path.stem for path in sorted(Path(scene_config_directory).glob("*.yaml"))]
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run EasyDrive scenarios with WebUI manual control")
     parser.add_argument("-c", "--scene-config-directory", required=True, help="Scenario config directory")
+    parser.add_argument("--dataset", required=True, choices=("nuscenes", "waymo"))
     parser.add_argument("--web-host", default="127.0.0.1", help="WebUI bind address")
     parser.add_argument("--web-port", type=int, default=8080, help="WebUI port")
     parser.add_argument("--video-output-dir", default="videos", help="Directory for env video recordings")
@@ -44,7 +42,7 @@ def main() -> int:
             "eval_repeat_per_scene": 1,
         }
     )
-    env = InteractiveScenarioEnv(SimulatorInterface(), config)
+    env = InteractiveScenarioEnv(SimulatorInterface(args.dataset), config)
     try:
         while True:
             env.reset()
