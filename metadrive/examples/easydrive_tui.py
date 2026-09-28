@@ -322,7 +322,7 @@ def _metric_table(title: str, metrics: Mapping[str, float]) -> Table:
     table = Table(title=title, expand=True, border_style=PANEL_BORDER_STYLE, show_header=False)
     table.add_column("Metric")
     table.add_column("Value", justify="right")
-    for metric in ("NC", "DAC", "TTC", "COM", "RC", "ProgressSpeed"):
+    for metric in ("NC", "DAC", "TTC", "COM", "RC", "RE"):
         if metric in metrics:
             table.add_row(metric, f"{metrics[metric]:.4f}")
     return table

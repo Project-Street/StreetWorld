@@ -289,7 +289,7 @@
         <p class="plotTitle">policy metric</p>
         <table class="metricTable">
           <thead>
-            <tr><th></th><th>NC</th><th>DAC</th><th>TTC</th><th>COM</th><th>RC</th><th>ProgressSpeed</th></tr>
+            <tr><th></th><th>NC</th><th>DAC</th><th>TTC</th><th>COM</th><th>RC</th><th>RE</th></tr>
           </thead>
           <tbody id="metricTableBody"></tbody>
         </table>
@@ -436,7 +436,7 @@
         return;
       }
       document.body.classList.add('metricOnly');
-      const columns = ['NC', 'DAC', 'TTC', 'COM', 'RC', 'ProgressSpeed'];
+      const columns = ['NC', 'DAC', 'TTC', 'COM', 'RC', 'RE'];
       Object.entries(metrics).forEach(([name, values]) => {
         const tr = document.createElement('tr');
         const label = document.createElement('td');

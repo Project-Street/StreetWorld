@@ -94,10 +94,10 @@ class ScenarioMetricTracker:
             or self.route_start_time is None
             or self.route_end_time is None
         ):
-            raise RuntimeError("ProgressSpeed requires route progress and timestamp samples.")
+            raise RuntimeError("RE requires route progress and timestamp samples.")
         elapsed = self.route_end_time - self.route_start_time
         if elapsed <= 0.0:
-            raise RuntimeError(f"ProgressSpeed requires positive elapsed time, got {elapsed}.")
+            raise RuntimeError(f"RE requires positive elapsed time, got {elapsed}.")
         remaining_route_length = self.route_length - self.route_start_progress
         if remaining_route_length <= 0.0:
             raise RuntimeError(f"RC requires positive remaining route length, got {remaining_route_length}.")
@@ -110,7 +110,7 @@ class ScenarioMetricTracker:
             "RC": float(
                 np.clip((self.route_end_progress - self.route_start_progress) / remaining_route_length, 0.0, 1.0)
             ),
-            "ProgressSpeed": float((self.route_end_progress - self.route_start_progress) / elapsed),
+            "RE": float((self.route_end_progress - self.route_start_progress) / elapsed),
         }
         self.completed_scene_metrics.append(metric)
         return metric

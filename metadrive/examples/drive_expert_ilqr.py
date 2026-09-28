@@ -35,6 +35,7 @@ EXPERT_CONFIG = {
 def main() -> None:
     parser = argparse.ArgumentParser(description="Closed-loop expert-following ScenarioEnv driver")
     parser.add_argument("--scene_config_directory", type=str, required=True)
+    parser.add_argument("--dataset", required=True, choices=("nuscenes", "waymo"))
     parser.add_argument("--max-steps", type=int, default=1000)
     parser.add_argument("--warmup-step", type=int, default=None)
     parser.add_argument("--gui", action=argparse.BooleanOptionalAction, default=True)
@@ -43,9 +44,9 @@ def main() -> None:
 
     print(HELP_MESSAGE)
     scene_config_directory = Path(args.scene_config_directory).resolve()
-    scene_ids = [str(path) for path in sorted(scene_config_directory.glob("*.yaml"))]
+    scene_ids = [path.stem for path in sorted(scene_config_directory.glob("*.yaml"))]
 
-    model = SimulatorInterface()
+    model = SimulatorInterface(args.dataset)
     config = Config(EXPERT_CONFIG)
     config.merge_from(
         {
