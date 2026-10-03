@@ -140,6 +140,4 @@ BASE_DEFAULT_CONFIG = dict(
     only_reset_when_replay=False,
     # If True, when creating and replaying object trajectories, use the same ID as in dataset
     force_reuse_object_name=False,
-
-    hotload=False,
 )

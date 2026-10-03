@@ -45,29 +45,24 @@ class ScenarioDataManager(BaseManager):
 
         self.start_scenario_index = self.base_config.get("start_scenario_index", 0)
         self.random_scenario = self.base_config.get("random_scenario", True)
-        self.hotload = bool(self.base_config.get("hotload", False))
         self.current_scene_index = self.start_scenario_index - 1
 
         # for multi-worker
         # self._scenarios = {}
+        self.num_scenarios = len(self.scene_ids)
 
-        if self.hotload:
-            self.metadata = {}
-            self.num_scenarios = len(scene_ids)
-        else:
-            self.read_metadata(loader)
 
         # sort scenario for curriculum training
         self.scenario_difficulty = None
         # self.sort_scenarios()
 
-
         # stat
         # self.coverage = [0 for _ in range(self.num_scenarios)]
+
     def _post_process_config(self, config):
         pass
 
-    def _load_single_scene(self, scene_id):
+    def _load_scene(self, scene_id):
         (
             timestamp_range,
             camera_params,
@@ -76,7 +71,7 @@ class ScenarioDataManager(BaseManager):
             scene_mesh_path,
             scene_mesh_transform,
         ) = self.loader(scene_id)
-        ego_poses, camera_params = self._calibrate_ego_center(ego_poses, camera_params)
+        ego_poses, camera_params = self._calibrate_ego_z(ego_poses, camera_params)
         metadata = self.restructure_metadata(
             scene_id=scene_id,
             timestamp_range=timestamp_range,
@@ -95,10 +90,10 @@ class ScenarioDataManager(BaseManager):
             return float(vehicle_size[2])
         return float(actor_config["controller"].DEFAULT_HEIGHT)
 
-    def _calibrate_ego_center(self, ego_poses, camera_params):
-        ego_center_height = float(self.base_config.get("ego_center_height", 0))
+    def _calibrate_ego_z(self, ego_poses, camera_params):
+        ego_z_height = float(self.base_config.get("ego_z_height", 0))
         ego_origin_delta = np.eye(4, dtype=np.float32)
-        ego_origin_delta[2, 3] = self._ego_vehicle_height() / 2 - ego_center_height
+        ego_origin_delta[2, 3] = self._ego_vehicle_height() / 2 - ego_z_height
 
         calibrated_ego_poses = {
             int(timestamp): (np.asarray(pose, dtype=np.float32) @ ego_origin_delta).astype(np.float32)
@@ -127,24 +122,6 @@ class ScenarioDataManager(BaseManager):
         self.remain_queue = [idx for _ in range(repeat_per_scene) for idx in range(self.num_scenarios)]  # Create a queue of scenario indices based on repeat_per_scene
         self.random_scenario = not order
         self.eval_mode = True
-
-    def read_metadata(self, loader):
-        self.metadata = {}
-        self.num_scenarios = 0
-        for scene_id in self.scene_ids:
-            metadata = self._load_single_scene(scene_id)
-            self.metadata[scene_id] = metadata
-            self.num_scenarios += 1
-
-    def hotload_scene(self, scene_id):
-        if scene_id in self.scene_ids:
-            return self.scene_ids.index(scene_id)
-        metadata = self._load_single_scene(scene_id)
-        self.scene_ids.append(scene_id)
-        self.metadata[scene_id] = metadata
-        self.num_scenarios = len(self.scene_ids)
-        scene_index = self.num_scenarios - 1
-        return scene_index
 
     def restructure_metadata(self, scene_id, timestamp_range, camera_params, ego_poses, participants):
         init_state, agent_state = {}, {}
@@ -228,10 +205,7 @@ class ScenarioDataManager(BaseManager):
                 raise LookupError("No more scenarios to evaluate.")
             
         elif scene_id is not None:
-            if self.hotload:
-                self.current_scene_index = self.hotload_scene(scene_id)
-            else:
-                self.current_scene_index = self.scene_ids.index(scene_id)
+            self.current_scene_index = self.scene_ids.index(scene_id)
         elif self.random_scenario:
             self.current_scene_index = self.np_random.randint(0, self.num_scenarios)
         else:
@@ -242,7 +216,9 @@ class ScenarioDataManager(BaseManager):
         config_dict=self.current_config["actor_config"]
         config_dict["controller"] = config_dict.get("controller", random_vehicle_type(self.np_random)) 
 
-        current_metadata = self.get_current_scenario_data()
+        scene_id = self.scene_ids[self.current_scene_index]
+        self.current_metadata = self._load_scene(scene_id)
+        current_metadata = self.current_metadata
         ego_poses = current_metadata['ego_poses']
         # average_ego_height =  np.mean([pose[2][3] for pose in ego_poses.values()])
         start_ts = current_metadata['timestamp_range'][0]
@@ -258,20 +234,7 @@ class ScenarioDataManager(BaseManager):
         #     start_ts=start_ts
         # )
     def get_current_scenario_data(self):
-        return self.get_scenario_data(self.current_scene_index)
-
-    def get_scenario_data(self, i, should_copy=False):
-        assert 0 <= i < self.num_scenarios, \
-            "scenario index exceeds range, scenario index: {}, worker_index: {}".format(i, self.worker_index)
-        scene_id = self.scene_ids[i]
-        if self.hotload and scene_id not in self.metadata:
-            self.hotload_scene(scene_id)
-        return self.metadata[scene_id]
-
-    @property
-    def current_scenario_length(self):
-        timestamp_range = self.get_current_scenario_data()['timestamp_range']
-        return timestamp_range[1] - timestamp_range[0]
+        return self.current_metadata
 
     def sort_scenarios(self):
         """

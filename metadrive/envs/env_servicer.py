@@ -40,10 +40,20 @@ class EnvServicer(service_pb2_grpc.EnvServiceServicer):
     def __init__(self, env):
         self.env = env
         self._lock = threading.Lock()
+        self._headless_gl_context = None
+
+    def _initialize_headless_gl_context(self) -> None:
+        if self.env.config.get("backend") == "easydrive" and self._headless_gl_context is None:
+            from fast_gauss.egl_utils import eglContextManager
+            import fast_gauss.gl_utils
+
+            self._headless_gl_context = eglContextManager()
+            fast_gauss.gl_utils.eglctx = self._headless_gl_context
 
     def Reset(self, request: service_pb2.ResetRequest, context) -> service_pb2.ResetResponse:
         with self._lock:
             try:
+                self._initialize_headless_gl_context()
                 obs, reset_info = self.env.reset()
             except LookupError as exc:
                 if str(exc) != "No more scenarios to evaluate.":

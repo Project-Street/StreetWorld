@@ -168,14 +168,16 @@ class AgentManager(BaseManager):
         self.controller.move(action)
         return
 
+    def initialize_state(self):
+        if self.state == AgentState.NOT_SPAWN and self.step_manager.key_step and self.active_policy.is_spawned:
+            self.controller.attachDyWld()
+            self.state = AgentState.ALIVE
+
     def update_state(self):
         """
         Derive and cache the agent's discrete state.
         """
-        # Not spawned yet
-        if self.state == AgentState.NOT_SPAWN and self.step_manager.key_step and self.active_policy.is_spawned:
-            self.controller.attachDyWld()
-            self.state = AgentState.ALIVE
+        self.initialize_state()
 
         if self.state == AgentState.ALIVE:
             # crash checks from controller

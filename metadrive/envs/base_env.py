@@ -256,7 +256,10 @@ class BaseEnv(gym.Env):
         print("=======>>> Reset scenario: {}, seed: {}".format(self.scene_id, self.current_seed))
 
         for mgr_n, manager in self.agent_managers.items() :
-            manager.update_state()
+            if mgr_n == "actor":
+                manager.initialize_state()
+            else:
+                manager.update_state()
         self._update_scene()
 
         step_infos = {}
