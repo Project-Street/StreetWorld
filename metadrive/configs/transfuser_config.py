@@ -1,6 +1,7 @@
 NUSCENES_CAMERA_FOCAL = 760.0
 
 TRANSFUSER_CONFIG = dict(
+    image_layout=[["FRONT_LEFT", "FRONT", "FRONT_RIGHT"]],
     project_trajectory_on_camera="FRONT",
     actor_config=dict(
         observer_config=dict(

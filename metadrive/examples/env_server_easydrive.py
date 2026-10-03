@@ -7,20 +7,10 @@ import argparse
 from typing import Sequence
 
 from metadrive.config import Config
-from metadrive.configs.alpamayo_config import ALPAMAYO_CONFIG
-from metadrive.configs.autovla_config import AUTOVLA_CONFIG
-from metadrive.configs.diffusiondrive_config import DIFFUSIONDRIVE_CONFIG
+from metadrive.configs.default_policy_config import DEFAULT_POLICY_CONFIG_0_5S
 from metadrive.configs.epona_config import EPONA_CONFIG
-from metadrive.configs.genad_config import GENAD_CONFIG
-from metadrive.configs.momad_config import MOMAD_CONFIG
 from metadrive.configs.nurec_config import NUREC_CONFIG
-from metadrive.configs.openemma_config import OPENEMMA_CONFIG
-from metadrive.configs.opendrivevla_config import OPENDRIVEVLA_CONFIG
-from metadrive.configs.sparsedrive_config import SPARSEDRIVE_CONFIG
-from metadrive.configs.stp3_config import STP3_CONFIG
 from metadrive.configs.transfuser_config import TRANSFUSER_CONFIG
-from metadrive.configs.uniad_config import UNIAD_CONFIG
-from metadrive.configs.vad_config import VAD_CONFIG
 from metadrive.envs.env_servicer import serve
 from metadrive.envs.scenario_env import ScenarioEnv
 from metadrive.envs.interactive_env import make_interactive_env
@@ -30,21 +20,21 @@ from metadrive.misc.nurec_interface.simulator_interface import SimulatorInterfac
 
 InteractiveScenarioEnv = make_interactive_env(ScenarioEnv)
 AD_POLICY_CONFIGS = {
-    "alpamayo1": ALPAMAYO_CONFIG,
-    "alpamayo1_5": ALPAMAYO_CONFIG,
-    "autovla": AUTOVLA_CONFIG,
-    "default": {},
-    "diffusiondrive": DIFFUSIONDRIVE_CONFIG,
+    "alpamayo1": DEFAULT_POLICY_CONFIG_0_5S,
+    "alpamayo1_5": DEFAULT_POLICY_CONFIG_0_5S,
+    "autovla": DEFAULT_POLICY_CONFIG_0_5S,
+    "default": DEFAULT_POLICY_CONFIG_0_5S,
+    "diffusiondrive": DEFAULT_POLICY_CONFIG_0_5S,
     "epona": EPONA_CONFIG,
-    "genad": GENAD_CONFIG,
-    "momad": MOMAD_CONFIG,
-    "openemma": OPENEMMA_CONFIG,
-    "opendrivevla": OPENDRIVEVLA_CONFIG,
-    "sparsedrive": SPARSEDRIVE_CONFIG,
-    "stp3": STP3_CONFIG,
+    "genad": DEFAULT_POLICY_CONFIG_0_5S,
+    "momad": DEFAULT_POLICY_CONFIG_0_5S,
+    "openemma": DEFAULT_POLICY_CONFIG_0_5S,
+    "opendrivevla": DEFAULT_POLICY_CONFIG_0_5S,
+    "sparsedrive": DEFAULT_POLICY_CONFIG_0_5S,
+    "stp3": DEFAULT_POLICY_CONFIG_0_5S,
     "transfuser": TRANSFUSER_CONFIG,
-    "uniad": UNIAD_CONFIG,
-    "vad": VAD_CONFIG,
+    "uniad": DEFAULT_POLICY_CONFIG_0_5S,
+    "vad": DEFAULT_POLICY_CONFIG_0_5S,
 }
 
 

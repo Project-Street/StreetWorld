@@ -1,8 +1,10 @@
+from copy import deepcopy
+
 from metadrive.obs.navigation_obs import NavigationObservation
 from metadrive.policy.env_input_ilqr_policy import EnvInputILQRPolicy
 
 
-UNIAD_CONFIG = dict(
+DEFAULT_POLICY_CONFIG_0_5S = dict(
     decision_repeat=25,
     project_trajectory_on_camera="FRONT",
     actor_config=dict(
@@ -27,3 +29,7 @@ UNIAD_CONFIG = dict(
         ),
     ),
 )
+
+DEFAULT_POLICY_CONFIG_0_1S = deepcopy(DEFAULT_POLICY_CONFIG_0_5S)
+DEFAULT_POLICY_CONFIG_0_1S["decision_repeat"] = 5
+DEFAULT_POLICY_CONFIG_0_1S["actor_config"]["policy_config"]["control_dt"] = 0.1
