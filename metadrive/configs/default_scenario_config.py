@@ -55,9 +55,6 @@ SCENARIO_ENV_CONFIG = dict(
     ttc_safe_bonus_min_speed=0.5,
     ttc_safe_bonus_min_progress=0.05,
     living_cost=0.05,
-    anti_stall_window=30,
-    enable_anti_stall_truncation=True,
-
     # ===== Cost Scheme =====
     crash_vehicle_cost=1.0,
     crash_object_cost=1.0,
@@ -76,5 +73,5 @@ SCENARIO_ENV_CONFIG = dict(
 
     # ===== Episode Bonus =====
     success_bonus=75.0,
-    max_step=150,
+    max_step=200,
 )

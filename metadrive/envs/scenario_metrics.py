@@ -51,7 +51,7 @@ class ScenarioMetricTracker:
         self.route_end_time = None
 
     def update(self, info: Dict[str, Any], obs: Dict[str, Any], env) -> None:
-        if int(info.get("episode_length", 0)) <= self.warmup_step:
+        if int(info.get("episode_length", 0)) < self.warmup_step:
             return
         self.collision |= info["reason"] in CRASH_REASONS
 
@@ -99,17 +99,20 @@ class ScenarioMetricTracker:
         if elapsed <= 0.0:
             raise RuntimeError(f"RE requires positive elapsed time, got {elapsed}.")
         remaining_route_length = self.route_length - self.route_start_progress
-        if remaining_route_length <= 0.0:
-            raise RuntimeError(f"RC requires positive remaining route length, got {remaining_route_length}.")
+        if remaining_route_length < 0.0:
+            raise RuntimeError(f"RC remaining route length cannot be negative, got {remaining_route_length}.")
+        if remaining_route_length == 0.0:
+            route_completion = 1.0
+        else:
+            completed_route_length = self.route_end_progress - self.route_start_progress
+            route_completion = float(np.clip(completed_route_length / remaining_route_length, 0.0, 1.0))
 
         metric = {
             "NC": 0.0 if self.collision else 1.0,
             "DAC": self.dac_hits / self.dac_total,
             "TTC": float(np.mean(self.ttc_flags)),
             "COM": self.com_hits / self.com_total,
-            "RC": float(
-                np.clip((self.route_end_progress - self.route_start_progress) / remaining_route_length, 0.0, 1.0)
-            ),
+            "RC": route_completion,
             "RE": float((self.route_end_progress - self.route_start_progress) / elapsed),
         }
         self.completed_scene_metrics.append(metric)

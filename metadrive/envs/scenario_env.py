@@ -88,16 +88,6 @@ class ScenarioEnv(BaseEnv):
             done = True
             self.logger.debug(msg("max step"), extra={"log_once": True})
 
-        stall_truncate = False
-        if not done and self._stall_truncate_flag:
-            state_info = AgentState.OUT_OF_STEP
-            done = True
-            stall_truncate = True
-        if done:
-            self._stall_truncate_flag = False
-            if stall_truncate:
-                self.logger.debug(msg("anti_stall_truncation"), extra={"log_once": True})
-
         # # log data to curriculum manager
         # self.engine.curriculum_manager.log_episode(
         #     done_info[TerminationState.SUCCESS], vehicle.navigation.route_completion
@@ -115,7 +105,6 @@ class ScenarioEnv(BaseEnv):
                 ep_stall_steps_count=self._episode_counters.get("stall_steps", 0),
                 ep_ttc_warning_steps_count=self._episode_counters.get("ttc_warn_steps", 0),
                 collision_happened=int(self._episode_counters.get("collision", False)),
-                anti_stall_truncated=int(stall_truncate),
             )
         return done, info
 
@@ -162,8 +151,6 @@ class ScenarioEnv(BaseEnv):
     def _reset_reward_trackers(self):
         self._last_progress_value = None
         self._last_progress_idx = None
-        self._stall_counter = 0
-        self._stall_truncate_flag = False
         self._episode_reward_sums = dict(
             progress=0.0,
             ttc=0.0,
@@ -365,13 +352,6 @@ class ScenarioEnv(BaseEnv):
             self._episode_counters["ttc_warn_steps"] += 1
         if stalled:
             self._episode_counters["stall_steps"] += 1
-            self._stall_counter += 1
-        else:
-            self._stall_counter = 0
-        if self.config.get("enable_anti_stall_truncation", True):
-            stall_window = max(int(self.config.get("anti_stall_window", 25)), 1)
-            if self._stall_counter >= stall_window:
-                self._stall_truncate_flag = True
 
         reward_components = {
             "living_cost": living_cost,
