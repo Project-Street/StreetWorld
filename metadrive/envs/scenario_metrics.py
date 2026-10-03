@@ -51,8 +51,19 @@ class ScenarioMetricTracker:
         self.route_end_time = None
 
     def update(self, info: Dict[str, Any], obs: Dict[str, Any], env) -> None:
-        if int(info.get("episode_length", 0)) < self.warmup_step:
+        episode_length = env.episode_lengths
+        if episode_length < self.warmup_step:
             return
+
+        self.route_progress = env._last_progress_value
+        self.route_length = obs["navigation"]["cummulative_length"][-1]
+        timestamp = info["relative_timestamp"] * 1e-6
+        if episode_length == self.warmup_step:
+            # The handoff frame anchors RC/RE but is not a model-controlled sample.
+            self.route_start_progress = self.route_progress
+            self.route_start_time = timestamp
+            return
+
         self.collision |= info["reason"] in CRASH_REASONS
 
         states = obs["states"]
@@ -61,68 +72,36 @@ class ScenarioMetricTracker:
             self.dac_hits += 1
 
         ttc = info["ttc"]
-        self.ttc_flags.append(1.0 if ttc is None or float(ttc) >= self.ttc_threshold else 0.0)
+        self.ttc_flags.append(1.0 if ttc is None or ttc >= self.ttc_threshold else 0.0)
 
-        acceleration = np.asarray(states["accelerate"], dtype=np.float32).reshape(-1)
-        angular_velocity = np.asarray(states["angular_velocity"], dtype=np.float32)
-        acceleration_norm = float(np.linalg.norm(acceleration[:2]))
+        acceleration_norm = np.linalg.norm(states["accelerate"][:2])
         self.com_total += 1
-        if acceleration_norm <= self.accel_threshold and abs(float(angular_velocity[2])) <= self.yaw_acc_threshold:
+        if acceleration_norm <= self.accel_threshold and abs(states["angular_velocity"][2]) <= self.yaw_acc_threshold:
             self.com_hits += 1
 
-        self.route_progress = float(env._last_progress_value)
-        self.route_length = float(np.asarray(obs["navigation"]["cummulative_length"], dtype=np.float32)[-1])
-        timestamp = float(info["relative_timestamp"]) * 1e-6
-        if self.route_start_progress is None:
-            self.route_start_progress = self.route_progress
-            self.route_start_time = timestamp
         self.route_end_progress = self.route_progress
         self.route_end_time = timestamp
 
     def finalize(self) -> Dict[str, float]:
-        if self.dac_total == 0:
-            raise RuntimeError("DAC has no samples.")
-        if not self.ttc_flags:
-            raise RuntimeError("TTC has no samples.")
-        if self.com_total == 0:
-            raise RuntimeError("COM has no samples.")
-        if self.route_length <= 0.0:
-            raise RuntimeError("RC route length must be positive.")
-        if (
-            self.route_start_progress is None
-            or self.route_end_progress is None
-            or self.route_start_time is None
-            or self.route_end_time is None
-        ):
-            raise RuntimeError("RE requires route progress and timestamp samples.")
-        elapsed = self.route_end_time - self.route_start_time
-        if elapsed <= 0.0:
-            raise RuntimeError(f"RE requires positive elapsed time, got {elapsed}.")
+        completed_route_length = self.route_end_progress - self.route_start_progress
         remaining_route_length = self.route_length - self.route_start_progress
-        if remaining_route_length < 0.0:
-            raise RuntimeError(f"RC remaining route length cannot be negative, got {remaining_route_length}.")
-        if remaining_route_length == 0.0:
-            route_completion = 1.0
-        else:
-            completed_route_length = self.route_end_progress - self.route_start_progress
-            route_completion = float(np.clip(completed_route_length / remaining_route_length, 0.0, 1.0))
+        elapsed = self.route_end_time - self.route_start_time
 
-        metric = {
-            "NC": 0.0 if self.collision else 1.0,
-            "DAC": self.dac_hits / self.dac_total,
-            "TTC": float(np.mean(self.ttc_flags)),
-            "COM": self.com_hits / self.com_total,
-            "RC": route_completion,
-            "RE": float((self.route_end_progress - self.route_start_progress) / elapsed),
-        }
+        with np.errstate(divide="raise", invalid="raise"):
+            metric = {
+                "NC": 0.0 if self.collision else 1.0,
+                "DAC": self.dac_hits / self.dac_total,
+                "TTC": np.mean(self.ttc_flags),
+                "COM": self.com_hits / self.com_total,
+                "RC": np.clip(completed_route_length / remaining_route_length, 0.0, 1.0),
+                "RE": completed_route_length / elapsed,
+            }
         self.completed_scene_metrics.append(metric)
         return metric
 
     def get_average_metric(self) -> Dict[str, float]:
-        if not self.completed_scene_metrics:
-            raise RuntimeError("No completed scene metrics.")
         keys = self.completed_scene_metrics[0].keys()
         return {
-            key: float(np.mean([metric[key] for metric in self.completed_scene_metrics]))
+            key: np.mean([metric[key] for metric in self.completed_scene_metrics])
             for key in keys
         }
