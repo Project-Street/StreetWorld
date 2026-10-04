@@ -1,6 +1,6 @@
-[submodule "rl_framework"]
-	path = rl_framework
-	url = git@github.com:CHJK-reinforce/RLframework_AD.git
+[submodule "policy_launcher"]
+	path = policy_launcher
+	url = git@github.com:lllcccfff/policy-launcher.git
 [submodule "UniAD_SIM"]
 	path = UniAD_SIM
 	url = https://github.com/hyzhou404/UniAD_SIM.git
