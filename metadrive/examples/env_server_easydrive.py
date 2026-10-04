@@ -7,43 +7,27 @@ import argparse
 from typing import Sequence
 
 from metadrive.config import Config
+from metadrive.configs.autovla_config import AUTOVLA_CONFIG
 from metadrive.configs.default_policy_config import DEFAULT_POLICY_CONFIG_0_5S
 from metadrive.configs.epona_config import EPONA_CONFIG
 from metadrive.configs.nurec_config import NUREC_CONFIG
+from metadrive.configs.openemma_config import OPENEMMA_CONFIG
 from metadrive.configs.transfuser_config import TRANSFUSER_CONFIG
 from metadrive.envs.env_servicer import serve
 from metadrive.envs.scenario_env import ScenarioEnv
 from metadrive.envs.interactive_env import make_interactive_env
-from metadrive.examples.easydrive_tui import select_catalog_scenes
 from metadrive.misc.nurec_interface.simulator_interface import SimulatorInterface as NurecSimulatorInterface
+from metadrive.ui.scene_selector import select_catalog_scenes
 
 
 InteractiveScenarioEnv = make_interactive_env(ScenarioEnv)
 AD_POLICY_CONFIGS = {
-    "alpamayo1": DEFAULT_POLICY_CONFIG_0_5S,
-    "alpamayo1_5": DEFAULT_POLICY_CONFIG_0_5S,
-    "autovla": DEFAULT_POLICY_CONFIG_0_5S,
-    "default": DEFAULT_POLICY_CONFIG_0_5S,
-    "diffusiondrive": DEFAULT_POLICY_CONFIG_0_5S,
+    "autovla": AUTOVLA_CONFIG,
     "epona": EPONA_CONFIG,
-    "genad": DEFAULT_POLICY_CONFIG_0_5S,
-    "momad": DEFAULT_POLICY_CONFIG_0_5S,
-    "openemma": DEFAULT_POLICY_CONFIG_0_5S,
-    "opendrivevla": DEFAULT_POLICY_CONFIG_0_5S,
-    "sparsedrive": DEFAULT_POLICY_CONFIG_0_5S,
-    "stp3": DEFAULT_POLICY_CONFIG_0_5S,
+    "openemma": OPENEMMA_CONFIG,
     "transfuser": TRANSFUSER_CONFIG,
-    "uniad": DEFAULT_POLICY_CONFIG_0_5S,
-    "vad": DEFAULT_POLICY_CONFIG_0_5S,
+    "latent_transfuser": TRANSFUSER_CONFIG,
 }
-
-
-def resolve_ad_policy_config(name: str) -> dict:
-    name = str(name).strip().lower()
-    if name not in AD_POLICY_CONFIGS:
-        valid = ", ".join(sorted(AD_POLICY_CONFIGS))
-        raise ValueError(f"Unknown AD policy config {name!r}. Valid options: {valid}")
-    return AD_POLICY_CONFIGS[name]
 
 
 def build_environment(
@@ -77,7 +61,8 @@ def build_environment(
     if backend == "easydrive":
         from st_renderer import SimulatorInterface
 
-        config = Config(resolve_ad_policy_config(ad_policy_config))
+        config = Config(DEFAULT_POLICY_CONFIG_0_5S)
+        config.merge_from(AD_POLICY_CONFIGS.get(ad_policy_config, {}))
         config.merge_from(config_values)
         return InteractiveScenarioEnv(SimulatorInterface(dataset), config)
     if backend == "nurec":
@@ -100,8 +85,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--port", type=int, default=50052, help="StreetWorld gRPC bind port")
     parser.add_argument("--web-host", default="127.0.0.1", help="WebUI bind address")
     parser.add_argument("--web-port", type=int, default=18080, help="WebUI bind port")
-    parser.add_argument("--max-workers", type=int, default=10, help="Maximum gRPC handler workers")
-    parser.add_argument("--ad-policy-config", type=str.lower, default="default", choices=sorted(AD_POLICY_CONFIGS))
+    parser.add_argument("--ad-policy-config", type=str.lower, default="default")
     parser.add_argument("--video-output-dir", default="videos", help="Directory for environment video recordings")
     parser.add_argument("--async-mode", action="store_true", help="Run simulation in fixed-period asynchronous mode")
     parser.add_argument("--nurec-grpc-host", default="127.0.0.1", help="NuRec renderer address")
@@ -134,7 +118,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         async_mode=args.async_mode,
         tui=True,
     )
-    serve(env, host=args.host, port=args.port, max_workers=args.max_workers)
+    serve(env, host=args.host, port=args.port)
     return 0
 
 

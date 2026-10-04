@@ -44,7 +44,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         async_mode=args.async_mode,
         tui=False,
     )
-    serve(env, host=args.host, port=args.port, max_workers=args.max_workers)
+    serve(env, host=args.host, port=args.port)
     return 0
 
 

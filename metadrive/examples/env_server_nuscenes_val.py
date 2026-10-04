@@ -96,7 +96,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         tui=False,
     )
     measured_env = MetricCsvEnvironment(env, metrics_output, resume=args.resume)
-    serve(measured_env, host=args.host, port=args.port, max_workers=args.max_workers)
+    serve(measured_env, host=args.host, port=args.port)
     return 0
 
 

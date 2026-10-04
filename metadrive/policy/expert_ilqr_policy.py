@@ -11,7 +11,7 @@ class ExpertILQRPolicy(EnvInputILQRPolicy):
         config["smooth"] = False
         config["max_acceleration"] = 3.2
         super().__init__(step_manager, config, enable_expert)
-        self.trajectory_steps = int(self.config["trajectory_steps"])
+        self.trajectory_steps = int(self.config.get("trajectory_steps", 10))
         if self.trajectory_steps < 1:
             raise ValueError("trajectory_steps must be positive")
         self._expert_path = None

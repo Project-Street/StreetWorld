@@ -50,12 +50,13 @@ class ScenarioMetricTracker:
         self.route_start_time = None
         self.route_end_time = None
 
-    def update(self, info: Dict[str, Any], obs: Dict[str, Any], env) -> None:
-        episode_length = env.episode_lengths
+    def update(
+        self, info: Dict[str, Any], obs: Dict[str, Any], *, episode_length: int, route_progress: float
+    ) -> None:
         if episode_length < self.warmup_step:
             return
 
-        self.route_progress = env._last_progress_value
+        self.route_progress = route_progress
         self.route_length = obs["navigation"]["cummulative_length"][-1]
         timestamp = info["relative_timestamp"] * 1e-6
         if episode_length == self.warmup_step:

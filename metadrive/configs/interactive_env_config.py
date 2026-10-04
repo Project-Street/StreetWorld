@@ -13,6 +13,6 @@ INTERACTIVE_ENV_CONFIG = dict(
     eval_mode=True,
     eval_order=True,
     eval_repeat_per_scene=1,
-    tui=False,
+    tui=True,
     webui=True,
 )

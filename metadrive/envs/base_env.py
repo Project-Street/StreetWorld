@@ -1,6 +1,7 @@
 import logging
 import threading
 import time
+from concurrent.futures import Future
 from collections import defaultdict
 from typing import Union, Dict, AnyStr, Optional, Tuple, Callable
 from collections import OrderedDict
@@ -76,77 +77,88 @@ class BaseEnv(gym.Env):
 
     def _init_async_state(self):
         self._async_condition = threading.Condition()
-        self._async_stop_event = threading.Event()
         self._async_thread = None
+        self._async_reset_request = None
+        self._closing = False
+        self._closed = False
         self._async_latest_action = [0.0, 0.0]
         self._async_last_step_result = None
         self._async_step_running = False
         self._async_exception = None
-
-    def _reset_async_state(self):
-        with self._async_condition:
-            self._async_stop_event.clear()
-            self._async_latest_action = [0.0, 0.0]
-            self._async_last_step_result = None
-            self._async_step_running = False
-            self._async_exception = None
-            self._async_condition.notify_all()
-
-    def _start_async_step_loop(self):
-        with self._async_condition:
-            if self._async_thread is not None:
-                raise RuntimeError("Async step loop is already running.")
-            self._async_thread = threading.Thread(target=self.async_step_loop, name="BaseEnvAsyncStepLoop", daemon=True)
-            self._async_thread.start()
-
-    def _stop_async_step_loop(self):
-        with self._async_condition:
-            self._async_stop_event.set()
-            self._async_condition.notify_all()
-            thread = self._async_thread
-
-        if thread is not None and thread is not threading.current_thread():
-            thread.join()
-
-        with self._async_condition:
-            if self._async_thread is thread:
-                self._async_thread = None
+        self._async_close_exception = None
 
     def async_step_loop(self):
-        period = self.config["decision_repeat"] * self.config["physics_world_step_size"] * 1e-6
-        if self._async_stop_event.wait(period):
-            return
+        next_step_at = None
+        try:
+            period = self.config["decision_repeat"] * self.config["physics_world_step_size"] * 1e-6
+            while True:
+                with self._async_condition:
+                    while not self._closing and self._async_reset_request is None:
+                        if next_step_at is None:
+                            self._async_condition.wait()
+                        else:
+                            delay = next_step_at - time.perf_counter()
+                            if delay <= 0:
+                                break
+                            self._async_condition.wait(delay)
+                    if self._closing:
+                        break
+                    reset_request = self._async_reset_request
+                    if reset_request is None:
+                        action = self._async_latest_action
+                        self._async_step_running = True
+                    else:
+                        self._async_latest_action = [0.0, 0.0]
+                        self._async_last_step_result = None
 
-        while not self._async_stop_event.is_set():
-            with self._async_condition:
-                if self._async_stop_event.is_set():
-                    return
-                action = self._async_latest_action
-                self._async_step_running = True
+                if reset_request is not None:
+                    seed, scene_id, result = reset_request
+                    try:
+                        obs, info = self._reset(seed=seed, scene_id=scene_id)
+                    except LookupError as exc:
+                        if str(exc) != "No more scenarios to evaluate.":
+                            raise
+                        # Evaluation exhaustion is a Reset response, not a worker failure.
+                        with self._async_condition:
+                            next_step_at = None
+                            self._async_reset_request = None
+                            result.set_exception(exc)
+                            self._async_condition.notify_all()
+                    else:
+                        with self._async_condition:
+                            self._async_last_step_result = (obs, 0.0, False, False, info)
+                            self._async_reset_request = None
+                            next_step_at = time.perf_counter() + period
+                            result.set_result((obs, info))
+                            self._async_condition.notify_all()
+                    continue
 
-            started_at = time.perf_counter()
-            try:
+                started_at = time.perf_counter()
                 step_result = self._step(action)
-            except BaseException as exc:
                 with self._async_condition:
                     self._async_step_running = False
-                    self._async_exception = exc
+                    self._async_last_step_result = step_result
+                    next_step_at = None if step_result[2] or step_result[3] else started_at + period
                     self._async_condition.notify_all()
-                return
-
-            elapsed = time.perf_counter() - started_at
-            terminated = step_result[2]
-            truncated = step_result[3]
+        except BaseException as exc:
             with self._async_condition:
+                self._async_exception = exc
                 self._async_step_running = False
-                self._async_last_step_result = step_result
-                if terminated or truncated:
-                    self._async_condition.notify_all()
-                    return
+                if self._async_reset_request is not None:
+                    self._async_reset_request[2].set_exception(exc)
+                    self._async_reset_request = None
                 self._async_condition.notify_all()
-
-            if self._async_stop_event.wait(period - elapsed):
-                return
+        finally:
+            try:
+                self._close()
+            except BaseException as exc:
+                self._async_close_exception = exc
+            with self._async_condition:
+                self._closed = True
+                if self._async_reset_request is not None:
+                    self._async_reset_request[2].set_exception(RuntimeError("Environment closed before Reset completed."))
+                    self._async_reset_request = None
+                self._async_condition.notify_all()
 
     # def _post_process_config(self, config):
     #     """Add more special process to merged config"""
@@ -210,9 +222,29 @@ class BaseEnv(gym.Env):
         self.data_manager.eval(order=order, repeat_per_scene=repeat_per_scene)
 
     def reset(self, seed: Union[None, int] = None, scene_id: Union[None, str] = None):
-        self._stop_async_step_loop()
-        self._reset_async_state()
+        if not self._async_mode:
+            if self._closed:
+                raise RuntimeError("Environment is closed.")
+            return self._reset(seed=seed, scene_id=scene_id)
 
+        with self._async_condition:
+            if self._async_exception is not None:
+                raise self._async_exception
+            if self._closing or self._closed:
+                raise RuntimeError("Environment is closed.")
+            if self._async_reset_request is not None:
+                raise RuntimeError("Reset is already in progress.")
+            result = Future()
+            self._async_reset_request = (seed, scene_id, result)
+            if self._async_thread is None:
+                self._async_thread = threading.Thread(
+                    target=self.async_step_loop, name="BaseEnvAsyncStepLoop", daemon=True
+                )
+                self._async_thread.start()
+            self._async_condition.notify_all()
+        return result.result()
+
+    def _reset(self, seed: Union[None, int] = None, scene_id: Union[None, str] = None):
         # Update record replay
         self.replay_episode = True if self.config["replay_episode"] is not None else False
         self.record_episode = self.config["record_episode"]
@@ -267,12 +299,7 @@ class BaseEnv(gym.Env):
             new_step_infos = manager.observe()
             step_infos[mgr_n] = new_step_infos
 
-        reset_return = self._get_reset_return(step_infos)
-        self._async_mode = bool(self.config["async_mode"])
-        if self._async_mode:
-            self._async_last_step_result = (reset_return[0], 0.0, False, False, reset_return[1])
-            self._start_async_step_loop()
-        return reset_return
+        return self._get_reset_return(step_infos)
 
     def _reset_global_seed(self, force_seed=None):
         if force_seed is not None:
@@ -366,7 +393,7 @@ class BaseEnv(gym.Env):
 
         with self._async_condition:
             self._async_latest_action = actions
-            while self._async_step_running:
+            while self._async_step_running or self._async_reset_request is not None:
                 self._async_condition.wait()
             if self._async_exception is not None:
                 raise self._async_exception
@@ -467,8 +494,22 @@ class BaseEnv(gym.Env):
         raise NotImplementedError
     
     def close(self):
-        self._stop_async_step_loop()
+        with self._async_condition:
+            self._closing = True
+            self._async_condition.notify_all()
+            thread = self._async_thread
+            if thread is None:
+                if self._closed:
+                    return
+                self._closed = True
+        if thread is None:
+            self._close()
+        else:
+            thread.join()
+            if self._async_close_exception is not None:
+                raise self._async_close_exception
 
+    def _close(self):
         agent_managers = getattr(self, "agent_managers", None)
         if isinstance(agent_managers, dict):
             for manager in list(agent_managers.values()):

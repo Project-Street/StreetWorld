@@ -80,16 +80,15 @@ def make_interactive_env(env_class):
             if self.config["tui"]:
                 self._tui.start()
 
-        def reset(self, *args, **kwargs):
+        def _reset(self, *args, **kwargs):
             if self.config["tui"]:
                 self._tui.begin_reset()
-            self._stop_async_step_loop()
             if self.config["video_output_dir"] is not None and self._video_exporter.has_frames:
                 self._video_exporter.flush_episode(str(self.scene_id))
             if self.config["webui"]:
                 self._web_ui.reset()
             try:
-                obs, info = super().reset(*args, **kwargs)
+                obs, info = super()._reset(*args, **kwargs)
             except LookupError as error:
                 if self.config["tui"] and str(error) == "No more scenarios to evaluate.":
                     self._tui.finish_evaluation()
@@ -199,17 +198,16 @@ def make_interactive_env(env_class):
             image_stacks[camera_name] = image_stack
             return image_stacks
 
-        def close(self):
+        def _close(self):
             if self.config["tui"]:
                 self._tui.close()
-            self._stop_async_step_loop()
             if self.config["video_output_dir"] is not None:
                 if self._video_exporter.has_frames:
                     self._video_exporter.flush_episode(str(self.scene_id))
                 self._video_exporter.shutdown()
             if self.config["webui"]:
                 self._web_ui.close()
-            super().close()
+            super()._close()
 
     InteractiveEnv.__name__ = f"Interactive{env_class.__name__}"
     InteractiveEnv.__qualname__ = InteractiveEnv.__name__

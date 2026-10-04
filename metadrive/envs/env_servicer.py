@@ -12,48 +12,41 @@ import metadrive.grpc.streetworld_grpc.service_pb2 as service_pb2
 import metadrive.grpc.streetworld_grpc.service_pb2_grpc as service_pb2_grpc
 
 
-def serve(env, *, host: str, port: int, max_workers: int) -> None:
-    server = grpc.server(
-        concurrent.futures.ThreadPoolExecutor(max_workers=max_workers),
-        options=[
-            ("grpc.max_send_message_length", 200 * 1024 * 1024),
-            ("grpc.max_receive_message_length", 200 * 1024 * 1024),
-        ],
-    )
-    service_pb2_grpc.add_EnvServiceServicer_to_server(EnvServicer(env), server)
-    if server.add_insecure_port(f"{host}:{port}") == 0:
-        raise RuntimeError(f"Could not bind StreetWorld gRPC server to {host}:{port}")
-    try:
-        server.start()
-        if not env.config["tui"]:
-            print(f"StreetWorld gRPC server started on {host}:{port}")
-            print("Press Ctrl-C to stop.")
-        server.wait_for_termination()
-    except KeyboardInterrupt:
-        pass
-    finally:
-        server.stop(0)
-        env.close()
+def serve(env, *, host: str, port: int) -> None:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+        server = grpc.server(
+            executor,
+            options=[
+                ("grpc.max_send_message_length", 200 * 1024 * 1024),
+                ("grpc.max_receive_message_length", 200 * 1024 * 1024),
+            ],
+        )
+        service_pb2_grpc.add_EnvServiceServicer_to_server(EnvServicer(env), server)
+        if server.add_insecure_port(f"{host}:{port}") == 0:
+            raise RuntimeError(f"Could not bind StreetWorld gRPC server to {host}:{port}")
+        try:
+            server.start()
+            if not env.config["tui"]:
+                print(f"StreetWorld gRPC server started on {host}:{port}")
+                print("Press Ctrl-C to stop.")
+            server.wait_for_termination()
+        except KeyboardInterrupt:
+            pass
+        finally:
+            server.stop(0).wait()
+            # A synchronous server with one worker owns its rendering resources there.
+            # Async environments dispatch close to their persistent worker themselves.
+            executor.submit(env.close).result()
 
 
 class EnvServicer(service_pb2_grpc.EnvServiceServicer):
     def __init__(self, env):
         self.env = env
         self._lock = threading.Lock()
-        self._headless_gl_context = None
-
-    def _initialize_headless_gl_context(self) -> None:
-        if self.env.config.get("backend") == "easydrive" and self._headless_gl_context is None:
-            from fast_gauss.egl_utils import eglContextManager
-            import fast_gauss.gl_utils
-
-            self._headless_gl_context = eglContextManager()
-            fast_gauss.gl_utils.eglctx = self._headless_gl_context
 
     def Reset(self, request: service_pb2.ResetRequest, context) -> service_pb2.ResetResponse:
         with self._lock:
             try:
-                self._initialize_headless_gl_context()
                 obs, reset_info = self.env.reset()
             except LookupError as exc:
                 if str(exc) != "No more scenarios to evaluate.":
