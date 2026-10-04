@@ -6,7 +6,7 @@ To build documents locally, please run the following codes:
 ```bash
 pip install sphinx sphinx_rtd_theme myst-nb
 pip install sphinx-copybutton
-cd metadrive/documentation
+cd streetworld/documentation
 rm -rf build/ && make html
 # or
 rm -rf build/ && sphinx-build -j 4 source build

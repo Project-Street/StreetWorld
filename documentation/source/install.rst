@@ -18,7 +18,7 @@ We recommend to use the command following to install::
 .. note:: Using ``git clone https://github.com/metadriverse/metadrive.git --single-branch``
   will only pull the main branch and bypass other branches, saving disk space.
 
-.. note:: We don't recommend installing MetaDrive with ``pip install metadrive-simulator`` because it will download the source code from PyPI, which may not be the latest version.
+.. note:: We don't recommend installing MetaDrive with ``pip install streetworld`` because it will download the source code from PyPI, which may not be the latest version.
 
 
 
@@ -28,13 +28,13 @@ After having the source code installed, some assets like 3D models are still req
 Generally, they will be pulled automatically when you run any MetaDrive program for the first time.
 But you can still pull the asset manually by::
 
- python -m metadrive.pull_asset
+ python -m streetworld.pull_asset
 
-.. note:: All ``python -m`` scripts are supposed to be runnable in all places **except** in the working direction that has a sub-folder called :code:`./metadrive`.
+.. note:: All ``python -m`` scripts are supposed to be runnable in all places **except** in the working direction that has a sub-folder called :code:`./streetworld`.
 
 Sometimes the assets may be broken or out of date. In this case run the following code to force update the local assets::
 
- python -m metadrive.pull_asset --update
+ python -m streetworld.pull_asset --update
 
 
 
@@ -42,7 +42,7 @@ Verify installation
 #############################
 To check whether MetaDrive is successfully installed, please run the following code::
 
-    python -m metadrive.examples.profile_metadrive
+    python -m streetworld.examples.profile_metadrive
 
 This script can also verify the efficiency of MetaDrive through the printed messages.
 The default observation contains information on ego vehicle's states, Lidar-like cloud points showing neighboring vehicles, and information about navigation and tasks. Besides, you can also try the Pygame-based Top-down rendering (See `TopDownObservation <obs.html#topdownobservation>`_), which is also runnable in most headless machine without any special treatment.
@@ -56,9 +56,9 @@ Install MetaDrive with headless rendering
 
 The latest MetaDrive is already built to support headless-rendering. But for a double check, run following command::
 
-    python -m metadrive.examples.verify_headless_installation
+    python -m streetworld.examples.verify_headless_installation
 
-The script will generate two **same** images to `/path/to/metadrive repo/metadrive/examples`, one from agent observation, the other from panda3d internal rendering buffer.
+The script will generate two **same** images to `/path/to/metadrive repo/streetworld/examples`, one from agent observation, the other from panda3d internal rendering buffer.
 Please fetch and check those images from cluster to ensure MetaDrive can draw the scene and capture images correctly.
 By default, it only generates images from the main camera. Set ```--camera [rgb/depth]``` to check other cameras.
 Also, ```--cuda``` flag can be added to test image_on_cuda pipeline for your headless machine.
@@ -85,14 +85,14 @@ Requirements:
 
 Installation:
 
-#. After cloning the repo, use ``pip install -e .[cuda]`` to install, or ``pip install -e metadrive-simulator[cuda]`` if you are using pip.
+#. After cloning the repo, use ``pip install -e .[cuda]`` to install, or ``pip install -e streetworld[cuda]`` if you are using pip.
 #. Install Torch::
 
     conda install pytorch==1.12.1 torchvision==0.13.1 torchaudio==0.12.1 cudatoolkit=11.6 -c pytorch -c conda-forge
 
 #. Install CuPy: ``pip install cupy-cuda11x``
 #. Install Cuda-Python: ``conda install -c nvidia cuda-python``
-#. For verifying your installation, cd ``metadrive/examples`` and run::
+#. For verifying your installation, cd ``streetworld/examples`` and run::
 
     python verify_image_observation.py --cuda
 

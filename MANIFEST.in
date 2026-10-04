@@ -1,15 +1,15 @@
-recursive-include metadrive/examples/ *
-recursive-include metadrive\\examples\\ *
-recursive-include metadrive\examples\ *
+recursive-include streetworld/examples/ *
+recursive-include streetworld\\examples\\ *
+recursive-include streetworld\examples\ *
 
-recursive-include metadrive/render_pipeline/ *
-recursive-include metadrive\\render_pipeline\\ *
-recursive-include metadrive\render_pipeline\ *
+recursive-include streetworld/render_pipeline/ *
+recursive-include streetworld\\render_pipeline\\ *
+recursive-include streetworld\render_pipeline\ *
 
-recursive-include metadrive/shaders/ *
-recursive-include metadrive\\shaders\\ *
-recursive-include metadrive\shaders\ *
+recursive-include streetworld/shaders/ *
+recursive-include streetworld\\shaders\\ *
+recursive-include streetworld\shaders\ *
 
-recursive-include metadrive/third_party/simplepbr/shaders/ *
-recursive-include metadrive\\third_party\\simplepbr\\shaders\\ *
-recursive-include metadrive\third_party\simplepbr\shaders\ *
+recursive-include streetworld/third_party/simplepbr/shaders/ *
+recursive-include streetworld\\third_party\\simplepbr\\shaders\\ *
+recursive-include streetworld\third_party\simplepbr\shaders\ *

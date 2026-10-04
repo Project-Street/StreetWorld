@@ -23,7 +23,7 @@ Download [VAD Model](https://drive.google.com/file/d/1FLX-4LVm4z-RskghFbxGuYlcYO
 
 **Launch simulator server**
 ```
-python -m metadrive.examples.env_server_easydrive  -c <scene_config_dir> --host <host ip> --port <port> --max-workers 1
+python -m streetworld.examples.env_server_easydrive  -c <scene_config_dir> --host <host ip> --port <port> --max-workers 1
 ```
 
 **drive in VAD** (run in Docker)

@@ -6,17 +6,17 @@
 /build/
 /dist/
 /documentation/build/
-/metadrive.egg-info/
-/metadrive/examples/**.png
-/metadrive/examples/**.jpg
+/streetworld.egg-info/
+/streetworld/examples/**.png
+/streetworld/examples/**.jpg
 
 /documentation/*
 
 output*
 data
 configs
-!/metadrive/configs/
-!/metadrive/configs/*.py
+!/streetworld/configs/
+!/streetworld/configs/*.py
 rl_outputs*
 tests*
 !tests/
@@ -30,7 +30,7 @@ videos*
 VAD
 TransFuser
 alpama*
-!metadrive/configs/alpamayo_config.py
+!streetworld/configs/alpamayo_config.py
 AutoVLA
 DiffusionDrive
 Alpamayo*
