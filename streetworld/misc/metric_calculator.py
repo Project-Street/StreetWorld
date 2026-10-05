@@ -151,7 +151,11 @@ class MetricCalculator:
                     "DAC": self.dac_hits / self.eval_steps,
                     "TTC": np.mean(self.ttc_flags),
                     "COM": self.com_hits / self.eval_steps,
-                    "RC": np.clip(completed_route_length / remaining_route_length, 0.0, 1.0),
+                    "RC": (
+                        np.clip(completed_route_length / remaining_route_length, 0.0, 1.0)
+                        if np.isfinite(remaining_route_length) and remaining_route_length > 0.0
+                        else np.nan
+                    ),
                     "RE": completed_route_length / elapsed,
                 }
         self.completed_scene_metrics.append(metric)
