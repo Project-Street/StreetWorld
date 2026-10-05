@@ -100,13 +100,6 @@ BASE_DEFAULT_CONFIG = dict(
     ),
 
 
-    # ===== participant =====
-    map_config=dict(
-        # Vehicle model. Candidates: "s", "m", "l", "xl", "default". random_agent_model makes this config invalid
-        store_map=False
-    ),
-
-
     # Physics world step is in microsecond (0.02s) and will be repeated for decision_repeat times per env.step()
     physics_world_step_size=2e4,
     decision_repeat=5,

@@ -187,7 +187,7 @@ class IDMPolicy(BasePolicy):
         if controller.metadrive_type != MetaDriveType.VEHICLE:
             raise ValueError("IDMPolicy can only control vehicle agents.")
         if trajdata_map is None:
-            raise ValueError("IDMPolicy requires trajdata_map from ScenarioMapManager.")
+            raise ValueError("IDMPolicy requires trajdata_map from ScenarioDataManager.")
 
         self.trajdata_map = trajdata_map
         spawn_yaw = float(init_state["spawn_yaw"])

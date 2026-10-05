@@ -30,11 +30,12 @@ class ScenarioDataManager(BaseManager):
             'constant': float(np.dot(average_normal, start_bottom_center))
         }
 
-    def __init__(self, config, loader):
+    def __init__(self, config, meta_loader, model_loader):
 
         super(ScenarioDataManager, self).__init__()
         self.base_config = config
-        self.loader = loader
+        self.meta_loader = meta_loader
+        self.model_loader = model_loader
         self.eval_mode = False
 
         # self.store_data = engine.global_config["store_data"]
@@ -70,7 +71,7 @@ class ScenarioDataManager(BaseManager):
             participants,
             scene_mesh_path,
             scene_mesh_transform,
-        ) = self.loader(scene_id)
+        ) = self.meta_loader(scene_id)
         ego_poses, camera_params = self._calibrate_ego_z(ego_poses, camera_params)
         metadata = self.restructure_metadata(
             scene_id=scene_id,
@@ -184,7 +185,7 @@ class ScenarioDataManager(BaseManager):
 
     def reset(self, scene_id=None):
         """
-        Reset scenario data manager.
+        Load scenario metadata and model.
 
         Args:
             scene_id: ID of the scene to load.
@@ -233,6 +234,9 @@ class ScenarioDataManager(BaseManager):
         #     ego_height=config_dict["controller"].DEFAULT_HEIGHT,
         #     start_ts=start_ts
         # )
+
+        return self.model_loader(scene_id)
+
     def get_current_scenario_data(self):
         return self.current_metadata
 

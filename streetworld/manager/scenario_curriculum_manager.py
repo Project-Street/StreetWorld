@@ -72,7 +72,6 @@ class ScenarioCurriculumManager(BaseManager):
         self.engine.level_up()
         self.recent_route_completion = QueueDict(max_length=self._episodes_to_eval)
         self.recent_success = QueueDict(max_length=self._episodes_to_eval)
-        self.engine.map_manager.clear_stored_maps()
         self.engine.data_manager.clear_stored_scenarios()
 
     @property

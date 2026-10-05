@@ -31,11 +31,12 @@ from streetworld.misc.step_counter import StepCounter
 from streetworld.engine.collision_callback import collision_callback
 from panda3d.core import AntialiasAttrib, loadPrcFileData, LineSegs, PythonCallbackObject, Vec3, NodePath
 from streetworld.version import VERSION
+from streetworld.objects.terrain.ground import GroundPlane
+from streetworld.objects.terrain.mesh_terrain import MeshTerrain
 from streetworld.objects.traffic_participants.cyclist import Cyclist
 from streetworld.objects.traffic_participants.pedestrian import Pedestrian
 from streetworld.objects.vehicle.vehicle_type import get_vehicle_type
 from streetworld.manager.scenario_data_manager import ScenarioDataManager
-from streetworld.manager.scenario_map_manager import ScenarioMapManager
 from streetworld.obs.navigation_obs import NavigationObservation
 from streetworld.obs.assembly_obs import AssemblyObservation
 from streetworld.policy.replay_policy import ReplayPolicy
@@ -71,6 +72,7 @@ class BaseEnv(gym.Env):
         # scenarios
 
         self.model = model
+        self.ground = None
 
         self.setup(default_config)
         self._async_mode = bool(self.config["async_mode"])
@@ -179,8 +181,11 @@ class BaseEnv(gym.Env):
         """
         Engine setting after launching
         """
-        self._register_manager("data_manager", ScenarioDataManager(config, self.model.load_metadata))
-        self._register_manager("map_manager", ScenarioMapManager(self.config['map_config'], self.model.load_model))
+        self._register_manager(
+            "data_manager", ScenarioDataManager(
+                config, meta_loader=self.model.load_metadata, model_loader=self.model.load_model
+            )
+        )
         self._register_manager("step_manager", StepCounter(self.config['physics_world_step_size'], self.config["decision_repeat"]))
 
         # self._register_manager("record_manager", RecordManager())
@@ -268,7 +273,10 @@ class BaseEnv(gym.Env):
         self._reset_global_seed(seed)
 
         # reset manager
-        for manager in [self.map_manager] + list(self.agent_managers.values()):
+        if self.ground is not None:
+            self.ground.destroy()
+            self.ground = None
+        for manager in self.agent_managers.values():
             manager.clear_all_objects()
         self._object_clean_check()
         
@@ -278,11 +286,11 @@ class BaseEnv(gym.Env):
                 self.agent_managers[n].destroy()
                 self.agent_managers.pop(n)
 
-        self.data_manager.reset(scene_id=scene_id)
+        scene_map = self.data_manager.reset(scene_id=scene_id)
         
         scenario_data = self.data_manager.get_current_scenario_data()
         self.step_manager.reset(**scenario_data)
-        scene_map = self.map_manager.reset(config=self.config['map_config'], physics_world=self.physics_world, **scenario_data)
+        self._reset_terrain(scenario_data)
         self._reset_agents(scenario_data, scene_map)
 
         print("=======>>> Reset scenario: {}, seed: {}".format(self.scene_id, self.current_seed))
@@ -307,7 +315,7 @@ class BaseEnv(gym.Env):
         else:
             current_seed = get_np_random(None).randint(0, 0x7fffffff)
         self.current_seed = current_seed
-        for mgr in [self.data_manager, self.map_manager] + list(self.agent_managers.values()):
+        for mgr in [self.data_manager] + list(self.agent_managers.values()):
             mgr.seed(current_seed)
 
     def _object_clean_check(self):
@@ -327,6 +335,23 @@ class BaseEnv(gym.Env):
             filtered.append(body)
         assert len(filtered) == 0, "Physics Bodies should be cleaned before manager.reset() is called. " \
                                    "Uncleared bodies: {}".format(filtered)
+
+    def _reset_terrain(self, scenario_data):
+        if not scenario_data['scene_mesh_path']:
+            plane_params = scenario_data['ground_plane']
+            self.ground = GroundPlane(
+                physics_world=self.physics_world,
+                direction=plane_params['normal'],
+                constant=plane_params['constant'],
+                random_seed=self.current_seed,
+            )
+        else:
+            self.ground = MeshTerrain(
+                model_path=scenario_data['scene_mesh_path'],
+                transform=scenario_data['scene_mesh_transform'],
+                physics_world=self.physics_world,
+                random_seed=self.current_seed,
+            )
 
     def _reset_agents(self, scenario_data, scene_map):
         camera_params = scenario_data['camera_params']
@@ -359,7 +384,7 @@ class BaseEnv(gym.Env):
                 'timestamp_range': scenario_data['timestamp_range'],
                 'trajdata_map': scene_map,
                 'collector': self._collect_all_object,
-                'ground': self.map_manager.ground,
+                'ground': self.ground,
             }
             if cfg['controller'] in [Pedestrian, Cyclist]:
                 cfg['observer'] = DummyObservation
@@ -561,9 +586,9 @@ class BaseEnv(gym.Env):
             agent_managers.clear()
         self.agent_managers = {}
 
-        map_manager = getattr(self, "map_manager", None)
-        if map_manager is not None:
-            map_manager.clear_all_objects()
+        if self.ground is not None:
+            self.ground.destroy()
+            self.ground = None
 
         physics_world = getattr(self, "physics_world", None)
         if physics_world is not None:
