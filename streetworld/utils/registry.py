@@ -7,17 +7,17 @@ def _initialize_registry():
     _metadrive_class_list = []
 
     # Register all PG blocks
-    from streetworld.component.pgblock.bottleneck import Merge, Split
-    from streetworld.component.pgblock.curve import Curve
-    from streetworld.component.pgblock.fork import InFork, OutFork
-    from streetworld.component.pgblock.parking_lot import ParkingLot
-    from streetworld.component.pgblock.ramp import InRampOnStraight, OutRampOnStraight
-    from streetworld.component.pgblock.roundabout import Roundabout
-    from streetworld.component.pgblock.std_intersection import StdInterSection, StdInterSectionWithUTurn
-    from streetworld.component.pgblock.std_t_intersection import StdTInterSection
-    from streetworld.component.pgblock.straight import Straight
-    from streetworld.component.pgblock.tollgate import TollGate
-    from streetworld.component.pgblock.bidirection import Bidirection
+    from streetworld.objects.pgblock.bottleneck import Merge, Split
+    from streetworld.objects.pgblock.curve import Curve
+    from streetworld.objects.pgblock.fork import InFork, OutFork
+    from streetworld.objects.pgblock.parking_lot import ParkingLot
+    from streetworld.objects.pgblock.ramp import InRampOnStraight, OutRampOnStraight
+    from streetworld.objects.pgblock.roundabout import Roundabout
+    from streetworld.objects.pgblock.std_intersection import StdInterSection, StdInterSectionWithUTurn
+    from streetworld.objects.pgblock.std_t_intersection import StdTInterSection
+    from streetworld.objects.pgblock.straight import Straight
+    from streetworld.objects.pgblock.tollgate import TollGate
+    from streetworld.objects.pgblock.bidirection import Bidirection
     _metadrive_class_list.extend(
         [
             Merge, Split, Curve, InFork, OutFork, ParkingLot, InRampOnStraight, OutRampOnStraight, Roundabout,

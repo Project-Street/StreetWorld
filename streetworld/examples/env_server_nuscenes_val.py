@@ -51,7 +51,7 @@ class MetricCsvEnvironment:
         result = self._env.step(action)
         _, _, terminated, truncated, info = result
         if terminated or truncated:
-            metrics = self._env.metric_tracker.completed_scene_metrics[-1]
+            metrics = self._env.metric_calculator.completed_scene_metrics[-1]
             row = {"scene_name": info["scene_name"]}
             row.update({name: metrics[name] for name in METRIC_COLUMNS})
             with self._output_path.open("a", encoding="utf-8", newline="") as output_file:

@@ -3,7 +3,7 @@ from typing import Dict
 from streetworld.base_class.configurable import Configurable
 from streetworld.base_class.nameable import Nameable
 from streetworld.base_class.randomizable import Randomizable
-from streetworld.component.pg_space import ParameterSpace
+from streetworld.objects.pg_space import ParameterSpace
 
 
 class BaseRunnable(Configurable, Nameable, Randomizable):

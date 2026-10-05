@@ -2,7 +2,7 @@ import math
 import numpy as np
 from gymnasium.spaces import Space
 from streetworld.utils.logger import get_logger
-from streetworld.component.vehicle.base_vehicle import BaseVehicle
+from streetworld.objects.vehicle.base_vehicle import BaseVehicle
 from streetworld.manager.base_manager import BaseManager
 from streetworld.obs.navigation_obs import NavigationObservation
 from streetworld.policy.idm_policy import IDMRouteInitializationError

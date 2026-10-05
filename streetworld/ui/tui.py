@@ -24,7 +24,7 @@ from streetworld.ui.tui_style import (
 )
 
 if TYPE_CHECKING:
-    from streetworld.envs.scenario_metrics import ScenarioMetricTracker
+    from streetworld.misc.metric_calculator import MetricCalculator
 
 
 YAML_SUFFIXES = {".yaml", ".yml"}
@@ -116,13 +116,13 @@ class TUI:
                 )
                 snapshot.completed += 1
 
-    def complete_episode(self, metric_tracker: ScenarioMetricTracker) -> None:
-        completed_metrics = metric_tracker.completed_scene_metrics
+    def complete_episode(self, metric_calculator: MetricCalculator) -> None:
+        completed_metrics = metric_calculator.completed_scene_metrics
         if not completed_metrics:
             return
         with self._lock:
             self._snapshot.scene_metrics = dict(completed_metrics[-1])
-            self._snapshot.aggregate_metrics = metric_tracker.get_average_metric()
+            self._snapshot.aggregate_metrics = metric_calculator.get_average_metric()
 
     def snapshot(self) -> RuntimeSnapshot:
         with self._lock:

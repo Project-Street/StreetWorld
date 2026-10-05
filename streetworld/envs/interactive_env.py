@@ -120,7 +120,7 @@ def make_interactive_env(env_class):
                     )
             if terminated or truncated:
                 if self.config["tui"]:
-                    self._tui.complete_episode(self.metric_tracker)
+                    self._tui.complete_episode(self.metric_calculator)
                 if self.config["webui"]:
                     self._web_ui.complete_episode(self.get_average_metric() if not self.data_manager.remain_queue else None)
                 if self.config["video_output_dir"] is not None:

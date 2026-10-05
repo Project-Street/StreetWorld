@@ -1,7 +1,7 @@
 import gymnasium as gym
 import numpy as np
 
-from streetworld.component.vehicle.base_vehicle import BaseVehicle
+from streetworld.objects.vehicle.base_vehicle import BaseVehicle
 from streetworld.obs.observation_base import BaseObservation
 import torch
 from scipy.spatial.transform import Rotation as R

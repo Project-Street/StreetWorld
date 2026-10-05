@@ -1,9 +1,5 @@
-from streetworld.engine.asset_loader import AssetLoader
-
-
 SCENARIO_ENV_CONFIG = dict(
     # ===== Scenario Config =====
-    data_directory=AssetLoader.file_path("nuscenes", unix_style=False),
     start_scenario_index=0,
 
     # Set num_scenarios=-1 to load all scenarios in the data directory.

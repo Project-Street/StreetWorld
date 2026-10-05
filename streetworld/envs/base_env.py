@@ -26,14 +26,14 @@ from streetworld.obs.observation_base import DummyObservation
 from streetworld.utils.random_utils import get_np_random
 from streetworld.utils.utils import merge_dicts, concat_step_infos
 from streetworld.utils.logger import get_logger, reset_logger
-from streetworld.engine.core.physics_world import PhysicsWorld
-from streetworld.engine.step_counter import StepCounter
-from streetworld.engine.core.collision_callback import collision_callback
+from streetworld.engine.physics_world import PhysicsWorld
+from streetworld.misc.step_counter import StepCounter
+from streetworld.engine.collision_callback import collision_callback
 from panda3d.core import AntialiasAttrib, loadPrcFileData, LineSegs, PythonCallbackObject, Vec3, NodePath
 from streetworld.version import VERSION
-from streetworld.component.traffic_participants.cyclist import Cyclist
-from streetworld.component.traffic_participants.pedestrian import Pedestrian
-from streetworld.component.vehicle.vehicle_type import get_vehicle_type
+from streetworld.objects.traffic_participants.cyclist import Cyclist
+from streetworld.objects.traffic_participants.pedestrian import Pedestrian
+from streetworld.objects.vehicle.vehicle_type import get_vehicle_type
 from streetworld.manager.scenario_data_manager import ScenarioDataManager
 from streetworld.manager.scenario_map_manager import ScenarioMapManager
 from streetworld.obs.navigation_obs import NavigationObservation
@@ -187,13 +187,13 @@ class BaseEnv(gym.Env):
         # self._register_manager("replay_manager", ReplayManager())
 
         # physics world
-        self.physics_world = PhysicsWorld(disable_collision=self.config["disable_collision"], physics_world_step_size=self.config['physics_world_step_size'])
+        self.physics_world = PhysicsWorld(physics_world_step_size=self.config['physics_world_step_size'])
 
         # collision callback
         self.physics_world.dynamic_world.setContactAddedCallback(PythonCallbackObject(collision_callback))
 
         self.agent_managers = {}
-        self.agent_managers['actor'] = self._init_agent_manager()
+        self.agent_managers['actor'] = AgentManager(self.config['actor_config'], self.step_manager)
 
 
     @property
@@ -313,13 +313,12 @@ class BaseEnv(gym.Env):
     def _object_clean_check(self):
         # rigid body check
         bodies = []
-        for world in [self.physics_world.dynamic_world, self.physics_world.static_world]:
-            bodies += world.getRigidBodies()
-            bodies += world.getSoftBodies()
-            bodies += world.getGhosts()
-            bodies += world.getVehicles()
-            bodies += world.getCharacters()
-            # bodies += world.getManifolds()
+        world = self.physics_world.dynamic_world
+        bodies += world.getRigidBodies()
+        bodies += world.getSoftBodies()
+        bodies += world.getGhosts()
+        bodies += world.getVehicles()
+        bodies += world.getCharacters()
 
         filtered = []
         for body in bodies:
@@ -337,7 +336,7 @@ class BaseEnv(gym.Env):
                 cfg = self.config['participant_config'].copy()
                 cfg['controller_config']['size'] = tracking['size']
                 if tracking['type'] == 'vehicle':
-                    cfg['controller'] = get_vehicle_type(tracking['size'][1], False)
+                    cfg['controller'] = get_vehicle_type(tracking['size'][1])
                 elif tracking['type'] == 'pedestrian':
                     cfg['controller'] = Pedestrian
                 elif tracking['type'] == 'cyclist':
@@ -377,9 +376,10 @@ class BaseEnv(gym.Env):
         obses = collected_obs['actor']['observation']
         _, reward_infos = self.reward_function()
         _, done_infos = self.done_function()
-        _, cost_infos = self.cost_function()
+        # _, cost_infos = self.cost_function()
 
         step_infos = concat_step_infos([done_infos, reward_infos, cost_infos])
+        step_infos["episode_length"] = self.episode_lengths
         step_infos["scene_name"] = self.scene_id
         step_infos["current_timestamp"] = int(self.step_manager.current_timestamp)
         step_infos["relative_timestamp"] = int(self.step_manager.relative_timestamp)
@@ -458,7 +458,7 @@ class BaseEnv(gym.Env):
         rewards, reward_infos = self.reward_function()
         self.episode_rewards += rewards
         done_function_result, done_infos = self.done_function()
-        _, cost_infos = self.cost_function()
+        # _, cost_infos = self.cost_function()
         self.dones = done_function_result
         obses = collected_obs['actor']['observation']
 
@@ -490,9 +490,53 @@ class BaseEnv(gym.Env):
     def cost_function(self, object_id: str) -> Tuple[float, Dict]:
         raise NotImplementedError
 
-    def done_function(self, object_id: str) -> Tuple[bool, Dict]:
-        raise NotImplementedError
-    
+
+    def done_function(self):
+        state_info = self.agent_managers['actor'].state
+        is_max_step = self.config["max_step"] is not None and self.episode_lengths >= self.config["max_step"]
+
+        def msg(reason):
+            return "Episode ended! Scenario Index: {} Scenario id: {} Reason: {}.".format(
+                self.current_seed, self.scene_id, reason
+            )
+
+        done = False
+        if state_info == AgentState.SUCCESS:
+            done = True
+            self.logger.debug(msg("arrive_dest"), extra={"log_once": True})
+        elif state_info == AgentState.OUT_OF_ROAD:
+            done = True
+            self.logger.debug(msg("out_of_road"), extra={"log_once": True})
+        elif state_info == AgentState.OUT_OF_STEP:
+            done = True
+            self.logger.debug(msg("out_of_step of object"), extra={"log_once": True})
+        elif state_info == AgentState.CRASH_HUMAN:
+            done = True
+            self.logger.debug(msg("crash human"), extra={"log_once": True})
+        elif state_info == AgentState.CRASH_VEHICLE:
+            done = True
+            self.logger.debug(msg("crash vehicle"), extra={"log_once": True})
+        elif state_info == AgentState.CRASH_OBJECT:
+            done = True
+            self.logger.debug(msg("crash object"), extra={"log_once": True})
+        elif state_info == AgentState.CRASH_WORLD:
+            done = True
+            self.logger.debug(msg("crash background"), extra={"log_once": True})
+        elif is_max_step:
+            state_info = AgentState.OUT_OF_STEP
+            done = True
+            self.logger.debug(msg("max step"), extra={"log_once": True})
+
+        # # log data to curriculum manager
+        # self.engine.curriculum_manager.log_episode(
+        #     done_info[TerminationState.SUCCESS], vehicle.navigation.route_completion
+        # )
+
+        info = {'reason': state_info}
+        if done:
+            info.update(self.reward_calculator.episode_info())
+        return done, info
+
     def close(self):
         with self._async_condition:
             self._closing = True

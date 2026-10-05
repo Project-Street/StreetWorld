@@ -16,7 +16,7 @@ from streetworld.configs.transfuser_config import TRANSFUSER_CONFIG
 from streetworld.envs.env_servicer import serve
 from streetworld.envs.scenario_env import ScenarioEnv
 from streetworld.envs.interactive_env import make_interactive_env
-from streetworld.misc.nurec_interface.simulator_interface import SimulatorInterface as NurecSimulatorInterface
+from submodules.nurec_interface.simulator_interface import SimulatorInterface as NurecSimulatorInterface
 from streetworld.ui.scene_selector import select_catalog_scenes
 
 

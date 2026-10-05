@@ -3,7 +3,7 @@ import numpy as np
 import torch
 from streetworld.manager.base_manager import BaseManager
 from streetworld.utils.scenario_utils import parse_object_state
-from streetworld.component.vehicle.vehicle_type import random_vehicle_type
+from streetworld.objects.vehicle.vehicle_type import random_vehicle_type
 from streetworld.utils.trajectory import Trajectory
 import json
 

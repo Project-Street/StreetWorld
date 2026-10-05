@@ -8,11 +8,11 @@ import numpy as np
 import torch
 from matplotlib.pyplot import figure
 
-from streetworld.component.traffic_participants.cyclist import Cyclist
-from streetworld.component.traffic_participants.pedestrian import Pedestrian
-from streetworld.component.vehicle.base_vehicle import BaseVehicle
+from streetworld.objects.traffic_participants.cyclist import Cyclist
+from streetworld.objects.traffic_participants.pedestrian import Pedestrian
+from streetworld.objects.vehicle.base_vehicle import BaseVehicle
 from streetworld.constants import DATA_VERSION, DEFAULT_AGENT
-from streetworld.engine import get_logger
+from streetworld.utils.logger import get_logger
 from streetworld.type import MetaDriveType
 from streetworld.utils.math import compute_angular_velocity, norm, wrap_to_pi
 

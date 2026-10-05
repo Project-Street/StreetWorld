@@ -4,7 +4,7 @@ from streetworld.constants import DEFAULT_SENSOR_HPR, DEFAULT_SENSOR_OFFSET
 from streetworld.constants import RENDER_MODE_NONE, DEFAULT_AGENT
 from streetworld.policy.env_input_policy import EnvInputPolicy
 from streetworld.policy.replay_policy import ReplayPolicy
-from streetworld.component.vehicle.vehicle_type import DefaultVehicle
+from streetworld.objects.vehicle.vehicle_type import DefaultVehicle
 from streetworld.obs.gaussian_obs import GaussianObservation
 from streetworld.obs.navigation_obs import NavigationObservation
 from streetworld.obs.state_obs import StateObservation

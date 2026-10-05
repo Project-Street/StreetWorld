@@ -1,7 +1,7 @@
 import copy
 
-from streetworld.component.terrain.ground import GroundPlane
-from streetworld.component.terrain.mesh_terrain import MeshTerrain
+from streetworld.objects.terrain.ground import GroundPlane
+from streetworld.objects.terrain.mesh_terrain import MeshTerrain
 from streetworld.constants import DEFAULT_AGENT
 from streetworld.manager.base_manager import BaseManager
 from streetworld.utils.logger import get_logger, set_log_level

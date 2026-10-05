@@ -31,8 +31,8 @@ from panda3d.core import (
 )
 from scipy.spatial.transform import Rotation
 
-from streetworld.component.terrain.ground import GroundPlane
-from streetworld.component.terrain.mesh_terrain import MeshTerrain
+from streetworld.objects.terrain.ground import GroundPlane
+from streetworld.objects.terrain.mesh_terrain import MeshTerrain
 from streetworld.obs.observation_base import BaseObservation
 from streetworld.type import MetaDriveType
 

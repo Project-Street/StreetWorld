@@ -15,11 +15,9 @@ version = "0.0.1"
 dependencies = [
     "addict",
     "cuda-python<=12.8",
-    "glfw",
     "gymnasium",
     "grpcio",
     "grpcio-tools",
-    "imgui-bundle",
     "lxml",
     "mediapy",
     "opencv-python-headless",
@@ -29,10 +27,12 @@ dependencies = [
     "PyOpenGL",
     "PyOpenGL_accelerate",
     "protobuf",
+    "PyYAML",
     "rich",
     "shapely",
     "torch",
     "trajdata",
+    "trimesh",
     "websockets<14",
     "pyglm",
     "gsplat==1.5.3",
@@ -43,10 +43,10 @@ dependencies = [
 packages = [
     "streetworld",
     "streetworld.misc",
-    "streetworld.misc.nurec_interface",
-    "streetworld.misc.nurec_interface.nre",
-    "streetworld.misc.nurec_interface.nre.grpc",
-    "streetworld.misc.nurec_interface.nre.grpc.protos",
+    "submodules.nurec_interface",
+    "submodules.nurec_interface.nre",
+    "submodules.nurec_interface.nre.grpc",
+    "submodules.nurec_interface.nre.grpc.protos",
 ]
 
 [tool.setuptools.package-dir]
@@ -54,4 +54,4 @@ packages = [
 
 [tool.setuptools.package-data]
 "streetworld" = ["*", "**/*"]
-"streetworld.misc.nurec_interface.nre.grpc.protos" = ["*.proto", "*.pyi"]
+"submodules.nurec_interface.nre.grpc.protos" = ["*.proto", "*.pyi"]

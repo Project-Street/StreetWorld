@@ -205,14 +205,14 @@ def get_object_from_node(node: BulletBodyNode):
 
 
 def is_map_related_instance(obj):
-    from streetworld.component.block.base_block import BaseBlock
-    from streetworld.component.map.base_map import BaseMap
+    from streetworld.objects.block.base_block import BaseBlock
+    from streetworld.objects.map.base_map import BaseMap
     return True if isinstance(obj, BaseBlock) or isinstance(obj, BaseMap) else False
 
 
 def is_map_related_class(object_class):
-    from streetworld.component.block.base_block import BaseBlock
-    from streetworld.component.map.base_map import BaseMap
+    from streetworld.objects.block.base_block import BaseBlock
+    from streetworld.objects.map.base_map import BaseMap
     return True if issubclass(object_class, BaseBlock) or issubclass(object_class, BaseMap) else False
 
 
