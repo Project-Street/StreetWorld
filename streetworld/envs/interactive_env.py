@@ -104,9 +104,9 @@ def make_interactive_env(env_class):
 
             obs, reward, terminated, truncated, info = super()._step(action)
             if self.config["webui"] or self.config["tui"] or self.config["video_output_dir"] is not None:
-                image_stacks = self._with_projected_trajectory(obs["gaussian"], action)
-                image = self._compose_image_layout(image_stacks, self.config["image_layout"])
-                payload = self._extract_video_payload(image, obs["states"], info)
+                image_stacks = self.__with_projected_trajectory(obs["gaussian"], action)
+                image = self.__compose_image_layout(image_stacks, self.config["image_layout"])
+                payload = self.__extract_video_payload(image, obs["states"], info)
                 if self.config["webui"]:
                     self._web_ui.publish(payload)
                 if self.config["video_output_dir"] is not None:
@@ -128,7 +128,7 @@ def make_interactive_env(env_class):
             return obs, reward, terminated, truncated, info
 
         @staticmethod
-        def _compose_image_layout(
+        def __compose_image_layout(
             image_stacks: Mapping[str, np.ndarray],
             layout: Sequence[Sequence[str]],
             pad_value: int = 0,
@@ -171,7 +171,7 @@ def make_interactive_env(env_class):
             return canvas
 
         @staticmethod
-        def _extract_video_payload(
+        def __extract_video_payload(
             image: np.ndarray,
             states: dict[str, Any],
             info: Mapping[str, Any],
@@ -185,7 +185,7 @@ def make_interactive_env(env_class):
                 "angular_velocity": states["angular_velocity"][2],
             }
 
-        def _with_projected_trajectory(self, gaussian_obs: Mapping[str, Any], action: Any) -> Mapping[str, np.ndarray]:
+        def __with_projected_trajectory(self, gaussian_obs: Mapping[str, Any], action: Any) -> Mapping[str, np.ndarray]:
             if self._project_trajectory_on_camera is None or action is None:
                 return gaussian_obs["image"]
 

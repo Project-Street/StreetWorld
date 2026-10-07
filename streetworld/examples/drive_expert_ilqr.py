@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
+from typing import Sequence
 
 from st_renderer import SimulatorInterface
 
@@ -32,19 +33,19 @@ EXPERT_CONFIG = {
 }
 
 
-def main() -> None:
+def main(argv: Sequence[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description="Closed-loop expert-following ScenarioEnv driver")
-    parser.add_argument("--scene_config_directory", type=str, required=True)
+    parser.add_argument("-c", "--scene-config", type=Path, required=True, help="Text file with one scene ID per line")
     parser.add_argument("--dataset", required=True, choices=("nuscenes", "waymo"))
     parser.add_argument("--max-steps", type=int, default=1000)
     parser.add_argument("--warmup-step", type=int, default=None)
     parser.add_argument("--gui", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--gui-image-key", type=str, default="FRONT")
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     print(HELP_MESSAGE)
-    scene_config_directory = Path(args.scene_config_directory).resolve()
-    scene_ids = [path.stem for path in sorted(scene_config_directory.glob("*.yaml"))]
+    scene_config = args.scene_config.expanduser().resolve()
+    scene_ids = scene_config.read_text(encoding="utf-8").splitlines()
 
     model = SimulatorInterface(args.dataset)
     config = Config(EXPERT_CONFIG)

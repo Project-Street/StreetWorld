@@ -1,37 +1,33 @@
 #!/usr/bin/env python
 """
-Run every EasyDrive scenario with browser WASD control.
+Run selected EasyDrive scenarios with browser WASD control.
 """
 
 import argparse
 import time
-from pathlib import Path
+from typing import Sequence
 
 from st_renderer import SimulatorInterface
 from streetworld.config import Config
 from streetworld.envs.scenario_env import ScenarioEnv
 from streetworld.envs.interactive_env import make_interactive_env
+from streetworld.ui.scene_selector import select_catalog_scenes
 
 
 InteractiveScenarioEnv = make_interactive_env(ScenarioEnv)
 
 
-def list_scene_ids(scene_config_directory: str) -> list[str]:
-    return [path.stem for path in sorted(Path(scene_config_directory).glob("*.yaml"))]
-
-
-def main() -> int:
+def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Run EasyDrive scenarios with WebUI manual control")
-    parser.add_argument("-c", "--scene-config-directory", required=True, help="Scenario config directory")
-    parser.add_argument("--dataset", required=True, choices=("nuscenes", "waymo"))
     parser.add_argument("--web-host", default="127.0.0.1", help="WebUI bind address")
     parser.add_argument("--web-port", type=int, default=8080, help="WebUI port")
     parser.add_argument("--video-output-dir", default="videos", help="Directory for env video recordings")
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
+    selection = select_catalog_scenes(datasets=("nuScenes", "Waymo"))
 
     config = Config(
         {
-            "scene_ids": list_scene_ids(args.scene_config_directory),
+            "scene_ids": list(selection.scenes),
             "random_scenario": False,
             "async_mode": True,
             "web_host": args.web_host,
@@ -42,7 +38,7 @@ def main() -> int:
             "eval_repeat_per_scene": 1,
         }
     )
-    env = InteractiveScenarioEnv(SimulatorInterface(args.dataset), config)
+    env = InteractiveScenarioEnv(SimulatorInterface(selection.dataset.lower()), config)
     try:
         while True:
             env.reset()

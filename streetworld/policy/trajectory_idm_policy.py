@@ -33,8 +33,8 @@ class TrajectoryIDMPolicy(BasePolicy):
         if controller.metadrive_type != MetaDriveType.VEHICLE:
             raise ValueError("IDMPolicy can only be used for vehicle agents.")
         super().reset(controller, seed, state, init_state, **kwargs)
-        self.path, self.cumlen = self._build_path_from_trajectory()
-        self.curve_radius = self._curve_radius(self.path)
+        self.path, self.cumlen = self.__build_path_from_trajectory()
+        self.curve_radius = self.__curve_radius(self.path)
         self.last_action = (0.0, 0.0)
 
     def act(self, observation, *args, **kwargs):
@@ -58,7 +58,7 @@ class TrajectoryIDMPolicy(BasePolicy):
         if not np.any((rel_all @ heading_vec) >= 0.0):
             raise RuntimeError("IDMPolicy found no forward waypoint on the trajectory path.")
         front_idx = int(nearest_front_index(pts, ego_xy, heading_vec))
-        v0 = self._target_speed(front_idx)
+        v0 = self.__target_speed(front_idx)
 
         # Free road acceleration
         a_free = self.ACC_FACTOR * (1.0 - (v / max(v0, 1e-3)) ** self.DELTA)
@@ -109,9 +109,9 @@ class TrajectoryIDMPolicy(BasePolicy):
 
         a_cmd = a_free - a_int
         if a_cmd >= 0.0:
-            throttle_brake = a_cmd / self._controller_max_acceleration()
+            throttle_brake = a_cmd / self.__controller_max_acceleration()
         else:
-            throttle_brake = a_cmd / self._controller_max_deceleration()
+            throttle_brake = a_cmd / self.__controller_max_deceleration()
         throttle_brake = float(np.clip(throttle_brake, -1.0, 1.0))
 
         # Steering from lookahead path
@@ -131,7 +131,7 @@ class TrajectoryIDMPolicy(BasePolicy):
         self.last_action = (steering, throttle_brake)
         return self.last_action
 
-    def _build_path_from_trajectory(self):
+    def __build_path_from_trajectory(self):
         points = []
         for ts in sorted(self.trajectory.keys()):
             frame = self.trajectory[ts]
@@ -148,21 +148,21 @@ class TrajectoryIDMPolicy(BasePolicy):
         cumlen = np.concatenate([[0.0], np.cumsum(seg_len)]).astype(np.float32)
         return path, cumlen
 
-    def _target_speed(self, front_idx):
+    def __target_speed(self, front_idx):
         radius = float(self.curve_radius[front_idx])
-        curve_speed = math.sqrt(self._controller_max_acceleration() * radius) * 3.6
+        curve_speed = math.sqrt(self.__controller_max_acceleration() * radius) * 3.6
         return float(min(self.max_speed, curve_speed))
 
-    def _controller_max_acceleration(self):
+    def __controller_max_acceleration(self):
         return 4.0 * float(self.controller.max_engine_force) / float(self.controller.MASS)
 
-    def _controller_max_deceleration(self):
+    def __controller_max_deceleration(self):
         return 4.0 * float(self.controller.max_brake_force) / (
             float(self.controller.MASS) * float(self.controller.TIRE_RADIUS)
         )
 
     @staticmethod
-    def _curve_radius(path):
+    def __curve_radius(path):
         radius = np.full(len(path), np.inf, dtype=np.float32)
         for i in range(1, len(path) - 1):
             a = float(np.linalg.norm(path[i] - path[i - 1]))

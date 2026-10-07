@@ -37,12 +37,12 @@ class EnvInputPolicy(BasePolicy):
         if self.config["action_check"]:
             assert self.get_input_space().contains(action), "Input {} is not compatible with action space {}!".format(action, self.get_input_space())
         if self.discrete_action:
-            action=self._convert_to_continuous_action(action)
+            action=self.__convert_to_continuous_action(action)
         self.last_action = action
         self.action_info["action"] = action
         return action
 
-    def _convert_to_continuous_action(self, action):
+    def __convert_to_continuous_action(self, action):
         steering = float(action % self.discrete_steering_dim) * self.steering_unit - 1.0
         throttle = float(action // self.discrete_steering_dim) * self.throttle_unit - 1.0
         return steering, throttle

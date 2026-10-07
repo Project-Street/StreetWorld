@@ -14,7 +14,7 @@ class ScenarioDataManager(BaseManager):
     PRIORITY = -10
 
     @staticmethod
-    def _build_ground_plane(ego_poses, ego_height, start_ts):
+    def __build_ground_plane(ego_poses, ego_height, start_ts):
         normals = np.stack([np.asarray(pose)[:3, 2] for pose in ego_poses.values()], axis=0)
         average_normal = normals.sum(axis=0)
         average_normal_norm = np.linalg.norm(average_normal)
@@ -60,10 +60,10 @@ class ScenarioDataManager(BaseManager):
         # stat
         # self.coverage = [0 for _ in range(self.num_scenarios)]
 
-    def _post_process_config(self, config):
+    def __post_process_config(self, config):
         pass
 
-    def _load_scene(self, scene_id):
+    def __load_scene(self, scene_id):
         (
             timestamp_range,
             camera_params,
@@ -72,8 +72,8 @@ class ScenarioDataManager(BaseManager):
             scene_mesh_path,
             scene_mesh_transform,
         ) = self.meta_loader(scene_id)
-        ego_poses, camera_params = self._calibrate_ego_z(ego_poses, camera_params)
-        metadata = self.restructure_metadata(
+        ego_poses, camera_params = self.__calibrate_ego_z(ego_poses, camera_params)
+        metadata = self.__restructure_metadata(
             scene_id=scene_id,
             timestamp_range=timestamp_range,
             camera_params=camera_params,
@@ -84,17 +84,17 @@ class ScenarioDataManager(BaseManager):
         metadata["scene_mesh_transform"] = scene_mesh_transform
         return metadata
 
-    def _ego_vehicle_height(self):
+    def __ego_vehicle_height(self):
         actor_config = self.base_config["actor_config"]
         vehicle_size = actor_config["controller_config"]["size"]
         if vehicle_size is not None:
             return float(vehicle_size[2])
         return float(actor_config["controller"].DEFAULT_HEIGHT)
 
-    def _calibrate_ego_z(self, ego_poses, camera_params):
+    def __calibrate_ego_z(self, ego_poses, camera_params):
         ego_z_height = float(self.base_config.get("ego_z_height", 0))
         ego_origin_delta = np.eye(4, dtype=np.float32)
-        ego_origin_delta[2, 3] = self._ego_vehicle_height() / 2 - ego_z_height
+        ego_origin_delta[2, 3] = self.__ego_vehicle_height() / 2 - ego_z_height
 
         calibrated_ego_poses = {
             int(timestamp): (np.asarray(pose, dtype=np.float32) @ ego_origin_delta).astype(np.float32)
@@ -124,7 +124,7 @@ class ScenarioDataManager(BaseManager):
         self.random_scenario = not order
         self.eval_mode = True
 
-    def restructure_metadata(self, scene_id, timestamp_range, camera_params, ego_poses, participants):
+    def __restructure_metadata(self, scene_id, timestamp_range, camera_params, ego_poses, participants):
         init_state, agent_state = {}, {}
         ego_ts = sorted(int(ts) for ts in ego_poses.keys())
         timestamp_range[0] = min(ego_ts, key=lambda ts: abs(ts - timestamp_range[0]))
@@ -218,7 +218,7 @@ class ScenarioDataManager(BaseManager):
         config_dict["controller"] = config_dict.get("controller", random_vehicle_type(self.np_random)) 
 
         scene_id = self.scene_ids[self.current_scene_index]
-        self.current_metadata = self._load_scene(scene_id)
+        self.current_metadata = self.__load_scene(scene_id)
         current_metadata = self.current_metadata
         ego_poses = current_metadata['ego_poses']
         # average_ego_height =  np.mean([pose[2][3] for pose in ego_poses.values()])
@@ -229,7 +229,7 @@ class ScenarioDataManager(BaseManager):
             'normal': [0, 0, 1],
             'constant': ground_height
         }
-        # current_metadata['ground_plane'] = self._build_ground_plane(
+        # current_metadata['ground_plane'] = self.__build_ground_plane(
         #     ego_poses,
         #     ego_height=config_dict["controller"].DEFAULT_HEIGHT,
         #     start_ts=start_ts

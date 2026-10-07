@@ -79,8 +79,8 @@ class BaseVehicle(BaseObject, BaseVehicleState):
         self.set_metadrive_type(MetaDriveType.VEHICLE)
 
         # build vehicle physics model
-        self.vehicle, self.body = self._create_vehicle_chassis()
-        self.wheels = self._create_wheel()
+        self.vehicle, self.body = self.__create_vehicle_chassis()
+        self.wheels = self.__create_wheel()
 
         # powertrain config
         self.enable_reverse = self.config["enable_reverse"]
@@ -95,17 +95,17 @@ class BaseVehicle(BaseObject, BaseVehicleState):
 
 
         # step info
-        self._init_step_info()
+        self.__init_step_info()
 
         if _calling_reset:
             self.reset(position=position, heading_theta=heading_theta, vehicle_config=config, **kwargs)
 
-    def _init_step_info(self):
+    def __init_step_info(self):
         # done info will be initialized every frame
         self.init_state_info()
 
     @staticmethod
-    def _preprocess_action(action):
+    def __preprocess_action(action):
         action = safe_clip_for_small_array(action, -1, 1)
         return action, {'raw_action': (action[0], action[1])}
 
@@ -154,7 +154,7 @@ class BaseVehicle(BaseObject, BaseVehicleState):
             self.last_angular_velocity = self.angular_velocity
 
         # done info
-        self._init_step_info()
+        self.__init_step_info()
 
     def move(self, action=None):
         """
@@ -162,7 +162,7 @@ class BaseVehicle(BaseObject, BaseVehicleState):
         """
         # init step info to store info before each step
 
-        self._init_step_info()
+        self.__init_step_info()
 
         if 'transform' in action and 'velocity' in action and 'angular_velocity' in action:
             self.set_transform(action["transform"])
@@ -172,17 +172,17 @@ class BaseVehicle(BaseObject, BaseVehicleState):
             step_info = None
         else:
             if "max_acceleration" in self.config:
-                self.limit_acceleration()
+                self.__limit_acceleration()
 
             self.last_velocity = self.velocity
             self.last_angular_velocity = self.angular_velocity
 
-            action, step_info = self._preprocess_action(action)
+            action, step_info = self.__preprocess_action(action)
             self.last_current_action.append(action)  # the real step of physics world is implemented in taskMgr.step()
-            self._set_action(action)
+            self.__set_action(action)
         return step_info
 
-    def limit_acceleration(self):
+    def __limit_acceleration(self):
         max_velocity_delta = float(self.config["max_acceleration"]) * self.physics_world.step_size_sec
         assert max_velocity_delta > 0.0
 
@@ -228,7 +228,7 @@ class BaseVehicle(BaseObject, BaseVehicleState):
         if (contact_points[:, 2] - nearest_z > 0).any().item():
             self.crash_world = True
 
-    def _set_action(self, action):
+    def __set_action(self, action):
         if action is None:
             return
         steering = action[0]
@@ -236,9 +236,9 @@ class BaseVehicle(BaseObject, BaseVehicleState):
         self.steering = steering
         self.vehicle.setSteeringValue(self.steering * self.max_steering, 0)
         self.vehicle.setSteeringValue(self.steering * self.max_steering, 1)
-        self._apply_throttle_brake(action[1])
+        self.__apply_throttle_brake(action[1])
 
-    def _apply_throttle_brake(self, throttle_brake):
+    def __apply_throttle_brake(self, throttle_brake):
         for wheel_index in range(4):
             if throttle_brake >= 0:
                 self.vehicle.setBrake(2.0, wheel_index)
@@ -265,7 +265,7 @@ class BaseVehicle(BaseObject, BaseVehicleState):
                         self.vehicle.applyEngineForce(0.0, wheel_index)
                         self.vehicle.setBrake(abs(throttle_brake) * self.max_brake_force, wheel_index)
 
-    def _create_vehicle_chassis(self):
+    def __create_vehicle_chassis(self):
         chassis = BaseRigidBodyNode(self.name, MetaDriveType.VEHICLE, self.MASS)
         chassis.base_object = self
 
@@ -280,7 +280,7 @@ class BaseVehicle(BaseObject, BaseVehicleState):
         vehicle_chassis.setCoordinateSystem(ZUp)
         return vehicle_chassis, chassis
 
-    def _create_wheel(self):
+    def __create_wheel(self):
         f_l = self.FRONT_WHEELBASE
         r_l = -self.REAR_WHEELBASE
         lateral = self.LATERAL_TIRE_TO_CENTER

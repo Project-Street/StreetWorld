@@ -49,23 +49,23 @@ class NavigationObservation(BaseObservation, Randomizable):
         self.location = trajdata_map.location if trajdata_map is not None else None
         self.init_state = init_state
         self.state = state
-        self._clear_expert_reference()
+        self.__clear_expert_reference()
         self._carla_route_xy = None
         self._carla_route_cursor = None
 
         if self.navigating_type == "expert_following":
-            self._build_expert_path()
+            self.__build_expert_path()
         elif self.navigating_type == "lane_following":
-            self._build_lane_follow_path()
+            self.__build_lane_follow_path()
         elif self.navigating_type == "snap_lane":
-            self._build_snap_lane_path()
+            self.__build_snap_lane_path()
         else:
             raise ValueError(f"Unknown navigating_type: {self.navigating_type}")
         
         self.destination = self._path_xy[-1] if self._path_xy is not None else init_state["destination"]
 
     def observe(self):
-        turn_signal, target_waypoint = self._get_turn_signal_and_target_waypoint()
+        turn_signal, target_waypoint = self.__get_turn_signal_and_target_waypoint()
         observation = {
             'navigating_type': self.navigating_type,
             'turn_signal': turn_signal,
@@ -75,20 +75,20 @@ class NavigationObservation(BaseObservation, Randomizable):
             'location': self.location,
         }
         if self.carla_style_target is not None:
-            observation['carla_style_target'] = self._carla_target_waypoint(self._vehicle_xy(self.controller))
+            observation['carla_style_target'] = self.__carla_target_waypoint(self.__vehicle_xy(self.controller))
         return observation
 
-    def _clear_expert_reference(self):
+    def __clear_expert_reference(self):
         self._expert_speed = None
         self._expert_angular_velocity = None
         self._expert_heading = None
     
-    def _get_turn_signal_and_target_waypoint(self):
+    def __get_turn_signal_and_target_waypoint(self):
         if  len(self._path_xy) < 2:
             return 0, self._path_xy[-1]
 
-        ego_xy = self._vehicle_xy(self.controller)
-        heading_vec = self._ego_heading_vec(self.controller)
+        ego_xy = self.__vehicle_xy(self.controller)
+        heading_vec = self.__ego_heading_vec(self.controller)
         i0 = nearest_front_index(self._path_xy, ego_xy, heading_vec)
         if i0 >= len(self._path_xy):
             return 0, self._path_xy[-1]
@@ -96,7 +96,7 @@ class NavigationObservation(BaseObservation, Randomizable):
         if self.forecast_type == "step":
             idx = i0 + int(self.forecast_value)
         elif self.forecast_type == "distance":
-            idx = self._first_index_by_arclen(self._path_cumlen, i0, self.forecast_value)
+            idx = self.__first_index_by_arclen(self._path_cumlen, i0, self.forecast_value)
         else:
             raise ValueError(f"Unknown forecast_type: {self.forecast_type}")
         idx = min(idx, len(self._path_xy) - 1)
@@ -124,10 +124,10 @@ class NavigationObservation(BaseObservation, Randomizable):
         self.state = None
         self._carla_route_xy = None
         self._carla_route_cursor = None
-        self._clear_expert_reference()
+        self.__clear_expert_reference()
 
     # ---------- path builders ----------
-    def _build_expert_path(self):
+    def __build_expert_path(self):
         timestamps = []
         points = []
         ang_vels = []
@@ -148,14 +148,14 @@ class NavigationObservation(BaseObservation, Randomizable):
         if self.path_interval is not None:
             values = np.column_stack([speeds, ang_vels])
             if self.forecast_type == "distance":
-                points, values, headings = self._sparsify_by_distance_interval(
+                points, values, headings = self.__sparsify_by_distance_interval(
                     points,
                     self.path_interval,
                     values,
                     headings,
                 )
             elif self.forecast_type == "step":
-                points, values, headings = self._sparsify_by_time_interval(
+                points, values, headings = self.__sparsify_by_time_interval(
                     timestamps,
                     points,
                     self.path_interval,
@@ -165,16 +165,16 @@ class NavigationObservation(BaseObservation, Randomizable):
             speeds = values[:, 0]
             ang_vels = values[:, 1]
 
-        self._set_path(points)
+        self.__set_path(points)
 
         if self._path_xy is not None:
             self._expert_speed = np.asarray(speeds, dtype=np.float32)
             self._expert_angular_velocity = np.asarray(ang_vels, dtype=np.float32)
             self._expert_heading = np.asarray(headings, dtype=np.float32)
         else:
-            self._clear_expert_reference()
+            self.__clear_expert_reference()
 
-    def _build_lane_follow_path(self):
+    def __build_lane_follow_path(self):
         spawn_yaw = float(self.init_state["spawn_yaw"])
         spawn_transform = self.state[min(self.state)]["transform"]
         spawn_xyz = vehicle_bottom_center(spawn_transform, self.controller.HEIGHT)
@@ -189,7 +189,7 @@ class NavigationObservation(BaseObservation, Randomizable):
             raise RuntimeError(f"No current lane found for lane_following navigation at spawn pose {xyzh.tolist()}.")
         curr_lane = lanes[0]
 
-        accum_length = self._seg_len(curr_lane.center.xy).sum()
+        accum_length = self.__seg_len(curr_lane.center.xy).sum()
         lanes = [curr_lane]
         while accum_length < lane_follow_length:
             succs = list(curr_lane.next_lanes)
@@ -197,16 +197,16 @@ class NavigationObservation(BaseObservation, Randomizable):
                 break
             next_lane = self.trajdata_map.get_road_lane(self.np_random.choice(succs))
             lanes.append(next_lane)
-            accum_length += self._seg_len(next_lane.center.xy).sum()
+            accum_length += self.__seg_len(next_lane.center.xy).sum()
             curr_lane = next_lane
         
-        path_pts = self._concat_centerlines(lanes, spawn_xyz[:2], spawn_yaw)
+        path_pts = self.__concat_centerlines(lanes, spawn_xyz[:2], spawn_yaw)
         if self.path_interval is not None and self.forecast_type == "distance":
-            path_pts, _, _ = self._sparsify_by_distance_interval(path_pts, self.path_interval)
-        self._set_path(path_pts)
-        self._clear_expert_reference()
+            path_pts, _, _ = self.__sparsify_by_distance_interval(path_pts, self.path_interval)
+        self.__set_path(path_pts)
+        self.__clear_expert_reference()
 
-    def _build_snap_lane_path(self):
+    def __build_snap_lane_path(self):
         timestamps = []
         expert = []
         headings = []
@@ -218,13 +218,13 @@ class NavigationObservation(BaseObservation, Randomizable):
         if self.path_interval is None:
             anchors, anchor_headings = expert, headings
         elif self.forecast_type == "distance":
-            anchors, _, anchor_headings = self._sparsify_by_distance_interval(
+            anchors, _, anchor_headings = self.__sparsify_by_distance_interval(
                 expert,
                 self.path_interval,
                 headings=headings,
             )
         else:
-            anchors, _, anchor_headings = self._sparsify_by_time_interval(
+            anchors, _, anchor_headings = self.__sparsify_by_time_interval(
                 timestamps,
                 expert,
                 self.path_interval,
@@ -232,27 +232,27 @@ class NavigationObservation(BaseObservation, Randomizable):
             )
         snapped = []
         for point, heading in zip(anchors, anchor_headings):
-            snapped_point = self._snap_point_to_lane_center(point, heading)
+            snapped_point = self.__snap_point_to_lane_center(point, heading)
             if self.forecast_type == "step" and len(snapped) > 0 and np.array_equal(snapped_point, snapped[-1]):
                 continue
             snapped.append(snapped_point)
         if self.carla_style_target is not None:
-            self._carla_route_xy = self._build_carla_route(snapped)
+            self._carla_route_xy = self.__build_carla_route(snapped)
             self._carla_route_cursor = 0
-        self._set_path(snapped, smooth=False)
-        self._clear_expert_reference()
+        self.__set_path(snapped, smooth=False)
+        self.__clear_expert_reference()
 
     # ---------- small utils ----------
     @staticmethod
-    def _vehicle_xy(vehicle):
+    def __vehicle_xy(vehicle):
         pos = vehicle.position
         return np.array([float(pos[0]), float(pos[1])], dtype=np.float32)
 
     @staticmethod
-    def _xy2(p):
+    def __xy2(p):
         return float(p[0]), float(p[1])
 
-    def _set_path(self, pts, smooth=True):
+    def __set_path(self, pts, smooth=True):
         
         pts = np.asarray(pts, dtype=np.float32)
         n = len(pts)
@@ -271,16 +271,16 @@ class NavigationObservation(BaseObservation, Randomizable):
             self._path_xy = None
             self._path_cumlen = None
             return
-        seg = self._seg_len(path)
+        seg = self.__seg_len(path)
         self._path_xy = path
         self._path_cumlen = np.concatenate([[0.0], np.cumsum(seg)])
         if (
             self._expert_speed is not None and
             len(self._expert_speed) != len(self._path_xy)
         ):
-            self._clear_expert_reference()
+            self.__clear_expert_reference()
 
-    def _build_carla_route(self, sparse_points):
+    def __build_carla_route(self, sparse_points):
         points = np.asarray(sparse_points, dtype=np.float32)
         keep = np.concatenate([[True], np.linalg.norm(points[1:] - points[:-1], axis=1) > 1e-6])
         points = points[keep]
@@ -335,7 +335,7 @@ class NavigationObservation(BaseObservation, Randomizable):
 
         return dense_points[sampled_indices]
 
-    def _carla_target_waypoint(self, ego_xy):
+    def __carla_target_waypoint(self, ego_xy):
         cursor = self._carla_route_cursor
         route = self._carla_route_xy
         if len(route) == 1:
@@ -359,14 +359,14 @@ class NavigationObservation(BaseObservation, Randomizable):
         return route[target_index]
 
     @staticmethod
-    def _sample_axis(total, interval):
+    def __sample_axis(total, interval):
         samples = np.arange(0.0, total, interval)
         if len(samples) == 0 or not np.isclose(samples[-1], total):
             samples = np.concatenate([samples, [total]])
         return samples
 
     @staticmethod
-    def _interpolate_path(points, source_axis, sample_axis, values=None, headings=None):
+    def __interpolate_path(points, source_axis, sample_axis, values=None, headings=None):
         sampled_points = np.stack(
             [
                 np.interp(sample_axis, source_axis, points[:, dim])
@@ -386,7 +386,7 @@ class NavigationObservation(BaseObservation, Randomizable):
             sampled_headings = np.interp(sample_axis, source_axis, unwrapped)
         return sampled_points, sampled_values, sampled_headings
 
-    def _sparsify_by_distance_interval(self, points, interval, values=None, headings=None):
+    def __sparsify_by_distance_interval(self, points, interval, values=None, headings=None):
         points = np.asarray(points)
         seg = np.linalg.norm(points[1:] - points[:-1], axis=1)
         keep = np.concatenate([[True], seg > 1e-6])
@@ -396,9 +396,9 @@ class NavigationObservation(BaseObservation, Randomizable):
         if headings is not None:
             headings = np.asarray(headings)[keep]
         cumlen = np.concatenate([[0.0], np.cumsum(np.linalg.norm(points[1:] - points[:-1], axis=1))])
-        return self._interpolate_path(points, cumlen, self._sample_axis(cumlen[-1], interval), values, headings)
+        return self.__interpolate_path(points, cumlen, self.__sample_axis(cumlen[-1], interval), values, headings)
 
-    def _sparsify_by_time_interval(self, timestamps, points, interval, values=None, headings=None):
+    def __sparsify_by_time_interval(self, timestamps, points, interval, values=None, headings=None):
         timestamps = np.asarray(timestamps)
         points = np.asarray(points)
         if values is not None:
@@ -406,22 +406,22 @@ class NavigationObservation(BaseObservation, Randomizable):
         if headings is not None:
             headings = np.asarray(headings)
         physical_time = (timestamps - timestamps[0]) * 1e-6
-        return self._interpolate_path(
+        return self.__interpolate_path(
             points,
             physical_time,
-            self._sample_axis(physical_time[-1], interval),
+            self.__sample_axis(physical_time[-1], interval),
             values,
             headings,
         )
 
-    def _snap_point_to_lane_center(self, point, heading):
-        lane = self._lane_for_point(point, heading)
+    def __snap_point_to_lane_center(self, point, heading):
+        lane = self.__lane_for_point(point, heading)
         if lane is None:
             return np.asarray(point)[:2]
         query = np.asarray([[point[0], point[1], point[2], heading]])
         return lane.center.project_onto(query)[0, :2]
 
-    def _lane_for_point(self, point, heading):
+    def __lane_for_point(self, point, heading):
         assert isinstance(self.trajdata_map, VectorMap), "trajdata_map must be provided for snap_lane navigation type."
         query = np.asarray([point[0], point[1], point[2], heading])
         lanes = self.trajdata_map.get_current_lane(
@@ -433,24 +433,24 @@ class NavigationObservation(BaseObservation, Randomizable):
             return None
         return lanes[0]
     
-    def _seg_len(self, points):
+    def __seg_len(self, points):
         seg = np.linalg.norm(points[1:] - points[:-1], axis=1)
         return seg
 
 
     @staticmethod
-    def _seg_len(points):
+    def __seg_len(points):
         seg = np.linalg.norm(points[1:] - points[:-1], axis=1)
         return seg
 
     @staticmethod
-    def _first_index_by_arclen(cumlen, i0, ahead_len):
+    def __first_index_by_arclen(cumlen, i0, ahead_len):
         target = cumlen[i0] + max(0.0, ahead_len)
         idx = np.searchsorted(cumlen, target, side="right")
         return int(idx)
 
     @staticmethod
-    def _ego_heading_vec(vehicle):
+    def __ego_heading_vec(vehicle):
         h = vehicle.heading  # (cos, sin)
         return np.array([h[0], h[1]])
 
@@ -478,7 +478,7 @@ class NavigationObservation(BaseObservation, Randomizable):
         )
 
     @staticmethod
-    def _signed_angle(v1, v2):
+    def __signed_angle(v1, v2):
         v1n = v1 / np.linalg.norm(v1)
         v2n = v2 / np.linalg.norm(v2)
         dot = np.clip(float(np.dot(v1n, v2n)), -1.0, 1.0)
@@ -486,7 +486,7 @@ class NavigationObservation(BaseObservation, Randomizable):
         cross_z = v1n[0] * v2n[1] - v1n[1] * v2n[0]
         return ang if cross_z > 0 else -ang
 
-    def _concat_centerlines(self, lane_seq, start_xy, start_heading):
+    def __concat_centerlines(self, lane_seq, start_xy, start_heading):
         pts = []
         for idx, lane in enumerate(lane_seq):
             cl = np.asarray(lane.center.xy, dtype=np.float32)

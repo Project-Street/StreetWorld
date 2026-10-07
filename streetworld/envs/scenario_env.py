@@ -41,11 +41,11 @@ class ScenarioEnv(BaseEnv):
     def get_average_metric(self):
         return self.metric_calculator.get_average_metric()
 
-    def reward_function(self):
+    def _reward_function(self):
         return self.reward_calculator.compute(self)
 
 
-    # def cost_function(self):
+    # def _cost_function(self):
     #     actor_mgr = self.agent_managers['actor']
     #     state = actor_mgr.state
 

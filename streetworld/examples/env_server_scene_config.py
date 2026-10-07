@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Serve scenarios supplied by a scene config file or directory."""
+"""Serve scenarios listed in a text file."""
 
 from __future__ import annotations
 

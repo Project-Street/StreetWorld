@@ -665,7 +665,7 @@ class CollisionBodyObservation(BaseObservation):
             scene_objects[object_id] = {
                 "size": state["size"],
                 "transform": state["transform"],
-                "color": self._object_color(scene_object),
+                "color": self.__object_color(scene_object),
             }
             if scene_object is self.controller:
                 ego_object_id = object_id
@@ -679,7 +679,7 @@ class CollisionBodyObservation(BaseObservation):
         )
 
     @staticmethod
-    def _object_color(scene_object: Any) -> tuple[float, float, float, float]:
+    def __object_color(scene_object: Any) -> tuple[float, float, float, float]:
         object_type = scene_object.metadrive_type
         if MetaDriveType.is_vehicle(object_type):
             color = _VEHICLE_COLOR

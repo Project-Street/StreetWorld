@@ -58,7 +58,7 @@ class RewardCalculator:
             success_bonus = float(config["success_bonus"])
 
         progress, progress_idx, deviation = self._project_progress_along_path(
-            navigation._vehicle_xy(vehicle), navigation._path_xy, navigation._path_cumlen,
+            navigation._NavigationObservation__vehicle_xy(vehicle), navigation._path_xy, navigation._path_cumlen,
             self._last_progress_idx,
         )
         progress_delta = 0.0 if self._last_progress_value is None else progress - self._last_progress_value
@@ -138,7 +138,7 @@ class RewardCalculator:
         w_mid = float(config["ttc_mid_penalty_weight"])
         w_high = float(config["ttc_high_penalty_weight"])
         w_safe_bonus = float(config["ttc_safe_bonus_weight"])
-        min_ttc = self._compute_min_ttc(vehicle, env._collect_all_object())
+        min_ttc = self._compute_min_ttc(vehicle, env._BaseEnv__collect_all_object())
         if min_ttc is not None:
             if min_ttc <= ttc_warn:
                 penalty = (ttc_warn - min_ttc) / max(ttc_warn, 1e-3)

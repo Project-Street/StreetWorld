@@ -62,7 +62,7 @@ class AgentManager(BaseManager):
         self.out_of_road_threshold = float(config.get("policy_config", {}).get("out_of_road_threshold", 5))
         self.warmup_step = config.get("warmup_step")
         
-    def lazy_init(self):
+    def __lazy_init(self):
         self.observer = self.config['observer'](self.config['observer_config'])
         self.policy = self.config['policy'](step_manager=self.step_manager, config=self.config['policy_config'])
         if self.warmup_step is not None:
@@ -91,9 +91,9 @@ class AgentManager(BaseManager):
         )
 
         if not self.INITIALIZED:
-            self.lazy_init()
+            self.__lazy_init()
 
-        self.controller = self._create_agent(**kwargs)
+        self.controller = self.__create_agent(**kwargs)
         self.state = AgentState.NOT_SPAWN
 
         try:
@@ -119,7 +119,7 @@ class AgentManager(BaseManager):
         if self.expert_policy is not None:
             self.expert_policy.reset(controller=self.controller, seed=self.generate_seed(), **kwargs)
 
-        if self._is_out_of_road():
+        if self.__is_out_of_road():
             self.clear_all_objects()
             self.state = AgentState.OUT_OF_ROAD
             assert isinstance(self.get_action_spaces(), Space)
@@ -137,11 +137,11 @@ class AgentManager(BaseManager):
         
         assert isinstance(self.get_action_spaces(), Space)
 
-    def _create_agent(self, physics_world, init_state, **kwargs):
+    def __create_agent(self, physics_world, init_state, **kwargs):
         # Only create one agent - use the first config or default agent
         obj_name = "default_agent"
 
-        obj = self.spawn_object(
+        obj = self._spawn_object(
             self.config['controller'], 
             name=obj_name,
             config=self.config['controller_config'], 
@@ -206,7 +206,7 @@ class AgentManager(BaseManager):
                 self.state = AgentState.OUT_OF_STEP
                 return
 
-            if self.step_manager.key_step and self._is_out_of_road():
+            if self.step_manager.key_step and self.__is_out_of_road():
                 self.clear_all_objects()
                 self.state = AgentState.OUT_OF_ROAD
                 return
@@ -216,7 +216,7 @@ class AgentManager(BaseManager):
                 self.state = AgentState.SUCCESS
                 return
 
-    def _is_out_of_road(self):
+    def __is_out_of_road(self):
         if self.trajdata_map is not None:
             map_position = vehicle_bottom_center(self.controller.transform, self.controller.HEIGHT)
             lanes = self.trajdata_map.get_lanes_within(map_position, self.out_of_road_threshold)
@@ -292,7 +292,7 @@ class AgentManager(BaseManager):
             lanes = self.trajdata_map.get_current_lane(xyzh, max_heading_error=np.inf, max_dist=2.25)
             if len(lanes) > 0:
                 current_lane = lanes[0]
-            covered_lanes = self._covered_lanes(map_position, float(self.controller.heading_theta), length, width)
+            covered_lanes = self.__covered_lanes(map_position, float(self.controller.heading_theta), length, width)
         if self.is_static:
             velocity = np.zeros(3, dtype=np.float32)
             acceleration = np.zeros(3, dtype=np.float32)
@@ -319,7 +319,7 @@ class AgentManager(BaseManager):
             "type": self.controller.metadrive_type
         }
 
-    def _covered_lanes(self, map_position, heading_theta, length, width):
+    def __covered_lanes(self, map_position, heading_theta, length, width):
         half_length = float(length) * 0.5
         half_width = float(width) * 0.5
         forward = np.asarray([math.cos(heading_theta), math.sin(heading_theta)], dtype=np.float32)

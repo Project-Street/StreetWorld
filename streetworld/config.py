@@ -141,13 +141,13 @@ class Config:
             d[subkey] = v
 
         cfg_dict = super().__getattribute__("_cfg_dict")
-        merged = self._merge_a_into_b(
+        merged = self.__merge_a_into_b(
             option_cfg_dict, cfg_dict, allow_list_keys, replace_keys=replace_keys
         )
         super().__setattr__("_cfg_dict", ConfigDict(merged))
 
     @staticmethod
-    def _merge_a_into_b(
+    def __merge_a_into_b(
         a: Dict, b: Dict, allow_list_keys: bool = True, replace_keys: list = None
     ) -> Dict:
         """
@@ -188,7 +188,7 @@ class Config:
                             f"base because {k} is a dict in the child config "
                             f"but is of type {type(b[k])} in base config."
                         )
-                    b[k] = Config._merge_a_into_b(v, b[k], allow_list_keys)
+                    b[k] = Config.__merge_a_into_b(v, b[k], allow_list_keys)
                 else:
                     b[k] = ConfigDict(v)
             else:
@@ -223,7 +223,7 @@ class Config:
         file_ext = os.path.splitext(filename)[1].lower()
 
         if file_ext == '.py':
-            cls._validate_py_syntax(filename)
+            cls.__validate_py_syntax(filename)
             # For .py files, import as a module
             with tempfile.TemporaryDirectory() as temp_dir:
                 mod_name = os.path.splitext(os.path.basename(filename))[0]
@@ -271,7 +271,7 @@ class Config:
         return cfg
 
     @staticmethod
-    def _validate_py_syntax(filename):
+    def __validate_py_syntax(filename):
         """Validate Python syntax of config file."""
         with open(filename, encoding="utf-8") as f:
             content = f.read()

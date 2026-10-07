@@ -65,11 +65,11 @@ def filter_catalog_scenes(
     return scenes or []
 
 
-def select_catalog_scenes() -> CatalogSelection:
+def select_catalog_scenes(datasets: Sequence[str] = tuple(CATALOGS)) -> CatalogSelection:
     """Interactively select a dataset and tags, returning a non-empty queue."""
     dataset_page = _SelectionPage(
         detail="Choose a dataset",
-        options=list(CATALOGS),
+        options=list(datasets),
     )
     while True:
         dataset = _run_selection_page(dataset_page)

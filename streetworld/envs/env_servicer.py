@@ -56,8 +56,8 @@ class EnvServicer(service_pb2_grpc.EnvServiceServicer):
             return service_pb2.ResetResponse(
                 status=False,
                 message="",
-                observation=self._serialize_observation(obs),
-                StepInfo=self._dict_to_struct(reset_info),
+                observation=self.__serialize_observation(obs),
+                StepInfo=self.__dict_to_struct(reset_info),
             )
 
     def Step(self, request: service_pb2.StepRequest, context) -> service_pb2.StepResponse:
@@ -67,14 +67,14 @@ class EnvServicer(service_pb2_grpc.EnvServiceServicer):
             return service_pb2.StepResponse(
                 status=False,
                 message="",
-                observation=self._serialize_observation(obs),
+                observation=self.__serialize_observation(obs),
                 reward=float(reward),
                 terminated=bool(terminated),
                 truncated=bool(truncated),
-                StepInfo=self._dict_to_struct(info),
+                StepInfo=self.__dict_to_struct(info),
             )
 
-    def _serialize_observation(self, obs: Any) -> common_pb2.Observation:
+    def __serialize_observation(self, obs: Any) -> common_pb2.Observation:
         if "collision_body" in obs:
             obs = dict(obs)
             # TODO: Add a binary gRPC contract for collision body images when remote use is required.
@@ -83,19 +83,19 @@ class EnvServicer(service_pb2_grpc.EnvServiceServicer):
         if "gaussian" in obs:
             other_obs = dict(obs)
             gaussian_obs = other_obs.pop("gaussian")
-            images = self._serialize_gaussian_images(gaussian_obs["image"], gaussian_obs["camera_info"])
+            images = self.__serialize_gaussian_images(gaussian_obs["image"], gaussian_obs["camera_info"])
             return common_pb2.Observation(
                 images_observation=images,
-                other_observation=self._dict_to_struct(other_obs),
+                other_observation=self.__dict_to_struct(other_obs),
             )
 
         if "image" in obs and "camera_info" in obs:
-            images = self._serialize_gaussian_images(obs["image"], obs["camera_info"])
+            images = self.__serialize_gaussian_images(obs["image"], obs["camera_info"])
             return common_pb2.Observation(images_observation=images)
 
-        return common_pb2.Observation(other_observation=self._dict_to_struct(obs))
+        return common_pb2.Observation(other_observation=self.__dict_to_struct(obs))
 
-    def _serialize_gaussian_images(
+    def __serialize_gaussian_images(
         self,
         gaussian_images: Dict[str, np.ndarray],
         camera_info: Dict[str, Dict[str, Any]],
@@ -109,28 +109,28 @@ class EnvServicer(service_pb2_grpc.EnvServiceServicer):
                 common_pb2.CameraImage(
                     camera_name=cam_name,
                     image_data=frame.tobytes(),
-                    camera_info=self._dict_to_struct(camera_info[cam_name]),
+                    camera_info=self.__dict_to_struct(camera_info[cam_name]),
                 )
             )
         return images
 
-    def _to_builtin(self, value: Any) -> Any:
+    def __to_builtin(self, value: Any) -> Any:
         if isinstance(value, dict):
-            return {str(k): self._to_builtin(v) for k, v in value.items()}
+            return {str(k): self.__to_builtin(v) for k, v in value.items()}
         if isinstance(value, (list, tuple)):
-            return [self._to_builtin(v) for v in value]
+            return [self.__to_builtin(v) for v in value]
         if isinstance(value, np.ndarray):
-            return self._to_builtin(value.tolist())
+            return self.__to_builtin(value.tolist())
         if isinstance(value, np.generic):
             return value.item()
         if isinstance(value, torch.Tensor):
-            return self._to_builtin(value.detach().cpu().tolist())
+            return self.__to_builtin(value.detach().cpu().tolist())
         if isinstance(value, (str, int, float, bool)) or value is None:
             return value
         return str(value)
 
-    def _dict_to_struct(self, data: Any) -> struct_pb2.Struct:
-        payload = self._to_builtin(data)
+    def __dict_to_struct(self, data: Any) -> struct_pb2.Struct:
+        payload = self.__to_builtin(data)
         if not isinstance(payload, dict):
             payload = {"__payload__": payload}
         struct = struct_pb2.Struct()

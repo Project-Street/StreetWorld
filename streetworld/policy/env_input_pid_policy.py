@@ -39,16 +39,16 @@ class EnvInputPIDPolicy(EnvInputPolicy):
     def reset(self, controller, seed, state, init_state, **kwargs):
         super().reset(controller, seed, state, init_state, **kwargs)
         self._cached_waypoints = None
-        self._cached_transform = self._xy_transform()
+        self._cached_transform = self.__xy_transform()
         self._last_control_timestamp = self.step_manager.current_timestamp
         self._turn_controller = PIDController(*self.turn_controller_params)
         self._speed_controller = PIDController(*self.speed_controller_params)
 
-    def _xy_transform(self):
+    def __xy_transform(self):
         transform = self.controller.transform
         return transform[np.ix_([0, 1, 3], [0, 1, 3])]
 
-    def _set_cached_waypoints(self, waypoints):
+    def __set_cached_waypoints(self, waypoints):
         waypoints = np.asarray(waypoints, dtype=np.float32).reshape(-1, 2)
         t_orig = np.arange(1, len(waypoints) + 1, dtype=np.float32) * self.trajectory_dt
         t_ref = np.concatenate(([0.0], t_orig))
@@ -61,10 +61,10 @@ class EnvInputPIDPolicy(EnvInputPolicy):
         self._cached_waypoints = np.column_stack(
             (np.interp(t_new, t_ref, x_forward_ref), np.interp(t_new, t_ref, y_left_ref))
         ).astype(np.float32)
-        self._cached_transform = self._xy_transform()
+        self._cached_transform = self.__xy_transform()
 
-    def _update_cached_waypoints(self):
-        current_transform = self._xy_transform()
+    def __update_cached_waypoints(self):
+        current_transform = self.__xy_transform()
         cached_to_current = np.linalg.inv(current_transform) @ self._cached_transform
         homogeneous_waypoints = np.column_stack(
             (self._cached_waypoints, np.ones(len(self._cached_waypoints), dtype=np.float32))
@@ -78,9 +78,9 @@ class EnvInputPIDPolicy(EnvInputPolicy):
 
         current_timestamp = self.step_manager.current_timestamp
         if self.step_manager.key_step:
-            self._set_cached_waypoints(action)
+            self.__set_cached_waypoints(action)
         elif current_timestamp - self._last_control_timestamp >= self.control_dt_us:
-            self._update_cached_waypoints()
+            self.__update_cached_waypoints()
             self._cached_waypoints = self._cached_waypoints[1:]
         else:
             return self.last_action

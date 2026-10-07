@@ -58,7 +58,7 @@ class BaseManager(Randomizable):
         super(BaseManager, self).destroy()
         self.clear_all_objects()
 
-    def spawn_object(self, object_class, **kwargs):
+    def _spawn_object(self, object_class, **kwargs):
         """
         Spawn one objects
         """

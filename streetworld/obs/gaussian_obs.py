@@ -28,7 +28,7 @@ class GaussianObservation(BaseObservation):
         
         self.controller = controller
         self.render_fn = render_fn
-        self.build_camera_params(camera_params)
+        self.__build_camera_params(camera_params)
 
         dtype = np.float32 if self.clip_rgb else np.uint8
         self.state = {
@@ -36,7 +36,7 @@ class GaussianObservation(BaseObservation):
             for name, height, width in zip(self.camera_names, self.params['H'], self.params['W'])
         }
 
-    def build_camera_params(self, _camera_params):
+    def __build_camera_params(self, _camera_params):
         if not self.camera_configs:
             for cam_name, params in _camera_params.items():
                 missing = [key for key in self.REQUIRED_CAMERA_PARAM_KEYS if key not in params]

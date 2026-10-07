@@ -26,7 +26,7 @@ class BaseTrafficParticipant(BaseObject):
         ):
         super(BaseTrafficParticipant, self).__init__(physics_world, size=size, random_seed=random_seed, name=name, config=config)
 
-        self.set_body()
+        self.__set_body()
 
         self.set_position(position)
         self.set_heading_theta(heading_theta)
@@ -50,7 +50,7 @@ class BaseTrafficParticipant(BaseObject):
         self.set_velocity(state_info["velocity"])
         self.set_angular_velocity(state_info["angular_velocity"])
 
-    def set_body(self):
+    def __set_body(self):
         collision_geom = BulletBoxShape((self.WIDTH / 2, self.LENGTH / 2, self.HEIGHT / 2))
         self.body = BaseRigidBodyNode(self.name, self.TYPE_NAME, self.MASS)
         self.body.addShape(collision_geom)

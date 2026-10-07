@@ -66,7 +66,7 @@ class SurroundingObservation(BaseObservation):
                 pos = transform_out[:3, 3]
                 velocity = ego_R_inv @ ctrl["velocity"]
                 acceleration = ego_R_inv @ ctrl["acceleration"]
-                heading_theta = self._wrap_pi(ctrl["heading_theta"] - ego_heading)
+                heading_theta = self.__wrap_pi(ctrl["heading_theta"] - ego_heading)
             else:
                 transform_out = ctrl["transform"]
                 pos = ctrl["position"]
@@ -91,7 +91,7 @@ class SurroundingObservation(BaseObservation):
         return surrounding
 
     @staticmethod
-    def _wrap_pi(a):
+    def __wrap_pi(a):
         return (a + math.pi) % (2 * math.pi) - math.pi
 
     def destroy(self):
