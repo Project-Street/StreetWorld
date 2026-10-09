@@ -1,10 +1,12 @@
+<a id="chapter-4"></a>
+
 <a id="section-4-1"></a>
 
 # 4.1 Config 的用途与使用
 
 [English](../../../en/guides/configuration/config.md)
 
-[总目录](../../../DOCUMENTATION_ZH.md) · [上一页：4. 配置系统](../configuration.md) · [下一页：4.2 配置层级与优先级](hierarchy.md)
+[总目录](../../../DOCUMENTATION_ZH.md) · [上一页：3.3 渲染后端示例](../rendering-backends.md) · [下一页：4.2 配置层级与优先级](hierarchy.md)
 
 测试不同驾驶策略时，需要选择场景、调整仿真步长，还可能更换主车的 Policy 或相机设置。StreetWorld 用 [Config](../../../../streetworld/config.py) 保存这些设置，在创建 Environment 时传入。环境再将主车、周边对象和观测各自的配置交给对应组件。
 
@@ -78,4 +80,4 @@ Observation、Policy、Controller 等类对象在 Python 脚本中设置，见[�
 
 ---
 
-[总目录](../../../DOCUMENTATION_ZH.md) · [上一页：4. 配置系统](../configuration.md) · [下一页：4.2 配置层级与优先级](hierarchy.md)
+[总目录](../../../DOCUMENTATION_ZH.md) · [上一页：3.3 渲染后端示例](../rendering-backends.md) · [下一页：4.2 配置层级与优先级](hierarchy.md)

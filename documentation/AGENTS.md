@@ -2,7 +2,7 @@
 
 文档按 `DOCUMENTATION_OUTLINE.md` 的章节组织，组件 API 以 `API_CLASS_FUNCTIONS.md` 为清单，行为和配置取值以当前源码为准。用户后续的修改优先。
 
-`README.md` 提供语言入口。中文版入口为 `DOCUMENTATION_ZH.md`，英文版入口为 `DOCUMENTATION_EN.md`；两者保留相同的章节目录。正文分别放在 `zh/` 和 `en/`，以 `1.1`、`2.1`、`3.1` 这样的节为分页单位，每节一个文件。章首页列出各节目录；总目录只列章和节，节内小节保留在所属页，不单独分页或列入总目录。安装与运行示例放在 `getting-started/`，架构、接口和配置放在 `guides/`，组件参考和基础类放在 `reference/`。Launcher 的通用流程为 `7.1`，放在 `launchers/common.md`；各模型依次作为 `7.2` 至 `7.18` 的独立节，每个模型一个文件。API 清单分别为 `API_CLASS_FUNCTIONS.md` 和 `API_CLASS_FUNCTIONS_EN.md`。
+`README.md` 提供语言入口。中文版入口为 `DOCUMENTATION_ZH.md`，英文版入口为 `DOCUMENTATION_EN.md`；两者保留相同的章节目录。正文分别放在 `zh/` 和 `en/`，第二章的 `2.1` 至 `2.6` 合并在 `guides/architecture.md`；其余章节以 `1.1`、`3.1` 这样的节为分页单位，每节一个文件。总目录只列章和节，直接链接正文页或页内锚点，不设只有目录的章首页；节内小节保留在所属页，不单独分页或列入总目录。安装与运行示例放在 `getting-started/`，架构、接口和配置放在 `guides/`，组件参考和基础类放在 `reference/`。Launcher 的通用流程为 `7.1`，放在 `launchers/common.md`；各模型依次作为 `7.2` 至 `7.18` 的独立节，每个模型一个文件。API 清单分别为 `API_CLASS_FUNCTIONS.md` 和 `API_CLASS_FUNCTIONS_EN.md`。
 
 ## 文字
 

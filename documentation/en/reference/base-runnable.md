@@ -4,7 +4,7 @@
 
 [简体中文](../../zh/reference/base-runnable.md)
 
-[Contents](../../DOCUMENTATION_EN.md) · [Previous: 6.3 Randomizable](randomizable.md) · [Next: 7. Policy Launcher appendix](../launchers/index.md)
+[Contents](../../DOCUMENTATION_EN.md) · [Previous: 6.3 Randomizable](randomizable.md) · [Next: 7.1 Common launch procedure](../launchers/common.md)
 
 ## Purpose and construction
 
@@ -46,4 +46,4 @@ obj.destroy()
 
 ---
 
-[Contents](../../DOCUMENTATION_EN.md) · [Previous: 6.3 Randomizable](randomizable.md) · [Next: 7. Policy Launcher appendix](../launchers/index.md)
+[Contents](../../DOCUMENTATION_EN.md) · [Previous: 6.3 Randomizable](randomizable.md) · [Next: 7.1 Common launch procedure](../launchers/common.md)

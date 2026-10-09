@@ -55,6 +55,8 @@
 
 目标：说明 Environment、SimulatorInterface 和 AgentManager 各自用于什么，如何开始场景、执行动作，以及仿真时间怎样控制。
 
+2.1 至 2.6 合并在 `guides/architecture.md` 中。
+
 ### 2.1 Environment 的作用与类型
 
 - OpenAI Gym 的交互方式与 Gymnasium 基类。

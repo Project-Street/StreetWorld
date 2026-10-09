@@ -1,10 +1,12 @@
+<a id="chapter-4"></a>
+
 <a id="section-4-1"></a>
 
 # 4.1 Using Config
 
 [简体中文](../../../zh/guides/configuration/config.md)
 
-[Contents](../../../DOCUMENTATION_EN.md) · [Previous: 4. Configuration system](../configuration.md) · [Next: 4.2 Configuration hierarchy and precedence](hierarchy.md)
+[Contents](../../../DOCUMENTATION_EN.md) · [Previous: 3.3 Rendering backend examples](../rendering-backends.md) · [Next: 4.2 Configuration hierarchy and precedence](hierarchy.md)
 
 Testing AD policies involves selecting scenes, changing simulation timing, and sometimes replacing the ego Policy or camera settings. StreetWorld stores these settings in [Config](../../../../streetworld/config.py), which is passed when constructing Environment. The environment forwards the ego, participant, and observation settings to their components.
 
@@ -78,4 +80,4 @@ Set class objects such as Observation, Policy, and Controller in Python scripts;
 
 ---
 
-[Contents](../../../DOCUMENTATION_EN.md) · [Previous: 4. Configuration system](../configuration.md) · [Next: 4.2 Configuration hierarchy and precedence](hierarchy.md)
+[Contents](../../../DOCUMENTATION_EN.md) · [Previous: 3.3 Rendering backend examples](../rendering-backends.md) · [Next: 4.2 Configuration hierarchy and precedence](hierarchy.md)

@@ -1,8 +1,10 @@
+<a id="chapter-7"></a>
+
 # 7.1 统一启动流程
 
 [English](../../en/launchers/common.md)
 
-[总目录](../../DOCUMENTATION_ZH.md) · [上一页：7. Policy Launcher 附录](index.md) · [下一页：7.2 UniAD](uniad.md)
+[总目录](../../DOCUMENTATION_ZH.md) · [上一页：6.4 BaseRunnable](../reference/base-runnable.md) · [下一页：7.2 UniAD](uniad.md)
 
 本页目录
 
@@ -19,6 +21,8 @@
 python -m pip install numpy gymnasium grpcio protobuf scipy pillow
 ```
 
+统一命令行通过 --model 选择模型，不提供 --checkpoint、--config 或 --model-root。文件路径在对应 NativeAgent 的构造配置中修改。
+
 ```bash
 python -m policy_launcher.launch --help
 python -m policy_launcher.launch \
@@ -28,7 +32,7 @@ python -m policy_launcher.launch \
 
 | 参数 | 默认值 | 用途与实际行为 |
 | --- | --- | --- |
-| --model | 必填 | [模型目录](index.md)中的 17 个入口之一 |
+| --model | 必填 | [模型列表](../../DOCUMENTATION_ZH.md#chapter-7)中的 17 个入口之一 |
 | --host | 127.0.0.1 | StreetWorld gRPC 服务主机 |
 | --port | 50052 | StreetWorld gRPC 端口 |
 | --device | cuda | 传给多数模型的构造函数；OpenEMMA 四个入口没有接收该参数 |
@@ -49,7 +53,7 @@ python -m policy_launcher.launch \
 
 unpack_ad_observation 读取 gaussian、states、navigation 和 surrounding，将微秒时间戳转为秒，补充 scene_token、cam_params、route_waypoints、target_waypoint 等字段。command 的约定是右转 0、左转 1、直行 2。各模型的 dataparser 随后处理图像、转换坐标，并将张量移到模型设备。
 
-服务端默认同步运行，每次模型推理后推进一个环境步。开启 async_mode 时，模型推理期间仿真仍在推进，step 可能返回缓存结果，详见[同步与异步](../guides/architecture/execution-mode.md#section-2-6)。客户端达到 max_steps 后切换场景；如果环境还未返回终止，该场景不会计入 ScenarioEnv 的已完成指标。
+服务端默认同步运行，每次模型推理后推进一个环境步。开启 async_mode 时，模型推理期间仿真仍在推进，step 可能返回缓存结果，详见[同步与异步](../guides/architecture.md#section-2-6)。客户端达到 max_steps 后切换场景；如果环境还未返回终止，该场景不会计入 ScenarioEnv 的已完成指标。
 
 easydrive 的 ST Renderer 分支在 default 轨迹配置上合并模型 preset。--ad-policy-config latent_transfuser 只调整相机和导航，未切换原始控制 Policy；NuRec 分支也未加载轨迹 preset。这两个模型需要使用本页的专用服务端配置。
 
@@ -116,4 +120,4 @@ PY
 
 ---
 
-[总目录](../../DOCUMENTATION_ZH.md) · [上一页：7. Policy Launcher 附录](index.md) · [下一页：7.2 UniAD](uniad.md)
+[总目录](../../DOCUMENTATION_ZH.md) · [上一页：6.4 BaseRunnable](../reference/base-runnable.md) · [下一页：7.2 UniAD](uniad.md)

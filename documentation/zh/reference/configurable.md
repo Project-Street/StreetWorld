@@ -1,10 +1,14 @@
+<a id="chapter-6"></a>
+
 <a id="api-9-1"></a>
 
 # 6.1 Configurable
 
 [English](../../en/reference/configurable.md)
 
-[总目录](../../DOCUMENTATION_ZH.md) · [上一页：6. 基础类](base-classes.md) · [下一页：6.2 Nameable](nameable.md)
+[总目录](../../DOCUMENTATION_ZH.md) · [上一页：5.7 Config](config.md) · [下一页：6.2 Nameable](nameable.md)
+
+配置、命名、随机数和运行生命周期各有一个基础类。有物理刚体的对象继承 BaseObject；只需要其中某项能力的组件，可直接继承对应基础类。
 
 ## 职责与创建方式
 
@@ -42,4 +46,4 @@ component.destroy()
 
 ---
 
-[总目录](../../DOCUMENTATION_ZH.md) · [上一页：6. 基础类](base-classes.md) · [下一页：6.2 Nameable](nameable.md)
+[总目录](../../DOCUMENTATION_ZH.md) · [上一页：5.7 Config](config.md) · [下一页：6.2 Nameable](nameable.md)

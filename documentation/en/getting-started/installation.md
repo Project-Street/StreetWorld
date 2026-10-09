@@ -1,10 +1,12 @@
+<a id="chapter-1"></a>
+
 <a id="section-1-1"></a>
 
 # 1.1 Installation
 
 [简体中文](../../zh/getting-started/installation.md)
 
-[Contents](../../DOCUMENTATION_EN.md) · [Previous: 1. Installation and quick start](index.md) · [Next: 1.2 Drive in the browser](web-controller.md)
+[Contents](../../DOCUMENTATION_EN.md) · [Previous: Contents](../../DOCUMENTATION_EN.md) · [Next: 1.2 Drive in the browser](web-controller.md)
 
 ## Requirements
 
@@ -38,4 +40,4 @@ Scene download links will be released later. If you already have the data, place
 
 ---
 
-[Contents](../../DOCUMENTATION_EN.md) · [Previous: 1. Installation and quick start](index.md) · [Next: 1.2 Drive in the browser](web-controller.md)
+[Contents](../../DOCUMENTATION_EN.md) · [Previous: Contents](../../DOCUMENTATION_EN.md) · [Next: 1.2 Drive in the browser](web-controller.md)

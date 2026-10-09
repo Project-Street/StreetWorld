@@ -1,10 +1,12 @@
+<a id="chapter-1"></a>
+
 <a id="section-1-1"></a>
 
 # 1.1 安装
 
 [English](../../en/getting-started/installation.md)
 
-[总目录](../../DOCUMENTATION_ZH.md) · [上一页：1. 安装与快速运行](index.md) · [下一页：1.2 用浏览器驾驶](web-controller.md)
+[总目录](../../DOCUMENTATION_ZH.md) · [上一页：总目录](../../DOCUMENTATION_ZH.md) · [下一页：1.2 用浏览器驾驶](web-controller.md)
 
 ## 环境要求
 
@@ -38,4 +40,4 @@ python -c "import streetworld, st_renderer, fast_gauss, nvdiffrast.torch, trajda
 
 ---
 
-[总目录](../../DOCUMENTATION_ZH.md) · [上一页：1. 安装与快速运行](index.md) · [下一页：1.2 用浏览器驾驶](web-controller.md)
+[总目录](../../DOCUMENTATION_ZH.md) · [上一页：总目录](../../DOCUMENTATION_ZH.md) · [下一页：1.2 用浏览器驾驶](web-controller.md)

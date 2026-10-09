@@ -4,9 +4,9 @@
 
 [English](../../en/reference/config.md)
 
-[总目录](../../DOCUMENTATION_ZH.md) · [上一页：5.6 运行辅助组件](runtime.md) · [下一页：6. 基础类](base-classes.md)
+[总目录](../../DOCUMENTATION_ZH.md) · [上一页：5.6 运行辅助组件](runtime.md) · [下一页：6.1 Configurable](configurable.md)
 
-[组件参考目录](index.md) · [类名索引：Config](#api-3-1)
+[类名索引：Config](#api-3-1)
 
 ## 职责与创建方式
 
@@ -49,4 +49,4 @@ assert snapshot.actor_config.warmup_step == 10
 
 ---
 
-[总目录](../../DOCUMENTATION_ZH.md) · [上一页：5.6 运行辅助组件](runtime.md) · [下一页：6. 基础类](base-classes.md)
+[总目录](../../DOCUMENTATION_ZH.md) · [上一页：5.6 运行辅助组件](runtime.md) · [下一页：6.1 Configurable](configurable.md)

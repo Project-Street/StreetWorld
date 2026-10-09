@@ -17,7 +17,7 @@ Environment parameters control the whole scene; Agent parameters control individ
 | `physics_world_step_size` | Number, microseconds | `20_000` | Simulation time advanced by each physics step, equivalent to `0.02 s` |
 | `decision_repeat` | int, physics steps | `5` | Physics steps per environment step; the default advances `0.1 s` |
 | `max_step` | int or None, environment steps | `None` | Episode step limit; `None` disables this environment-level limit, while the ego Agent's `max_step` still applies |
-| `async_mode` | bool | `False` | Whether simulation continues while waiting for driving input; see [Synchronous and asynchronous execution](../architecture/execution-mode.md#section-2-6) |
+| `async_mode` | bool | `False` | Whether simulation continues while waiting for driving input; see [Synchronous and asynchronous execution](../architecture.md#section-2-6) |
 
 ## Agent
 

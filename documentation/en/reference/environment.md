@@ -1,10 +1,16 @@
+<a id="chapter-5"></a>
+
 # 5.1 Environment
 
 [简体中文](../../zh/reference/environment.md)
 
-[Contents](../../DOCUMENTATION_EN.md) · [Previous: 5. API reference](index.md) · [Next: 5.2 Manager](manager.md)
+[Contents](../../DOCUMENTATION_EN.md) · [Previous: 4.5 Policy and Controller configuration](../guides/configuration/policy-controller.md) · [Next: 5.2 Manager](manager.md)
 
-See [API reference contents](index.md) for configuration paths and example variables.
+<a id="reference-conventions"></a>
+
+Configuration fields use complete environment paths. Create cfg from an environment class's default_config() and modify it before construction; env denotes an environment that has completed reset. Each example is independent.
+
+Look up methods by class in the [API index](../../API_CLASS_FUNCTIONS_EN.md).
 
 On this page
 
@@ -356,4 +362,4 @@ make_interactive_env is defined in interactive_env.py; serve is defined in env_s
 
 ---
 
-[Contents](../../DOCUMENTATION_EN.md) · [Previous: 5. API reference](index.md) · [Next: 5.2 Manager](manager.md)
+[Contents](../../DOCUMENTATION_EN.md) · [Previous: 4.5 Policy and Controller configuration](../guides/configuration/policy-controller.md) · [Next: 5.2 Manager](manager.md)

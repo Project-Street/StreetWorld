@@ -4,7 +4,7 @@
 
 [Contents](../../DOCUMENTATION_EN.md) · [Previous: 5.3 Observation](observation.md) · [Next: 5.5 Object / Controller](object.md)
 
-See [API reference contents](index.md) for configuration paths and example variables.
+See [configuration and example conventions](environment.md#reference-conventions).
 
 On this page
 

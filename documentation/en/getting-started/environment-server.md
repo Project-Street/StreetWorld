@@ -48,7 +48,7 @@ PY
 
 The client loads a scene with `reset()`, submits a manually constructed trajectory, and prints the scene name, reward, and termination flags. The default server interprets the six points as future positions spaced `0.5 s` apart and advances simulation by 0.5 s.
 
-To connect a model, replace `trajectory` with the `trajectory` predicted from `observation` and call `step()` in a loop. After a scene ends, call `reset()` to load the next one. See the [Policy Launcher appendix](../launchers/index.md) for supported models, dependencies, weights, and commands.
+To connect a model, replace `trajectory` with the `trajectory` predicted from `observation` and call `step()` in a loop. After a scene ends, call `reset()` to load the next one. See the [Policy Launcher appendix](../launchers/common.md) for supported models, dependencies, weights, and commands.
 
 ## During a run
 
@@ -64,7 +64,7 @@ Clients connect to the gRPC address; the browser uses the web address. The serve
 | `--web-host`, `--web-port` | `127.0.0.1`, `18080` | Web address for viewing simulation images |
 | `--ad-policy-config` | `default` | Matches observations and timing to the model; dedicated values are `autovla`, `epona`, `openemma`, `transfuser`, and `latent_transfuser` |
 | `--video-output-dir` | `videos` | Video output directory |
-| `--async-mode` | Disabled | Advances simulation during model inference; see [Synchronous and asynchronous execution](../guides/architecture/execution-mode.md#section-2-6) |
+| `--async-mode` | Disabled | Advances simulation during model inference; see [Synchronous and asynchronous execution](../guides/architecture.md#section-2-6) |
 | `--nurec-grpc-host`, `--nurec-grpc-port` | `127.0.0.1`, `8080` | NuRec rendering service address when NuRec is selected |
 | `--nurec-grpc-timeout` | `600.0 s` | Timeout for NuRec rendering requests |
 
@@ -99,7 +99,7 @@ python -m streetworld.examples.env_server_scene_config \
 | `--web-host`, `--web-port` | `127.0.0.1`, `18080` | Web address for viewing simulation images |
 | `--ad-policy-config` | `default` | Matches observations and timing to the model; dedicated values are `autovla`, `epona`, `openemma`, `transfuser`, and `latent_transfuser` |
 | `--video-output-dir` | `videos` | Video output directory |
-| `--async-mode` | Disabled | Advances simulation during model inference; see [Synchronous and asynchronous execution](../guides/architecture/execution-mode.md#section-2-6) |
+| `--async-mode` | Disabled | Advances simulation during model inference; see [Synchronous and asynchronous execution](../guides/architecture.md#section-2-6) |
 | `--nurec-grpc-host`, `--nurec-grpc-port` | `127.0.0.1`, `8080` | NuRec rendering service address when NuRec is selected |
 | `--nurec-grpc-timeout` | `600.0 s` | Timeout for NuRec rendering requests |
 

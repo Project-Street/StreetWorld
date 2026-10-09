@@ -4,7 +4,7 @@
 
 [总目录](../../DOCUMENTATION_ZH.md) · [上一页：5.4 Policy](policy.md) · [下一页：5.6 运行辅助组件](runtime.md)
 
-配置字段和示例变量见[组件参考目录](index.md)。
+配置字段和示例变量见[配置与示例约定](environment.md#reference-conventions)。
 
 本页目录
 

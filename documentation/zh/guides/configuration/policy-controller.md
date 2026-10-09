@@ -4,7 +4,7 @@
 
 [English](../../../en/guides/configuration/policy-controller.md)
 
-[总目录](../../../DOCUMENTATION_ZH.md) · [上一页：4.4 Observer 配置](observation.md) · [下一页：5. 组件参考](../../reference/index.md)
+[总目录](../../../DOCUMENTATION_ZH.md) · [上一页：4.4 Observer 配置](observation.md) · [下一页：5.1 Environment](../../reference/environment.md)
 
 驾驶程序向 `step()` 传入动作，Policy 将动作变成控制或移动指令，Controller 执行这些指令。基础配置中，主车使用 EnvInputPolicy，接收转向和油门/制动；周边对象使用 ReplayPolicy，按记录轨迹回放。
 
@@ -69,4 +69,4 @@ Policy 中的 `max_acceleration` 限制轨迹求解，Controller 中的同名字
 
 ---
 
-[总目录](../../../DOCUMENTATION_ZH.md) · [上一页：4.4 Observer 配置](observation.md) · [下一页：5. 组件参考](../../reference/index.md)
+[总目录](../../../DOCUMENTATION_ZH.md) · [上一页：4.4 Observer 配置](observation.md) · [下一页：5.1 Environment](../../reference/environment.md)

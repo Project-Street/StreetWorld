@@ -4,7 +4,7 @@
 
 [简体中文](../../zh/guides/rendering-backends.md)
 
-[Contents](../../DOCUMENTATION_EN.md) · [Previous: 3.2 3D assets and SimulatorInterface](simulator-interface.md) · [Next: 4. Configuration system](configuration.md)
+[Contents](../../DOCUMENTATION_EN.md) · [Previous: 3.2 3D assets and SimulatorInterface](simulator-interface.md) · [Next: 4.1 Using Config](configuration/config.md)
 
 nuScenes and Waymo use ST Renderer on the local GPU. NuRec scenes use a separate rendering service. Pass the selected backend's interface instance to Environment.
 
@@ -189,4 +189,4 @@ simulator = SimulatorInterface(
 
 ---
 
-[Contents](../../DOCUMENTATION_EN.md) · [Previous: 3.2 3D assets and SimulatorInterface](simulator-interface.md) · [Next: 4. Configuration system](configuration.md)
+[Contents](../../DOCUMENTATION_EN.md) · [Previous: 3.2 3D assets and SimulatorInterface](simulator-interface.md) · [Next: 4.1 Using Config](configuration/config.md)

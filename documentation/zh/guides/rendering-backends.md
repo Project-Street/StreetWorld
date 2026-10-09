@@ -4,7 +4,7 @@
 
 [English](../../en/guides/rendering-backends.md)
 
-[总目录](../../DOCUMENTATION_ZH.md) · [上一页：3.2 3D 资产与 SimulatorInterface](simulator-interface.md) · [下一页：4. 配置系统](configuration.md)
+[总目录](../../DOCUMENTATION_ZH.md) · [上一页：3.2 3D 资产与 SimulatorInterface](simulator-interface.md) · [下一页：4.1 Config 的用途与使用](configuration/config.md)
 
 nuScenes 和 Waymo 使用 ST Renderer 在本机 GPU 上渲染；NuRec 场景由独立服务渲染。选择对应后端后，将接口实例传给 Environment。
 
@@ -189,4 +189,4 @@ simulator = SimulatorInterface(
 
 ---
 
-[总目录](../../DOCUMENTATION_ZH.md) · [上一页：3.2 3D 资产与 SimulatorInterface](simulator-interface.md) · [下一页：4. 配置系统](configuration.md)
+[总目录](../../DOCUMENTATION_ZH.md) · [上一页：3.2 3D 资产与 SimulatorInterface](simulator-interface.md) · [下一页：4.1 Config 的用途与使用](configuration/config.md)

@@ -1,10 +1,12 @@
+<a id="chapter-3"></a>
+
 <a id="section-3-1"></a>
 
 # 3.1 Environment: local and remote calls
 
 [简体中文](../../zh/guides/environment-interface.md)
 
-[Contents](../../DOCUMENTATION_EN.md) · [Previous: 3. Interface contracts](interfaces.md) · [Next: 3.2 3D assets and SimulatorInterface](simulator-interface.md)
+[Contents](../../DOCUMENTATION_EN.md) · [Previous: 2. Architecture](architecture.md) · [Next: 3.2 3D assets and SimulatorInterface](simulator-interface.md)
 
 Environment runs driving episodes: it loads a scene, accepts actions, simulates vehicle motion, and returns observations, reward, and termination flags. A local AD policy calls it directly; a model in a separate process calls the server environment through GrpcClientEnv.
 
@@ -226,4 +228,4 @@ A gRPC message can be at most 200 MiB in either direction. The client restores n
 
 ---
 
-[Contents](../../DOCUMENTATION_EN.md) · [Previous: 3. Interface contracts](interfaces.md) · [Next: 3.2 3D assets and SimulatorInterface](simulator-interface.md)
+[Contents](../../DOCUMENTATION_EN.md) · [Previous: 2. Architecture](architecture.md) · [Next: 3.2 3D assets and SimulatorInterface](simulator-interface.md)

@@ -48,7 +48,7 @@ PY
 
 这段代码先用 `reset()` 加载一个场景，再提交一次手工构造的轨迹，打印场景名、奖励和结束状态。默认服务端将这六个点解释为每隔 `0.5 s` 的未来位置，并推进 `0.5 s` 仿真时间。
 
-接入模型时，用模型根据 `observation` 预测的轨迹替换 `trajectory`，循环调用 `step()`；场景结束后，再调用 `reset()` 加载下一个场景。已有模型的依赖、权重和启动命令见 [Policy Launcher 附录](../launchers/index.md)。
+接入模型时，用模型根据 `observation` 预测的轨迹替换 `trajectory`，循环调用 `step()`；场景结束后，再调用 `reset()` 加载下一个场景。已有模型的依赖、权重和启动命令见 [Policy Launcher 附录](../launchers/common.md)。
 
 ## 运行后
 
@@ -64,7 +64,7 @@ gRPC 地址用于客户端连接，网页地址用于浏览器查看。客户端
 | `--web-host`、`--web-port` | `127.0.0.1`、`18080` | 浏览器查看画面的地址 |
 | `--ad-policy-config` | `default` | 匹配模型所需的观测和时间周期；专用值为 `autovla`、`epona`、`openemma`、`transfuser`、`latent_transfuser` |
 | `--video-output-dir` | `videos` | 视频保存目录 |
-| `--async-mode` | 未开启 | 模型推理期间也推进仿真，详见[同步与异步](../guides/architecture/execution-mode.md#section-2-6) |
+| `--async-mode` | 未开启 | 模型推理期间也推进仿真，详见[同步与异步](../guides/architecture.md#section-2-6) |
 | `--nurec-grpc-host`、`--nurec-grpc-port` | `127.0.0.1`、`8080` | 选择 NuRec 时，连接 NuRec 渲染服务的地址 |
 | `--nurec-grpc-timeout` | `600.0 s` | NuRec 渲染请求超时 |
 
@@ -99,7 +99,7 @@ python -m streetworld.examples.env_server_scene_config \
 | `--web-host`、`--web-port` | `127.0.0.1`、`18080` | 浏览器查看画面的地址 |
 | `--ad-policy-config` | `default` | 匹配模型所需的观测和时间周期；专用值为 `autovla`、`epona`、`openemma`、`transfuser`、`latent_transfuser` |
 | `--video-output-dir` | `videos` | 视频保存目录 |
-| `--async-mode` | 未开启 | 模型推理期间也推进仿真，详见[同步与异步](../guides/architecture/execution-mode.md#section-2-6) |
+| `--async-mode` | 未开启 | 模型推理期间也推进仿真，详见[同步与异步](../guides/architecture.md#section-2-6) |
 | `--nurec-grpc-host`、`--nurec-grpc-port` | `127.0.0.1`、`8080` | 选择 NuRec 时，连接 NuRec 渲染服务的地址 |
 | `--nurec-grpc-timeout` | `600.0 s` | NuRec 渲染请求超时 |
 

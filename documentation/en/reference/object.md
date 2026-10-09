@@ -4,7 +4,7 @@
 
 [Contents](../../DOCUMENTATION_EN.md) · [Previous: 5.4 Policy](policy.md) · [Next: 5.6 Runtime utilities](runtime.md)
 
-See [API reference contents](index.md) for configuration paths and example variables.
+See [configuration and example conventions](environment.md#reference-conventions).
 
 On this page
 

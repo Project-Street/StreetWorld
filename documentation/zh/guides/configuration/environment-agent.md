@@ -17,7 +17,7 @@
 | `physics_world_step_size` | 数值，微秒 | `20_000` | 每个物理小步推进的仿真时间，即 `0.02 s` |
 | `decision_repeat` | int，物理步数 | `5` | 每个环境步包含的物理小步数；默认每步模拟 `0.1 s` |
 | `max_step` | int 或 None，环境步数 | `None` | 一轮测试的环境步数上限；`None` 不设置这一层的限制，主车仍受自己的 `max_step` 限制 |
-| `async_mode` | bool | `False` | 是否在等待驾驶输入期间继续仿真，见[同步与异步](../architecture/execution-mode.md#section-2-6) |
+| `async_mode` | bool | `False` | 是否在等待驾驶输入期间继续仿真，见[同步与异步](../architecture.md#section-2-6) |
 
 ## Agent
 

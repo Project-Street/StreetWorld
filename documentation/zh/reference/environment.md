@@ -1,10 +1,16 @@
+<a id="chapter-5"></a>
+
 # 5.1 Environment
 
 [English](../../en/reference/environment.md)
 
-[总目录](../../DOCUMENTATION_ZH.md) · [上一页：5. 组件参考](index.md) · [下一页：5.2 Manager](manager.md)
+[总目录](../../DOCUMENTATION_ZH.md) · [上一页：4.5 Policy 与 Controller 配置](../guides/configuration/policy-controller.md) · [下一页：5.2 Manager](manager.md)
 
-配置字段和示例变量见[组件参考目录](index.md)。
+<a id="reference-conventions"></a>
+
+配置字段以完整环境路径列出。示例中的 cfg 从环境 default_config() 创建，在构造环境前修改；env 是已完成 reset 的环境。每段示例单独使用。
+
+按类查询函数：[API 清单](../../API_CLASS_FUNCTIONS.md)。
 
 本页目录
 
@@ -356,4 +362,4 @@ make_interactive_env 定义在 interactive_env.py，serve 定义在 env_servicer
 
 ---
 
-[总目录](../../DOCUMENTATION_ZH.md) · [上一页：5. 组件参考](index.md) · [下一页：5.2 Manager](manager.md)
+[总目录](../../DOCUMENTATION_ZH.md) · [上一页：4.5 Policy 与 Controller 配置](../guides/configuration/policy-controller.md) · [下一页：5.2 Manager](manager.md)

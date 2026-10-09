@@ -1,8 +1,10 @@
+<a id="chapter-7"></a>
+
 # 7.1 Common launch procedure
 
 [简体中文](../../zh/launchers/common.md)
 
-[Contents](../../DOCUMENTATION_EN.md) · [Previous: 7. Policy Launcher appendix](index.md) · [Next: 7.2 UniAD](uniad.md)
+[Contents](../../DOCUMENTATION_EN.md) · [Previous: 6.4 BaseRunnable](../reference/base-runnable.md) · [Next: 7.2 UniAD](uniad.md)
 
 On this page
 
@@ -19,6 +21,8 @@ Install the shared dependencies in the model environment:
 python -m pip install numpy gymnasium grpcio protobuf scipy pillow
 ```
 
+The shared CLI selects models with --model. It does not provide --checkpoint, --config, or --model-root; change file paths in the corresponding NativeAgent constructor settings.
+
 ```bash
 python -m policy_launcher.launch --help
 python -m policy_launcher.launch \
@@ -28,7 +32,7 @@ python -m policy_launcher.launch \
 
 | Parameters | Default | Purpose and actual behavior |
 | --- | --- | --- |
-| --model | Required | One of the 17 entries in the [model index](index.md) |
+| --model | Required | One of the 17 entries in the [model list](../../DOCUMENTATION_EN.md#chapter-7) |
 | --host | 127.0.0.1 | StreetWorld gRPC host |
 | --port | 50052 | StreetWorld gRPC port |
 | --device | cuda | Passed to most model constructors; the four OpenEMMA entries do not accept it |
@@ -49,7 +53,7 @@ python -m policy_launcher.launch \
 
 unpack_ad_observation reads gaussian, states, navigation, and surrounding, converts microsecond timestamps to seconds, and adds fields such as scene_token, cam_params, route_waypoints, and target_waypoint. Command values are right=0, left=1, straight=2. Each model's dataparser then processes images, transforms coordinates, and moves tensors to the model device.
 
-The server runs synchronously by default, advancing one environment step after each inference. With async_mode, simulation continues during inference and step can return cached results; see [Synchronous and asynchronous execution](../guides/architecture/execution-mode.md#section-2-6). The client switches scenes at max_steps. If the environment has not reported termination, that scene is not included in ScenarioEnv's completed metrics.
+The server runs synchronously by default, advancing one environment step after each inference. With async_mode, simulation continues during inference and step can return cached results; see [Synchronous and asynchronous execution](../guides/architecture.md#section-2-6). The client switches scenes at max_steps. If the environment has not reported termination, that scene is not included in ScenarioEnv's completed metrics.
 
 The easydrive ST Renderer branch merges model presets into the default trajectory configuration. --ad-policy-config latent_transfuser changes cameras and navigation but does not select the raw-control Policy. The NuRec branch also does not load trajectory presets. Use the dedicated server configurations below for these models.
 
@@ -116,4 +120,4 @@ PY
 
 ---
 
-[Contents](../../DOCUMENTATION_EN.md) · [Previous: 7. Policy Launcher appendix](index.md) · [Next: 7.2 UniAD](uniad.md)
+[Contents](../../DOCUMENTATION_EN.md) · [Previous: 6.4 BaseRunnable](../reference/base-runnable.md) · [Next: 7.2 UniAD](uniad.md)

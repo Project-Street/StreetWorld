@@ -1,10 +1,12 @@
+<a id="chapter-3"></a>
+
 <a id="section-3-1"></a>
 
 # 3.1 Environment：本地与远程调用
 
 [English](../../en/guides/environment-interface.md)
 
-[总目录](../../DOCUMENTATION_ZH.md) · [上一页：3. 接口约定](interfaces.md) · [下一页：3.2 3D 资产与 SimulatorInterface](simulator-interface.md)
+[总目录](../../DOCUMENTATION_ZH.md) · [上一页：2. 整体结构](architecture.md) · [下一页：3.2 3D 资产与 SimulatorInterface](simulator-interface.md)
 
 Environment 用于运行驾驶测试。它载入场景，接收驾驶动作，计算车辆运动，再返回新的观测、奖励和结束状态。驾驶程序根据这些结果决定下一步怎么开；本地程序直接调用环境，独立运行的模型则通过 `GrpcClientEnv` 调用服务端环境。
 
@@ -226,4 +228,4 @@ finally:
 
 ---
 
-[总目录](../../DOCUMENTATION_ZH.md) · [上一页：3. 接口约定](interfaces.md) · [下一页：3.2 3D 资产与 SimulatorInterface](simulator-interface.md)
+[总目录](../../DOCUMENTATION_ZH.md) · [上一页：2. 整体结构](architecture.md) · [下一页：3.2 3D 资产与 SimulatorInterface](simulator-interface.md)

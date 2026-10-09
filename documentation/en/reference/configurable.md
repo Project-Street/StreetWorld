@@ -1,10 +1,14 @@
+<a id="chapter-6"></a>
+
 <a id="api-9-1"></a>
 
 # 6.1 Configurable
 
 [简体中文](../../zh/reference/configurable.md)
 
-[Contents](../../DOCUMENTATION_EN.md) · [Previous: 6. Base classes](base-classes.md) · [Next: 6.2 Nameable](nameable.md)
+[Contents](../../DOCUMENTATION_EN.md) · [Previous: 5.7 Config](config.md) · [Next: 6.2 Nameable](nameable.md)
+
+Configuration, naming, randomness, and runtime lifecycle each have a base class. Objects with physical bodies inherit BaseObject; components needing only one of these capabilities can inherit the corresponding base class directly.
 
 ## Purpose and construction
 
@@ -42,4 +46,4 @@ component.destroy()
 
 ---
 
-[Contents](../../DOCUMENTATION_EN.md) · [Previous: 6. Base classes](base-classes.md) · [Next: 6.2 Nameable](nameable.md)
+[Contents](../../DOCUMENTATION_EN.md) · [Previous: 5.7 Config](config.md) · [Next: 6.2 Nameable](nameable.md)

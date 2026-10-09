@@ -4,9 +4,9 @@
 
 [简体中文](../../zh/reference/config.md)
 
-[Contents](../../DOCUMENTATION_EN.md) · [Previous: 5.6 Runtime utilities](runtime.md) · [Next: 6. Base classes](base-classes.md)
+[Contents](../../DOCUMENTATION_EN.md) · [Previous: 5.6 Runtime utilities](runtime.md) · [Next: 6.1 Configurable](configurable.md)
 
-[API reference contents](index.md) · [Class index: Config](#api-3-1)
+[Class index: Config](#api-3-1)
 
 ## Purpose and construction
 
@@ -49,4 +49,4 @@ assert snapshot.actor_config.warmup_step == 10
 
 ---
 
-[Contents](../../DOCUMENTATION_EN.md) · [Previous: 5.6 Runtime utilities](runtime.md) · [Next: 6. Base classes](base-classes.md)
+[Contents](../../DOCUMENTATION_EN.md) · [Previous: 5.6 Runtime utilities](runtime.md) · [Next: 6.1 Configurable](configurable.md)

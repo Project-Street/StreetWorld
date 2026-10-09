@@ -4,7 +4,7 @@
 
 [简体中文](../../../zh/guides/configuration/policy-controller.md)
 
-[Contents](../../../DOCUMENTATION_EN.md) · [Previous: 4.4 Observer configuration](observation.md) · [Next: 5. API reference](../../reference/index.md)
+[Contents](../../../DOCUMENTATION_EN.md) · [Previous: 4.4 Observer configuration](observation.md) · [Next: 5.1 Environment](../../reference/environment.md)
 
 The AD policy passes an action to step(). Policy converts it to control or motion commands, and Controller executes them. The base configuration uses EnvInputPolicy for ego steering and throttle/brake input; surrounding objects use ReplayPolicy to follow recorded trajectories.
 
@@ -69,4 +69,4 @@ Policy.max_acceleration constrains trajectory optimization; the Controller's fie
 
 ---
 
-[Contents](../../../DOCUMENTATION_EN.md) · [Previous: 4.4 Observer configuration](observation.md) · [Next: 5. API reference](../../reference/index.md)
+[Contents](../../../DOCUMENTATION_EN.md) · [Previous: 4.4 Observer configuration](observation.md) · [Next: 5.1 Environment](../../reference/environment.md)

@@ -4,7 +4,7 @@
 
 [Contents](../../DOCUMENTATION_EN.md) · [Previous: 5.2 Manager](manager.md) · [Next: 5.4 Policy](policy.md)
 
-See [API reference contents](index.md) for configuration paths and example variables.
+See [configuration and example conventions](environment.md#reference-conventions).
 
 On this page
 

@@ -4,7 +4,7 @@
 
 [English](../../en/reference/base-runnable.md)
 
-[总目录](../../DOCUMENTATION_ZH.md) · [上一页：6.3 Randomizable](randomizable.md) · [下一页：7. Policy Launcher 附录](../launchers/index.md)
+[总目录](../../DOCUMENTATION_ZH.md) · [上一页：6.3 Randomizable](randomizable.md) · [下一页：7.1 统一启动流程](../launchers/common.md)
 
 ## 职责与创建方式
 
@@ -46,4 +46,4 @@ obj.destroy()
 
 ---
 
-[总目录](../../DOCUMENTATION_ZH.md) · [上一页：6.3 Randomizable](randomizable.md) · [下一页：7. Policy Launcher 附录](../launchers/index.md)
+[总目录](../../DOCUMENTATION_ZH.md) · [上一页：6.3 Randomizable](randomizable.md) · [下一页：7.1 统一启动流程](../launchers/common.md)
