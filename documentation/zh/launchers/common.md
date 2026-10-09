@@ -2,7 +2,7 @@
 
 [English](../../en/launchers/common.md)
 
-[总目录](../../DOCUMENTATION_ZH.md) · [上一页：7. Policy Launcher 附录](index.md) · [下一页：7.2 各模型启动说明](policies.md)
+[总目录](../../DOCUMENTATION_ZH.md) · [上一页：7. Policy Launcher 附录](index.md) · [下一页：7.2 UniAD](uniad.md)
 
 本页目录
 
@@ -116,4 +116,4 @@ PY
 
 ---
 
-[总目录](../../DOCUMENTATION_ZH.md) · [上一页：7. Policy Launcher 附录](index.md) · [下一页：7.2 各模型启动说明](policies.md)
+[总目录](../../DOCUMENTATION_ZH.md) · [上一页：7. Policy Launcher 附录](index.md) · [下一页：7.2 UniAD](uniad.md)

@@ -10,7 +10,7 @@ nuScenes and Waymo use ST Renderer on the local GPU. NuRec scenes use a separate
 
 <a id="st-renderer"></a>
 
-## 3.3.1 ST Renderer
+## ST Renderer
 
 ST Renderer renders reconstructed nuScenes or Waymo Gaussian scenes on the local GPU. Create a nuScenes interface as follows:
 
@@ -22,7 +22,7 @@ simulator = SimulatorInterface("nuscenes")
 
 Use `SimulatorInterface("waymo")` for Waymo. Files are read from the repository's dataset directories by default. For data elsewhere, set `root` to the directory containing scene NPZ files, for example SimulatorInterface("nuscenes", `root`="/path/to/nuscenes").
 
-See [3.3.2 NuRec](#nurec) for its scene format, rendering service installation, and startup.
+See [NuRec](#nurec) for its scene format, rendering service installation, and startup.
 
 <a id="scene-files"></a>
 
@@ -55,7 +55,7 @@ NuRec scene IDs are relative paths beginning with Batch followed by digits, such
 
 <a id="nurec"></a>
 
-## 3.3.2 NuRec
+## NuRec
 
 [NuRec](https://docs.nvidia.com/nurec/index.html) is NVIDIA's scene reconstruction and rendering tool. It reconstructs camera and lidar recordings into 3D scenes stored as USDZ files. Rendering can change camera and participant poses to generate new views of those scenes.
 

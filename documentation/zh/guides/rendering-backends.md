@@ -10,7 +10,7 @@ nuScenes 和 Waymo 使用 ST Renderer 在本机 GPU 上渲染；NuRec 场景由�
 
 <a id="st-renderer"></a>
 
-## 3.3.1 ST Renderer
+## ST Renderer
 
 ST Renderer 在本机 GPU 上渲染重建好的 nuScenes 或 Waymo 高斯场景。选择 nuScenes 时这样创建接口：
 
@@ -22,7 +22,7 @@ simulator = SimulatorInterface("nuscenes")
 
 Waymo 使用 `SimulatorInterface("waymo")`。默认从仓库下的对应数据目录读取文件；数据放在其他位置时，用 `root` 指定存放场景 NPZ 的目录，例如 `SimulatorInterface("nuscenes", root="/path/to/nuscenes")`。
 
-NuRec 的场景格式、渲染服务安装和启动步骤见 [3.3.2 NuRec](#nurec)。
+NuRec 的场景格式、渲染服务安装和启动步骤见 [NuRec](#nurec)。
 
 <a id="scene-files"></a>
 
@@ -55,7 +55,7 @@ NuRec 的场景 ID 是以 `Batch<数字>` 开头的相对路径，如 `Batch0001
 
 <a id="nurec"></a>
 
-## 3.3.2 NuRec
+## NuRec
 
 [NuRec](https://docs.nvidia.com/nurec/index.html) 是 NVIDIA 提供的场景重建与渲染工具。它将采集的相机、激光雷达数据重建成三维场景，保存为 USDZ 文件。渲染时可以改变相机和交通对象的位姿，从这些场景生成新的画面。
 

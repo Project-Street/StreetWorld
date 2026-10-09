@@ -2,7 +2,7 @@
 
 [简体中文](../../zh/launchers/common.md)
 
-[Contents](../../DOCUMENTATION_EN.md) · [Previous: 7. Policy Launcher appendix](index.md) · [Next: 7.2 Launch instructions by model](policies.md)
+[Contents](../../DOCUMENTATION_EN.md) · [Previous: 7. Policy Launcher appendix](index.md) · [Next: 7.2 UniAD](uniad.md)
 
 On this page
 
@@ -116,4 +116,4 @@ PY
 
 ---
 
-[Contents](../../DOCUMENTATION_EN.md) · [Previous: 7. Policy Launcher appendix](index.md) · [Next: 7.2 Launch instructions by model](policies.md)
+[Contents](../../DOCUMENTATION_EN.md) · [Previous: 7. Policy Launcher appendix](index.md) · [Next: 7.2 UniAD](uniad.md)

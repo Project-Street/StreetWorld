@@ -133,14 +133,12 @@
 
 ### 3.3 渲染后端示例
 
-本节按后端分页，场景资产目录放在后端目录页。
-
-#### 3.3.1 ST Renderer
+#### ST Renderer
 
 - nuScenes / Waymo 的本地渲染与接口创建。
 - 数据目录、场景 ID 和自定义 root。
 
-#### 3.3.2 NuRec
+#### NuRec
 
 - NuRec 的场景重建、USDZ 资产和渲染服务。
 - StreetWorld 读取本地数据与请求远程渲染的分工。
@@ -349,27 +347,75 @@
 - gRPC 连接与评测循环。
 - 模型、源码路径、checkpoint、设备与服务端 Policy preset 的对应关系。
 
-### 7.2 各个 Policy 的启动说明
+### 7.2 UniAD
 
-- UniAD：`uniad`。
-- VAD：`vad`。
-- GenAD：`genad`。
-- MomAD：`momad`。
-- ST-P3：`stp3`。
-- OpenDriveVLA：`opendrivevla`。
-- Latent TransFuser：`latent_transfuser`。
-- DiffusionDrive：`diffusiondrive`。
-- SparseDrive：`sparsedrive`。
-- Alpamayo 1：`alpamayo1`。
-- Alpamayo 1.5：`alpamayo1.5`。
-- AutoVLA：`autovla`。
-- Epona：`epona`。
-- OpenEMMA GPT：`openemma_gpt`。
-- OpenEMMA Qwen：`openemma_qwen`。
-- OpenEMMA LLaVA：`openemma_llava`。
-- OpenEMMA Llama：`openemma_llama`。
+Launcher 标识：`uniad`。
 
-### 7.3 每个模型的统一说明模板
+### 7.3 VAD
+
+Launcher 标识：`vad`。
+
+### 7.4 GenAD
+
+Launcher 标识：`genad`。
+
+### 7.5 MomAD
+
+Launcher 标识：`momad`。
+
+### 7.6 ST-P3
+
+Launcher 标识：`stp3`。
+
+### 7.7 OpenDriveVLA
+
+Launcher 标识：`opendrivevla`。
+
+### 7.8 Latent TransFuser
+
+Launcher 标识：`latent_transfuser`。
+
+### 7.9 DiffusionDrive
+
+Launcher 标识：`diffusiondrive`。
+
+### 7.10 SparseDrive
+
+Launcher 标识：`sparsedrive`。
+
+### 7.11 Alpamayo 1
+
+Launcher 标识：`alpamayo1`。
+
+### 7.12 Alpamayo 1.5
+
+Launcher 标识：`alpamayo1.5`。
+
+### 7.13 AutoVLA
+
+Launcher 标识：`autovla`。
+
+### 7.14 Epona
+
+Launcher 标识：`epona`。
+
+### 7.15 OpenEMMA GPT
+
+Launcher 标识：`openemma_gpt`。
+
+### 7.16 OpenEMMA Qwen
+
+Launcher 标识：`openemma_qwen`。
+
+### 7.17 OpenEMMA LLaVA
+
+Launcher 标识：`openemma_llava`。
+
+### 7.18 OpenEMMA Llama
+
+Launcher 标识：`openemma_llama`。
+
+### 每个模型的统一说明模板
 
 - 依赖环境。
 - 上游源码准备。
