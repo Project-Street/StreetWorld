@@ -2,7 +2,7 @@
 
 [简体中文](../../zh/launchers/common.md)
 
-[Contents](../../DOCUMENTATION_EN.md) · [Previous: 7. Policy Launcher appendix](index.md) · [Next: 7.2.1 UniAD](uniad.md)
+[Contents](../../DOCUMENTATION_EN.md) · [Previous: 7. Policy Launcher appendix](index.md) · [Next: 7.2 Launch instructions by model](policies.md)
 
 On this page
 
@@ -11,7 +11,7 @@ On this page
 
 [policy_launcher.launch](../../../policy_launcher/launch.py) loads the model's NativeAgent before connecting to the server through GrpcClientEnv. It loops over reset, observation unpacking, predict_action, and step to run the server's scene queue. Model-loading failures occur before gRPC connection or scene reset.
 
-Use one terminal for the [simulation environment](../getting-started/index.md#section-1-1) and another for the model environment. Run both from the StreetWorld root. Model environments require Python 3.10 or later; Alpamayo requires 3.12. Shared client dependencies are NumPy, Gymnasium, grpcio, Protobuf, SciPy, and Pillow; install model dependencies separately.
+Use one terminal for the [simulation environment](../getting-started/installation.md#section-1-1) and another for the model environment. Run both from the StreetWorld root. Model environments require Python 3.10 or later; Alpamayo requires 3.12. Shared client dependencies are NumPy, Gymnasium, grpcio, Protobuf, SciPy, and Pillow; install model dependencies separately.
 
 Install the shared dependencies in the model environment:
 
@@ -49,7 +49,7 @@ python -m policy_launcher.launch \
 
 unpack_ad_observation reads gaussian, states, navigation, and surrounding, converts microsecond timestamps to seconds, and adds fields such as scene_token, cam_params, route_waypoints, and target_waypoint. Command values are right=0, left=1, straight=2. Each model's dataparser then processes images, transforms coordinates, and moves tensors to the model device.
 
-The server runs synchronously by default, advancing one environment step after each inference. With async_mode, simulation continues during inference and step can return cached results; see [Synchronous and asynchronous execution](../guides/architecture.md#section-2-6). The client switches scenes at max_steps. If the environment has not reported termination, that scene is not included in ScenarioEnv's completed metrics.
+The server runs synchronously by default, advancing one environment step after each inference. With async_mode, simulation continues during inference and step can return cached results; see [Synchronous and asynchronous execution](../guides/architecture/execution-mode.md#section-2-6). The client switches scenes at max_steps. If the environment has not reported termination, that scene is not included in ScenarioEnv's completed metrics.
 
 The easydrive ST Renderer branch merges model presets into the default trajectory configuration. --ad-policy-config latent_transfuser changes cameras and navigation but does not select the raw-control Policy. The NuRec branch also does not load trajectory presets. Use the dedicated server configurations below for these models.
 
@@ -116,4 +116,4 @@ PY
 
 ---
 
-[Contents](../../DOCUMENTATION_EN.md) · [Previous: 7. Policy Launcher appendix](index.md) · [Next: 7.2.1 UniAD](uniad.md)
+[Contents](../../DOCUMENTATION_EN.md) · [Previous: 7. Policy Launcher appendix](index.md) · [Next: 7.2 Launch instructions by model](policies.md)

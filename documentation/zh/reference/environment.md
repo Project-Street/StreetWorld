@@ -62,7 +62,7 @@ scene_ids、random_scenario、start_scenario_index 和 ego_z_height 由 [Scenari
 
 | 类别与签名 | 参数 | 返回值 | 行为与调用条件 | 异常与实现状态 |
 | --- | --- | --- | --- | --- |
-| 构造函数<br>`__init__(self, model, config: Config=None)` | `model`：实现 SimulatorInterface 调用约定的后端实例；`config`：组件配置字典 | None | 合并默认配置和调用方配置，创建运行组件。 | model 须实现 [SimulatorInterface 接口](../guides/interfaces.md#section-3-2)；缺少 scene_ids 会在 ScenarioDataManager 构造时抛 KeyError。 |
+| 构造函数<br>`__init__(self, model, config: Config=None)` | `model`：实现 SimulatorInterface 调用约定的后端实例；`config`：组件配置字典 | None | 合并默认配置和调用方配置，创建运行组件。 | model 须实现 [SimulatorInterface 接口](../guides/simulator-interface.md#section-3-2)；缺少 scene_ids 会在 ScenarioDataManager 构造时抛 KeyError。 |
 | 类方法<br>`default_config(cls) -> Config` | — | Config | 返回 BASE_DEFAULT_CONFIG 对应的新配置。 | 不含必需的 scene_ids。 |
 | 实例方法<br>`eval(self, order=True, repeat_per_scene=1)` | `order`：顺序模式标志；`repeat_per_scene`：场景列表的遍历次数 | None | 交给 ScenarioDataManager 创建评测队列；此后 reset 按队列取场景，不使用 scene_id。 | order=False 只修改随机模式标志，当前不会打乱队列。 |
 | 实例方法<br>`reset(self, seed: Union[None, int]=None, scene_id: Union[None, str]=None)` | `seed`：随机种子；None 使用调用方或环境的随机状态；`scene_id`：scene_ids 中的场景 ID；None 由 Manager 选择 | (observation, info) | 加载并重置场景；异步模式提交 reset 请求并等待结果。 | 关闭后抛 RuntimeError；同时存在 reset 请求时抛 RuntimeError；评测队列耗尽抛 LookupError。 |
@@ -289,7 +289,7 @@ GrpcClientEnv 是 AD policy 调用远程仿真环境的 Gym 客户端。AD polic
 
 ### 配置
 
-通过构造参数设置 host、port、timeout_sec 和 auto_wait_ready，无需 Config。传输格式见 [Environment 本地与远程调用](../guides/interfaces.md#section-3-1)。
+通过构造参数设置 host、port、timeout_sec 和 auto_wait_ready，无需 Config。传输格式见 [Environment 本地与远程调用](../guides/environment-interface.md#section-3-1)。
 
 ### API
 

@@ -207,7 +207,7 @@ AgentManager 在 `reset()` 时传入 Controller、渲染函数和相机参数；
 
 image 保存 `{相机名: ndarray(1,H,W,3)}`，camera_info 保存 `{相机名: {K, H, W, ego2camera, extra?}}`。K 为 3×3 内参，ego2camera 为 4×4 外参。元数据中的 extra 会传给渲染后端，例如 NuRec 的 logical_id；手动配置相机时只生成 K、H、W 和 ego2camera。
 
-通过 gRPC 传输图像时，服务端设置 clip_rgb=False，以 uint8 RGB 字节输出。同批 ST Renderer 相机使用相同的 H、W，见 [ST Renderer 接口约定](../guides/interfaces.md#render)。
+通过 gRPC 传输图像时，服务端设置 clip_rgb=False，以 uint8 RGB 字节输出。同批 ST Renderer 相机使用相同的 H、W，见 [ST Renderer 接口约定](../guides/simulator-interface.md#render)。
 
 ### 使用示例
 
@@ -365,7 +365,7 @@ SurroundingObservation 是提供周边交通参与者状态的观测组件。跟
 | 实例方法<br>`destroy(self)` | — | None | 释放 Controller 与 collector 引用。 | — |
 | 属性 getter<br>`observation_space(self)` | — | Box(shape=(1,), float32) | 为可变对象数量提供占位声明。 | 实际输出是按对象 ID 索引的字典，不能按该 Box 验证。 |
 
-每个对象返回 transform(4,4)、position(3,)、velocity(3,)、acceleration(3,)、heading_theta、angular_velocity、angular_acceleration、current_lane、covered_lanes、size(长/宽/高) 和 type。位置单位为 m，其余单位见[观测格式与单位](../guides/interfaces.md#observation-data)。车道字段保留地图对象引用，不随坐标模式转换。
+每个对象返回 transform(4,4)、position(3,)、velocity(3,)、acceleration(3,)、heading_theta、angular_velocity、angular_acceleration、current_lane、covered_lanes、size(长/宽/高) 和 type。位置单位为 m，其余单位见[观测格式与单位](../guides/environment-interface.md#observation-data)。车道字段保留地图对象引用，不随坐标模式转换。
 
 IDMPolicy 和 TrajectoryIDMPolicy 按世界坐标读取周边位置与速度，使用它们时设置 coordinate_mode="world"。主车的默认场景指标用车辆坐标计算 TTC，保留 agent 模式。
 

@@ -6,7 +6,7 @@ Open-loop trajectory errors do not capture how an AD policy accumulates or corre
 
 StreetWorld follows Gym's environment design: AD policies interact through `reset()` and `step(action)` for training and evaluation. Users can also drive with keyboard controls in a browser. Separate interfaces for rendering backends, observations, policies, and simulation objects allow these components to be replaced or extended for new scenes, cameras, and AD policies.
 
-[Documentation](documentation/DOCUMENTATION_EN.md) · [简体中文](documentation/DOCUMENTATION_ZH.md) · [Installation](documentation/en/getting-started/index.md#section-1-1) · [Quick start](documentation/en/getting-started/index.md#section-1-2) · [Policy Launcher](documentation/en/launchers/index.md)
+[Documentation](documentation/DOCUMENTATION_EN.md) · [简体中文](documentation/DOCUMENTATION_ZH.md) · [Installation](documentation/en/getting-started/installation.md#section-1-1) · [Quick start](documentation/en/getting-started/web-controller.md#section-1-2) · [Policy Launcher](documentation/en/launchers/index.md)
 
 ## Release events
 
@@ -31,21 +31,21 @@ StreetWorld follows Gym's environment design: AD policies interact through `rese
 
 | Rank | AD policy | NC ↑ (%) | DAC ↑ (%) | TTC ↑ (%) | COM ↑ (%) | RC ↑ (%) | RE ↑ (m/s) |
 | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| 1 | [ST-P3](documentation/en/launchers/stp3.md) | 51.67 | 95.13 | 46.77 | 95.74 | 59.36 | 3.76 |
-| 2 | [OpenDriveVLA](documentation/en/launchers/opendrivevla.md) | 60.30 | 90.87 | 36.70 | 99.52 | 56.89 | 5.48 |
-| 3 | [SparseDrive](documentation/en/launchers/sparsedrive.md) | 50.15 | 95.05 | 39.90 | 97.38 | 55.67 | 3.87 |
-| 4 | [DiffusionDrive](documentation/en/launchers/diffusiondrive.md) | 46.82 | 95.48 | 46.12 | 98.09 | 53.54 | 3.55 |
-| 5 | [UniAD](documentation/en/launchers/uniad.md) | 60.30 | 91.19 | 36.62 | 99.18 | 53.19 | 8.31 |
-| 6 | [VAD](documentation/en/launchers/vad.md) | 62.58 | 90.24 | 38.92 | 98.82 | 48.37 | 7.08 |
-| 7 | [GenAD](documentation/en/launchers/genad.md) | 58.94 | 90.69 | 29.14 | 99.53 | 48.11 | 8.01 |
-| 8 | [Latent TransFuser](documentation/en/launchers/latent_transfuser.md) | 49.85 | 87.53 | 38.69 | 99.43 | 37.97 | 3.96 |
-| — | [MomAD](documentation/en/launchers/momad.md) | — | — | — | — | — | — |
-| — | [AutoVLA](documentation/en/launchers/autovla.md) | — | — | — | — | — | — |
-| — | [Epona](documentation/en/launchers/epona.md) | — | — | — | — | — | — |
-| — | [OpenEMMA GPT](documentation/en/launchers/openemma_gpt.md) | — | — | — | — | — | — |
-| — | [OpenEMMA Qwen](documentation/en/launchers/openemma_qwen.md) | — | — | — | — | — | — |
-| — | [OpenEMMA LLaVA](documentation/en/launchers/openemma_llava.md) | — | — | — | — | — | — |
-| — | [OpenEMMA Llama](documentation/en/launchers/openemma_llama.md) | — | — | — | — | — | — |
+| 1 | [ST-P3](documentation/en/launchers/policies.md#launcher-stp3) | 51.67 | 95.13 | 46.77 | 95.74 | 59.36 | 3.76 |
+| 2 | [OpenDriveVLA](documentation/en/launchers/policies.md#launcher-opendrivevla) | 60.30 | 90.87 | 36.70 | 99.52 | 56.89 | 5.48 |
+| 3 | [SparseDrive](documentation/en/launchers/policies.md#launcher-sparsedrive) | 50.15 | 95.05 | 39.90 | 97.38 | 55.67 | 3.87 |
+| 4 | [DiffusionDrive](documentation/en/launchers/policies.md#launcher-diffusiondrive) | 46.82 | 95.48 | 46.12 | 98.09 | 53.54 | 3.55 |
+| 5 | [UniAD](documentation/en/launchers/policies.md#launcher-uniad) | 60.30 | 91.19 | 36.62 | 99.18 | 53.19 | 8.31 |
+| 6 | [VAD](documentation/en/launchers/policies.md#launcher-vad) | 62.58 | 90.24 | 38.92 | 98.82 | 48.37 | 7.08 |
+| 7 | [GenAD](documentation/en/launchers/policies.md#launcher-genad) | 58.94 | 90.69 | 29.14 | 99.53 | 48.11 | 8.01 |
+| 8 | [Latent TransFuser](documentation/en/launchers/policies.md#launcher-latent_transfuser) | 49.85 | 87.53 | 38.69 | 99.43 | 37.97 | 3.96 |
+| — | [MomAD](documentation/en/launchers/policies.md#launcher-momad) | — | — | — | — | — | — |
+| — | [AutoVLA](documentation/en/launchers/policies.md#launcher-autovla) | — | — | — | — | — | — |
+| — | [Epona](documentation/en/launchers/policies.md#launcher-epona) | — | — | — | — | — | — |
+| — | [OpenEMMA GPT](documentation/en/launchers/policies.md#launcher-openemma_gpt) | — | — | — | — | — | — |
+| — | [OpenEMMA Qwen](documentation/en/launchers/policies.md#launcher-openemma_qwen) | — | — | — | — | — | — |
+| — | [OpenEMMA LLaVA](documentation/en/launchers/policies.md#launcher-openemma_llava) | — | — | — | — | — | — |
+| — | [OpenEMMA Llama](documentation/en/launchers/policies.md#launcher-openemma_llama) | — | — | — | — | — | — |
 
 ## License
 

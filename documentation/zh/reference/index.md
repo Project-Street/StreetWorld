@@ -4,7 +4,7 @@
 
 [English](../../en/reference/index.md)
 
-[总目录](../../DOCUMENTATION_ZH.md) · [上一章：4. 配置系统](../guides/configuration.md) · [下一页：5.1 Environment](environment.md)
+[总目录](../../DOCUMENTATION_ZH.md) · [上一页：4.5 Policy 与 Controller 配置](../guides/configuration/policy-controller.md) · [下一页：5.1 Environment](environment.md)
 
 配置字段以完整环境路径列出。示例中的 cfg 从环境 default_config() 创建，在构造环境前修改；env 是已完成 reset 的环境。每段示例单独使用。
 
@@ -62,4 +62,4 @@
 
 ---
 
-[总目录](../../DOCUMENTATION_ZH.md) · [上一章：4. 配置系统](../guides/configuration.md) · [下一页：5.1 Environment](environment.md)
+[总目录](../../DOCUMENTATION_ZH.md) · [上一页：4.5 Policy 与 Controller 配置](../guides/configuration/policy-controller.md) · [下一页：5.1 Environment](environment.md)
