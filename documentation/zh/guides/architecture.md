@@ -4,7 +4,7 @@
 
 [English](../../en/guides/architecture.md)
 
-[总目录](../../DOCUMENTATION_ZH.md) · [上一页：1.4 运行 Expert iLQR](../getting-started/expert-ilqr.md) · [下一页：3.1 Environment：本地与远程调用](environment-interface.md)
+[总目录](../../DOCUMENTATION_ZH.md) · [上一章：1. 安装与快速运行](../getting-started/index.md) · [下一章：3. 接口约定](interfaces.md)
 
 <a id="section-2-1"></a>
 
@@ -29,7 +29,7 @@ SimulatorInterface 约定场景数据怎样交给 Environment，以及渲染器�
 
 创建 Environment 时，需要传入一个 SimulatorInterface 实例。`reset()` 通过它读取轨迹、相机参数和地形，加载 3D 资产与道路地图。运行场景时，Environment 把当前时间和周边对象的位姿交给它，主车的相机观测再调用它获取图像。
 
-仓库中的 ST Renderer 实现读取 nuScenes 或 Waymo 资产，在本机 GPU 上渲染；NuRec 实现读取 NuRec 资产，向独立运行的渲染服务请求图像。接口的数据格式和两种实现的配置见[第三章](simulator-interface.md)。
+仓库中的 ST Renderer 实现读取 nuScenes 或 Waymo 资产，在本机 GPU 上渲染；NuRec 实现读取 NuRec 资产，向独立运行的渲染服务请求图像。接口的数据格式和两种实现的配置见[第三章](interfaces.md#section-3-2)。
 
 <a id="section-2-3"></a>
 
@@ -70,7 +70,7 @@ Environment 通过管理多个 AgentManager 实现场景仿真：主车有自己
 
 例如，物理步长为 `0.02 s`、`decision_repeat=5` 时，一个环境步模拟 `0.1 s`。保持物理步长不变，将 `decision_repeat` 改成 `25`，一个环境步就模拟 `0.5 s`，新观测也每隔 `0.5 s` 仿真时间生成一次。
 
-使用 iLQR 跟踪轨迹时，还要相应调整策略的控制周期，配置方法见[时间设置示例](configuration/policy-controller.md#section-4-5)。
+使用 iLQR 跟踪轨迹时，还要相应调整策略的控制周期，配置方法见[时间设置示例](configuration.md#section-4-5)。
 
 <a id="section-2-6"></a>
 
@@ -90,4 +90,4 @@ Environment 通过管理多个 AgentManager 实现场景仿真：主车有自己
 
 ---
 
-[总目录](../../DOCUMENTATION_ZH.md) · [上一页：1.4 运行 Expert iLQR](../getting-started/expert-ilqr.md) · [下一页：3.1 Environment：本地与远程调用](environment-interface.md)
+[总目录](../../DOCUMENTATION_ZH.md) · [上一章：1. 安装与快速运行](../getting-started/index.md) · [下一章：3. 接口约定](interfaces.md)

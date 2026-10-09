@@ -4,7 +4,7 @@
 
 [简体中文](../../zh/guides/architecture.md)
 
-[Contents](../../DOCUMENTATION_EN.md) · [Previous: 1.4 Run Expert iLQR](../getting-started/expert-ilqr.md) · [Next: 3.1 Environment: local and remote calls](environment-interface.md)
+[Contents](../../DOCUMENTATION_EN.md) · [Previous chapter: 1. Installation and quick start](../getting-started/index.md) · [Next chapter: 3. Interface contracts](interfaces.md)
 
 <a id="section-2-1"></a>
 
@@ -29,7 +29,7 @@ SimulatorInterface defines the scene data supplied to Environment and how a rend
 
 Pass a SimulatorInterface instance when constructing an Environment. During `reset()`, the environment reads trajectories, camera parameters, and terrain, then loads 3D assets and road maps. During simulation, it passes the current timestamp and participant poses to the backend; the ego camera Observer requests images from it.
 
-The ST Renderer implementation reads nuScenes or Waymo assets and renders on the local GPU. The NuRec implementation reads NuRec assets and requests images from a separate rendering service. See [Chapter 3](simulator-interface.md) for data formats and backend configuration.
+The ST Renderer implementation reads nuScenes or Waymo assets and renders on the local GPU. The NuRec implementation reads NuRec assets and requests images from a separate rendering service. See [Chapter 3](interfaces.md#section-3-2) for data formats and backend configuration.
 
 <a id="section-2-3"></a>
 
@@ -70,7 +70,7 @@ Simulated duration per environment step (seconds)
 
 With a `0.02 s` physics step and `decision_repeat=5`, each environment step advances 0.1 s. Keeping the physics step fixed and changing `decision_repeat` to `25` advances `0.5 s` per step and produces observations at `0.5 s` intervals of simulation time.
 
-For iLQR trajectory tracking, adjust the policy's control period accordingly. See the [timing example](configuration/policy-controller.md#section-4-5).
+For iLQR trajectory tracking, adjust the policy's control period accordingly. See the [timing example](configuration.md#section-4-5).
 
 <a id="section-2-6"></a>
 
@@ -90,4 +90,4 @@ If physics and rendering take longer than the configured interval, asynchronous 
 
 ---
 
-[Contents](../../DOCUMENTATION_EN.md) · [Previous: 1.4 Run Expert iLQR](../getting-started/expert-ilqr.md) · [Next: 3.1 Environment: local and remote calls](environment-interface.md)
+[Contents](../../DOCUMENTATION_EN.md) · [Previous chapter: 1. Installation and quick start](../getting-started/index.md) · [Next chapter: 3. Interface contracts](interfaces.md)

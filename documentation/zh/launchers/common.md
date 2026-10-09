@@ -11,7 +11,7 @@
 
 [policy_launcher.launch](../../../policy_launcher/launch.py) 先加载模型的 NativeAgent，再通过 GrpcClientEnv 连接服务端。客户端循环调用 reset、解包观测、predict_action 和 step，运行服务端的场景队列。模型加载失败时还未连接 gRPC，也未重置场景。
 
-在一个终端使用[仿真环境](../getting-started/installation.md)运行服务端，另一个终端使用对应模型环境运行 Launcher。两个终端都从 StreetWorld 根目录执行命令。模型环境需要 Python 3.10 或更高版本；Alpamayo 需要 3.12。客户端公共依赖包括 NumPy、Gymnasium、grpcio、Protobuf、SciPy 和 Pillow，模型依赖另行安装。
+在一个终端使用[仿真环境](../getting-started/index.md#section-1-1)运行服务端，另一个终端使用对应模型环境运行 Launcher。两个终端都从 StreetWorld 根目录执行命令。模型环境需要 Python 3.10 或更高版本；Alpamayo 需要 3.12。客户端公共依赖包括 NumPy、Gymnasium、grpcio、Protobuf、SciPy 和 Pillow，模型依赖另行安装。
 
 在模型环境中安装公共依赖：
 

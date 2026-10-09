@@ -11,7 +11,7 @@ On this page
 
 [policy_launcher.launch](../../../policy_launcher/launch.py) loads the model's NativeAgent before connecting to the server through GrpcClientEnv. It loops over reset, observation unpacking, predict_action, and step to run the server's scene queue. Model-loading failures occur before gRPC connection or scene reset.
 
-Use one terminal for the [simulation environment](../getting-started/installation.md) and another for the model environment. Run both from the StreetWorld root. Model environments require Python 3.10 or later; Alpamayo requires 3.12. Shared client dependencies are NumPy, Gymnasium, grpcio, Protobuf, SciPy, and Pillow; install model dependencies separately.
+Use one terminal for the [simulation environment](../getting-started/index.md#section-1-1) and another for the model environment. Run both from the StreetWorld root. Model environments require Python 3.10 or later; Alpamayo requires 3.12. Shared client dependencies are NumPy, Gymnasium, grpcio, Protobuf, SciPy, and Pillow; install model dependencies separately.
 
 Install the shared dependencies in the model environment:
 

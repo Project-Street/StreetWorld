@@ -4,7 +4,7 @@
 
 [简体中文](../../zh/reference/index.md)
 
-[Contents](../../DOCUMENTATION_EN.md) · [Previous: 4.5 Policy and Controller configuration](../guides/configuration/policy-controller.md) · [Next: 5.1 Environment](environment.md)
+[Contents](../../DOCUMENTATION_EN.md) · [Previous chapter: 4. Configuration system](../guides/configuration.md) · [Next: 5.1 Environment](environment.md)
 
 Configuration fields use complete environment paths. Create cfg from an environment class's default_config() and modify it before construction; env denotes an environment that has completed reset. Each example is independent.
 
@@ -62,4 +62,4 @@ Look up methods by class in the [API index](../../API_CLASS_FUNCTIONS_EN.md).
 
 ---
 
-[Contents](../../DOCUMENTATION_EN.md) · [Previous: 4.5 Policy and Controller configuration](../guides/configuration/policy-controller.md) · [Next: 5.1 Environment](environment.md)
+[Contents](../../DOCUMENTATION_EN.md) · [Previous chapter: 4. Configuration system](../guides/configuration.md) · [Next: 5.1 Environment](environment.md)

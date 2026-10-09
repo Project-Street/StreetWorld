@@ -62,7 +62,7 @@ Source: [streetworld/envs/base_env.py](../../../streetworld/envs/base_env.py).
 
 | Category and signature | Parameters | Returns | Behavior and conditions | Exceptions and implementation status |
 | --- | --- | --- | --- | --- |
-| Constructor<br>`__init__(self, model, config: Config=None)` | `model`: backend instance implementing the SimulatorInterface contract; `config`: component configuration dictionary | None | Merges default and caller configurations and creates runtime components. | model must implement [SimulatorInterface](../guides/simulator-interface.md). Missing scene_ids raises KeyError during ScenarioDataManager construction. |
+| Constructor<br>`__init__(self, model, config: Config=None)` | `model`: backend instance implementing the SimulatorInterface contract; `config`: component configuration dictionary | None | Merges default and caller configurations and creates runtime components. | model must implement [SimulatorInterface](../guides/interfaces.md#section-3-2). Missing scene_ids raises KeyError during ScenarioDataManager construction. |
 | Class method<br>`default_config(cls) -> Config` | — | Config | Returns a new configuration from BASE_DEFAULT_CONFIG. | Does not include the required scene_ids. |
 | Instance method<br>`eval(self, order=True, repeat_per_scene=1)` | `order`: ordering flag; `repeat_per_scene`: number of passes through the scene list | None | Asks ScenarioDataManager to build an evaluation queue; subsequent reset calls use the queue and ignore scene_id. | order=False only changes the random-mode flag; it does not shuffle the queue. |
 | Instance method<br>`reset(self, seed: Union[None, int]=None, scene_id: Union[None, str]=None)` | `seed`: random `seed`, with None using caller/environment random state; `scene_id`: ID in scene_ids, selected by Manager when None | (observation, info) | Loads and resets the scene; asynchronous mode submits a reset request and waits for completion. | Raises RuntimeError after closure or when another reset is pending; an exhausted evaluation queue raises LookupError. |
@@ -289,7 +289,7 @@ Source: [streetworld/envs/grpc_client_env.py](../../../streetworld/envs/grpc_cli
 
 ### Configuration
 
-Set host, port, timeout_sec, and auto_wait_ready through constructor arguments; no Config is needed. See [Environment: local and remote calls](../guides/environment-interface.md) for transport formats.
+Set host, port, timeout_sec, and auto_wait_ready through constructor arguments; no Config is needed. See [Environment: local and remote calls](../guides/interfaces.md#section-3-1) for transport formats.
 
 ### API
 

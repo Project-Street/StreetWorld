@@ -2,7 +2,7 @@
 
 文档按 `DOCUMENTATION_OUTLINE.md` 的章节组织，组件 API 以 `API_CLASS_FUNCTIONS.md` 为清单，行为和配置取值以当前源码为准。用户后续的修改优先。
 
-`README.md` 提供语言入口。中文版入口为 `DOCUMENTATION_ZH.md`，英文版入口为 `DOCUMENTATION_EN.md`；两者保留相同的章节目录。正文分别放在 `zh/` 和 `en/`：`getting-started/` 保存安装和运行示例，`guides/` 保存架构、接口和配置说明，`reference/` 按组件分组，`launchers/` 保存通用启动流程及每个模型的独立页面。API 清单分别为 `API_CLASS_FUNCTIONS.md` 和 `API_CLASS_FUNCTIONS_EN.md`。
+`README.md` 提供语言入口。中文版入口为 `DOCUMENTATION_ZH.md`，英文版入口为 `DOCUMENTATION_EN.md`；两者保留相同的章节目录。正文分别放在 `zh/` 和 `en/`，安装与快速运行放在 `getting-started/index.md`，整体结构、接口约定、配置系统分别放在 `guides/architecture.md`、`guides/interfaces.md`、`guides/configuration.md`。这几章按章分文件，章内小节通过锚点链接，不再单独拆页。`reference/` 按组件分组，`launchers/` 保存通用启动流程及每个模型的独立页面。API 清单分别为 `API_CLASS_FUNCTIONS.md` 和 `API_CLASS_FUNCTIONS_EN.md`。
 
 ## 文字
 

@@ -6,7 +6,7 @@ Open-loop trajectory errors do not capture how an AD policy accumulates or corre
 
 StreetWorld follows Gym's environment design: AD policies interact through `reset()` and `step(action)` for training and evaluation. Users can also drive with keyboard controls in a browser. Separate interfaces for rendering backends, observations, policies, and simulation objects allow these components to be replaced or extended for new scenes, cameras, and AD policies.
 
-[Documentation](documentation/DOCUMENTATION_EN.md) · [简体中文](documentation/DOCUMENTATION_ZH.md) · [Installation](documentation/en/getting-started/installation.md) · [Quick start](documentation/en/getting-started/web-controller.md) · [Policy Launcher](documentation/en/launchers/index.md)
+[Documentation](documentation/DOCUMENTATION_EN.md) · [简体中文](documentation/DOCUMENTATION_ZH.md) · [Installation](documentation/en/getting-started/index.md#section-1-1) · [Quick start](documentation/en/getting-started/index.md#section-1-2) · [Policy Launcher](documentation/en/launchers/index.md)
 
 ## Release events
 

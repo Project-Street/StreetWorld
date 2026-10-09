@@ -207,7 +207,7 @@ Source: [streetworld/obs/gaussian_obs.py](../../../streetworld/obs/gaussian_obs.
 
 image contains {camera_name: ndarray(1,H,W,3)}; camera_info contains {camera_name: {K, H, W, ego2camera, extra?}}. K is a 3×3 intrinsic matrix; ego2camera is a 4×4 extrinsic transform. Metadata extra is passed to the backend, such as NuRec logical_id. Custom cameras generate only K, H, W, and ego2camera.
 
-For gRPC images, set server clip_rgb=False to transmit uint8 RGB bytes. ST Renderer batch cameras must share H/W; see the [renderer contract](../guides/simulator-interface.md#render).
+For gRPC images, set server clip_rgb=False to transmit uint8 RGB bytes. ST Renderer batch cameras must share H/W; see the [renderer contract](../guides/interfaces.md#render).
 
 ### Example
 
@@ -365,7 +365,7 @@ Source: [streetworld/obs/surrounding_obs.py](../../../streetworld/obs/surroundin
 | Instance method<br>`destroy(self)` | — | None | Releases Controller/collector references. | — |
 | Property getter<br>`observation_space(self)` | — | Box(shape=(1,), float32) | Provides a placeholder for variable object counts. | Actual output is keyed by object ID and cannot be validated against this Box. |
 
-Each object includes transform(4,4), position(3,), velocity(3,), acceleration(3,), heading_theta, angular_velocity, angular_acceleration, current_lane, covered_lanes, size(length/width/height), and type. Position is in meters; see [observation units](../guides/environment-interface.md#observation-data) for the rest. Lane fields retain map object references and do not transform with coordinate mode.
+Each object includes transform(4,4), position(3,), velocity(3,), acceleration(3,), heading_theta, angular_velocity, angular_acceleration, current_lane, covered_lanes, size(length/width/height), and type. Position is in meters; see [observation units](../guides/interfaces.md#observation-data) for the rest. Lane fields retain map object references and do not transform with coordinate mode.
 
 IDMPolicy and TrajectoryIDMPolicy read surrounding positions/velocities in world coordinates; set coordinate_mode="world" for them. Default ego metrics compute TTC in vehicle coordinates, so retain agent mode there.
 
