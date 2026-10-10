@@ -1,25 +1,28 @@
 [build-system]
-requires = ["setuptools>=45"]
+requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "streetworld"
-description = "StreetWorld is built on MetaDrive, integrating Gaussian splatting rendering and simulation. It discovers scenes automatically from a scene-config directory and supports remote visualization in a client/server mode for interactive driving or RL training."
 readme = { file = "README.md", content-type = "text/markdown" }
 authors = [
     { name = "lllcccfff", email = "7802220128@csu.edu.cn" },
     { name = "Jesse Senior", email = "jessesenior@outlook.com" },
 ]
-requires-python = ">=3.8"
+requires-python = ">=3.10"
 version = "0.0.1"
 dependencies = [
     "addict",
     "cuda-python<=12.8",
+    "fast_gauss @ git+ssh://git@github.com/lllcccfff/fast-gauss-paral.git@48d5682f3215828d8ea57009f62f3657f14d9ee2",
+    "fastapi",
     "gymnasium",
     "grpcio",
     "grpcio-tools",
     "lxml",
+    "matplotlib",
     "mediapy",
+    "nvdiffrast @ git+https://github.com/NVlabs/nvdiffrast.git",
     "opencv-python-headless",
     "panda3d",
     "pydantic",
@@ -29,15 +32,23 @@ dependencies = [
     "protobuf",
     "PyYAML",
     "rich",
+    "scipy",
     "shapely",
-    "torch",
-    "trajdata",
+    "st-renderer @ git+ssh://git@github.com/lllcccfff/st-renderer.git@7b3d01dd1c43ab2bffafd3606db240994bb94c81",
+    "torch==2.4.1",
+    "torchvision==0.19.1",
+    "torchaudio==2.4.1",
+    "trajdata @ git+https://github.com/NVlabs/trajdata.git@47792008919e750e075dc2790116ab48df2e12a6",
     "trimesh",
+    "uvicorn",
     "websockets<14",
     "pyglm",
     "gsplat==1.5.3",
     "plyfile==1.1.3"
 ]
+
+[dependency-groups]
+build = ["setuptools>=68", "wheel", "ninja"]
 
 [tool.setuptools]
 packages = [

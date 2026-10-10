@@ -21,7 +21,7 @@ StreetWorld 是一个自动驾驶闭环仿真平台。驾驶策略接收相机�
 - <a id="chapter-3"></a>[3. 接口约定](zh/guides/environment-interface.md)
     - [3.1 Environment：本地与远程调用](zh/guides/environment-interface.md#section-3-1)
     - [3.2 3D 资产与 SimulatorInterface](zh/guides/simulator-interface.md#section-3-2)
-    - [3.3 渲染后端示例](zh/guides/rendering-backends.md#section-3-3)
+    - [3.3 SimulatorInterface 示例](zh/guides/rendering-backends.md#section-3-3)
 - <a id="chapter-4"></a>[4. 配置系统](zh/guides/configuration/config.md)
     - [4.1 Config 的用途与使用](zh/guides/configuration/config.md#section-4-1)
     - [4.2 配置层级与优先级](zh/guides/configuration/hierarchy.md#section-4-2)

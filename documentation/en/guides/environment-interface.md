@@ -8,7 +8,7 @@
 
 [Contents](../../DOCUMENTATION_EN.md) · [Previous: 2. Architecture](architecture.md) · [Next: 3.2 3D assets and SimulatorInterface](simulator-interface.md)
 
-Environment runs driving episodes: it loads a scene, accepts actions, simulates vehicle motion, and returns observations, reward, and termination flags. A local AD policy calls it directly; a model in a separate process calls the server environment through GrpcClientEnv.
+Environment provides the interface between an AD policy and the simulation. It loads scenes, accepts actions, advances vehicle motion, and returns observations, rewards, and termination flags.
 
 ## Local calls
 
@@ -34,7 +34,7 @@ finally:
     env.close()
 ```
 
-`reset()` starts an episode and returns the initial observation and scene information. `step(action)` returns the five values below; `close()` releases environment resources.
+`reset()` starts an episode and returns the initial observation and scene information. `step(action)` submits an action and returns the five values below; `close()` releases environment resources.
 
 | Return value | Type and meaning |
 | --- | --- |
@@ -48,7 +48,7 @@ finally:
 
 ## action: trajectories and control inputs
 
-The ego Policy determines `step(action)`'s input format. EnvInputILQRPolicy and EnvInputPIDPolicy accept future waypoints from an AD policy and convert them to control inputs. EnvInputPolicy accepts steering and throttle/brake directly.
+The ego Policy determines the input format for `step(action)`. If the AD policy outputs future waypoints, use EnvInputILQRPolicy or EnvInputPIDPolicy to convert the trajectory into steering and throttle. If it outputs controls directly, use EnvInputPolicy to accept steering and throttle/brake.
 
 ### Trajectory input
 
@@ -82,18 +82,18 @@ For example, `[0.0, 0.2]` centers steering and applies 20% throttle; `[0.5, 0.0]
 
 <a id="observation-data"></a>
 
-## observation: data available to the AD policy
+## observation: observations for the AD policy
 
 The ego AssemblyObservation combines the default observations. Changing the Observer or its configuration changes the returned fields.
 
 | Field | Contents and format |
 | --- | --- |
-| `gaussian` | Camera images and parameters; local gaussian['image'][camera_name] has shape `(1, H, W, 3)`, using `uint8` RGB values in 0–255 by default. The first dimension is one frame, H/W are image height/width, and the last dimension contains RGB channels |
+| `gaussian` | Camera images and parameters; local `gaussian['image'][camera_name]` has shape `(1, H, W, 3)`, using `uint8` RGB values in 0–255 by default. The first dimension is one frame, H/W are image height/width, and the last dimension contains RGB channels |
 | `navigation` | Navigation data including the current road, route, and ego position relative to the route |
 | `states` | Ego speed and motion state |
 | `surrounding` | Poses, dimensions, and motion state of surrounding vehicles, pedestrians, and other objects |
 
-Positions use meters, velocity `m/s`, acceleration `m/s²`, angular velocity `rad/s`, and angular acceleration rad/s². Heading angles such as `heading_theta` use radians. Vehicle coordinates are X forward, Y left, Z up. SurroundingObservation can return participant data in ego or world coordinates; see the [Observation reference](../reference/observation.md). See [SimulatorInterface](simulator-interface.md#load-metadata) for camera parameters and pose matrices.
+Positions use meters, velocity `m/s`, acceleration `m/s²`, angular velocity `rad/s`, and angular acceleration `rad/s²`. Heading angles such as `heading_theta` use radians. Vehicle coordinates are X forward, Y left, Z up. SurroundingObservation can return participant data in ego or world coordinates; see the [Observation reference](../reference/observation.md). See [SimulatorInterface](simulator-interface.md#load-metadata) for camera parameters and pose matrices.
 
 <a id="scenario-info"></a>
 
@@ -131,15 +131,17 @@ AgentState describes a simulation object's current state. Environment checks the
 | `CRASH_OBJECT` | `crash_object` | Collision with another traffic object |
 | `CRASH_WORLD` | `crash_world` | Collision with scene background geometry or terrain |
 
-Arrival, leaving the road, step limits, and collisions set terminated=True. A step limit also sets `truncated=True`, so both flags can be true. Use `if terminated or truncated` to detect episode end.
+Arrival, leaving the road, step limits, and collisions set `terminated=True`. A step limit also sets `truncated=True`, so both flags can be true. Use `if terminated or truncated` to detect episode end.
 
 `max_step` sets the environment limit; `actor_config.max_step` sets the ego Agent limit. `check_crash` enables ego collision checking, and `check_crash_world` additionally controls background collision checking. Fields such as `crash_vehicle_done` do not participate in this termination logic, so they cannot keep a scene running after collision.
 
 <a id="reward-calculation"></a>
 
 ## Calculate and customize rewards
-For reinforcement learning, adapt the reward to the training objective by changing the reward calculator or overriding the reward function.
-ScenarioEnv uses [RewardCalculator](../../../streetworld/misc/reward_calculator.py). It calls `reset()` at the start of each episode and `compute(env)` to obtain (reward, `reward_info`). Environment merges `reward_info` into `info` and accumulates the per-step reward.
+
+Rewards define the optimization objective in reinforcement learning. Adjust the weights and thresholds of existing terms, or rewrite the reward function to add your own criteria.
+
+ScenarioEnv uses [RewardCalculator](../../../streetworld/misc/reward_calculator.py). It calls `reset()` at the start of each episode to clear records and `compute(env)` to obtain `(reward, reward_info)`. Environment merges `reward_info` into `info` and accumulates the per-step reward.
 
 The default reward contains these terms:
 
@@ -152,7 +154,7 @@ The default reward contains these terms:
 | `success_bonus` | Reward for reaching the destination; default `75` |
 | `living_cost` | Constant added on each calculation; current default `0.05` |
 
-Set weights or thresholds such as `progress_reward_weight` and `collision_penalty_weight` in Config; see [ScenarioEnv configuration](../reference/environment.md#api-1-2). To add a reward term, override `_reward_function()` in a ScenarioEnv subclass. This example retains the default reward and penalizes large steering inputs:
+Set weights or thresholds such as `progress_reward_weight` and `collision_penalty_weight` in Config; see [ScenarioEnv configuration](../reference/environment.md#api-1-2) for all fields. To add reward logic, override `_reward_function()` in a ScenarioEnv subclass. This example retains the default reward and adds a penalty proportional to steering magnitude:
 
 ```python
 from streetworld.envs.scenario_env import ScenarioEnv
@@ -168,7 +170,7 @@ class SteeringPenaltyEnv(ScenarioEnv):
         return total, info
 ```
 
-Construct `SteeringPenaltyEnv` in place of `ScenarioEnv`, using the same calls. The method must return a numeric reward and an information dictionary. The new penalty is included in episode_reward.
+Construct `SteeringPenaltyEnv` in place of `ScenarioEnv`, using the same calls. The method must return a numeric reward and an information dictionary. The new penalty is included in `episode_reward`.
 
 Alternatively, copy or subclass RewardCalculator, change `compute(env)`, and assign your calculator to `self.reward_calculator` in a custom environment constructor. It must also implement `reset()` to clear episode records and `episode_info()` to return accumulated diagnostics at termination. Config does not currently select a reward calculator class.
 
@@ -194,10 +196,13 @@ The returned class retains `reset()`, `step()`, and `close()` and manages these 
 | VideoExporter | Saves per-scene MP4 videos, optionally showing speed/angular-velocity history and control inputs beside the images | `video_output_dir` defaults to `videos`; `None` disables recording. `video_hud` controls additional state displays |
 
 After each step, the interactive environment reads camera images from `observation`, arranges them with `image_layout`, and passes images and vehicle state to these components. At scene end, the terminal shows the termination reason and metrics, and the video is written to disk. `close()` shuts down the interfaces and saves unfinished recordings.
-The web service starts during environment construction. After reset, it waits for the first `step()` to display camera images. Manual driving requires continuous key handling; see the [browser driving example](../getting-started/web-controller.md#section-1-2). See the [API reference](../reference/environment.md#api-1-3) for all interactive environment settings.
+
+The web service starts during environment construction. After `reset()`, it waits for the first `step()` to display camera images. Manual driving requires continuous key handling; see the [browser driving example](../getting-started/web-controller.md#section-1-2). See the [API reference](../reference/environment.md#api-1-3) for all interactive environment settings.
 
 ## Remote calls
-AD policies and the simulator often have conflicting dependencies. Run each in its own Python environment and exchange simulation observations and inference results between processes.
+
+An AD policy and the simulator may require conflicting dependency versions. Install them in separate Python environments and exchange observations and actions over gRPC to run closed-loop simulation.
+
 Start the Environment Server as described in [Chapter 1](../getting-started/environment-server.md#section-1-3), then connect with GrpcClientEnv. The client still uses `reset()`, `step()`, and `close()`; scene loading, vehicle simulation, and rewards run on the server.
 
 ```python
@@ -213,9 +218,9 @@ finally:
     env.close()
 ```
 
-This example submits six future position points to the server's default `trajectory` Policy. Replace `trajectory` with your model's prediction from `observation`, then repeat the calls in a loop.
+This example submits six future position points to the server's default trajectory Policy. When integrating an AD policy, generate a trajectory from `observation`, replace `trajectory`, and repeat the calls in a loop.
 
-The server configuration selects remote scenes. Client `reset()` currently does not send `seed` or `options` and has no `scene_id` argument. For continuous control, send `[steering, throttle_brake]`; the server restores a one-row, two-column array, and EnvInputPolicy takes that row. Discrete action IDs are not supported by this transport; a nonempty action must contain an even number of elements. Sending `None` also gives the server None.
+The server configuration selects remote scenes. Client `reset()` currently does not send `seed` or `options` and has no `scene_id` argument. For continuous control, send `[steering, throttle_brake]`; the server restores a one-row, two-column array, and EnvInputPolicy takes that row. Discrete action IDs are not supported by this transport; a nonempty action must contain an even number of elements. Sending `None` also gives the server `None`.
 
 | Details | Changes in remote calls |
 | --- | --- |

@@ -4,11 +4,11 @@
 
 [简体中文](../../zh/guides/simulator-interface.md)
 
-[Contents](../../DOCUMENTATION_EN.md) · [Previous: 3.1 Environment: local and remote calls](environment-interface.md) · [Next: 3.3 Rendering backend examples](rendering-backends.md)
+[Contents](../../DOCUMENTATION_EN.md) · [Previous: 3.1 Environment: local and remote calls](environment-interface.md) · [Next: 3.3 SimulatorInterface examples](rendering-backends.md)
 
 SimulatorInterface defines StreetWorld's scene loading and image rendering contract. Dataset assets supply trajectories, camera parameters, maps, and terrain in a common format for Environment. Renderers implement the same interface to generate images from simulated object and camera poses.
 
-Environment calls these methods by convention; each implementation handles its own files, assets, and rendering. Implement the four methods below to add a dataset or renderer, then pass the instance to Environment. See [Rendering backend examples](rendering-backends.md#section-3-3) for the existing backends.
+Environment calls these methods by convention; each implementation handles its own files, assets, and rendering. Implement the four methods below to add a dataset or renderer, then pass the instance to Environment. See [SimulatorInterface examples](rendering-backends.md#section-3-3) for the existing backends.
 
 ## The four SimulatorInterface calls
 
@@ -106,4 +106,4 @@ Environment supplies `extra` automatically. NuRec `load_metadata()` reads it fro
 
 ---
 
-[Contents](../../DOCUMENTATION_EN.md) · [Previous: 3.1 Environment: local and remote calls](environment-interface.md) · [Next: 3.3 Rendering backend examples](rendering-backends.md)
+[Contents](../../DOCUMENTATION_EN.md) · [Previous: 3.1 Environment: local and remote calls](environment-interface.md) · [Next: 3.3 SimulatorInterface examples](rendering-backends.md)

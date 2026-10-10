@@ -18,7 +18,7 @@
 
 ### 职责与创建方式
 
-BaseManager 是 Manager 的基础类，提供对象登记、创建和销毁接口。一个 Manager 可能在场景运行中创建多个物理对象，切换场景时需要统一释放；子类可以使用这套对象管理机制实现自己的场景或 Agent 管理逻辑。
+BaseManager 是 Manager 的基础类，提供对象登记、创建和销毁接口。一个 Manager 可能在场景运行中创建一个或多个物理对象，切换场景时需要统一释放；子类可以使用这套对象管理机制实现自己的场景或 Agent 管理逻辑。
 
 它通过 [Randomizable](randomizable.md#api-9-3) 管理随机状态，在 `spawned_objects` 中按 ID 保存对象，清理时调用对象的 `destroy()`。Environment 直接调用具体 Manager 的 `reset()`、`step()` 和 `update_state()`；前后置钩子不会全部自动执行。
 

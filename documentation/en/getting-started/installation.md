@@ -8,35 +8,19 @@
 
 [Contents](../../DOCUMENTATION_EN.md) · [Previous: Contents](../../DOCUMENTATION_EN.md) · [Next: 1.2 Drive in the browser](web-controller.md)
 
-## Requirements
-
-- Python 3.10 or later.
-- NVIDIA GPU, CUDA Toolkit, and OpenGL; headless rendering requires EGL.
-
-## Installation
-
 ```bash
-conda create -n streetworld python=3.10 -y
-conda activate streetworld
-
 git clone --recursive https://github.com/Project-Street/StreetWorld.git
 cd StreetWorld
 
-python -m pip install -e ./trajdata
-python -m pip install -e .
-python -m pip install -e ./submodules/fast-gauss-paral
-python -m pip install -e ./submodules/st-renderer
-python -m pip install scipy matplotlib fastapi uvicorn setuptools wheel ninja
-python -m pip install git+https://github.com/NVlabs/nvdiffrast.git --no-build-isolation
+conda create -n streetworld python=3.11 'pip>=25.1' -y
+conda activate streetworld
+
+python -m pip install --group build
+python -m pip install torch==2.4.1 torchvision==0.19.1 torchaudio==2.4.1 --index-url https://download.pytorch.org/whl/cu121
+python -m pip install -e . --no-build-isolation
 ```
 
-## Verify the installation
-
-```bash
-python -c "import streetworld, st_renderer, fast_gauss, nvdiffrast.torch, trajdata"
-```
-
-Scene download links will be released later. If you already have the data, place it under the [scene asset directories](../guides/rendering-backends.md#scene-files), then run the [browser driving example](web-controller.md#section-1-2).
+Scene download links will be released later. See [scene asset directories](../guides/rendering-backends.md#scene-files) for downloading and placing the default scene assets.
 
 ---
 

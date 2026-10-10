@@ -8,7 +8,7 @@
 
 [总目录](../../DOCUMENTATION_ZH.md) · [上一页：2. 整体结构](architecture.md) · [下一页：3.2 3D 资产与 SimulatorInterface](simulator-interface.md)
 
-Environment 用于运行驾驶测试。它载入场景，接收驾驶动作，计算车辆运动，再返回新的观测、奖励和结束状态。驾驶程序根据这些结果决定下一步怎么开；本地程序直接调用环境，独立运行的模型则通过 `GrpcClientEnv` 调用服务端环境。
+Environment 提供 AD policy 与仿真交互的接口。它加载场景，接收动作并推进车辆运动，返回观测、奖励和结束状态。
 
 ## 本地调用
 
@@ -48,7 +48,7 @@ finally:
 
 ## action：轨迹与控制量
 
-`step(action)` 的输入由主车的 Policy 决定。EnvInputILQRPolicy、EnvInputPIDPolicy 可以用于AD policy的推理，直接接收未来轨迹 (waypoint) 并转化为控制量，EnvInputPolicy 接收转向和油门/制动。
+`step(action)` 的输入格式由主车的 Policy 决定。AD policy 输出未来轨迹（waypoints）时，使用 EnvInputILQRPolicy 或 EnvInputPIDPolicy 将轨迹转换为转向和油门；直接输出控制量时，使用 EnvInputPolicy 接收转向和油门/制动。
 
 ### 轨迹输入
 
@@ -82,7 +82,7 @@ Policy 根据这条轨迹计算转向和油门，交给车辆执行。点的采�
 
 <a id="observation-data"></a>
 
-## observation：驾驶程序能读到什么
+## observation：AD policy 接收的观测
 
 默认观测由主车的 AssemblyObservation 组合而成。更换 Observer 或配置后，字段会相应变化。
 
@@ -138,7 +138,9 @@ AgentState 记录一个仿真对象当前处于什么状态。Environment 检查
 <a id="reward-calculation"></a>
 
 ## 奖励计算与修改
-奖励函数的设计对于强化学习训练非常关键。研究者可以根据自己的需要，修改重写reward类或函数。
+
+强化学习训练通过奖励定义优化目标。可以调整已有奖励项的权重和阈值，也可以重写奖励函数，加入自己的评价项。
+
 ScenarioEnv 使用 [RewardCalculator](../../../streetworld/misc/reward_calculator.py) 计算奖励。每轮开始时调用它的 `reset()` 清空记录，每次计算时调用 `compute(env)`，得到 `(reward, reward_info)`；Environment 将 `reward_info` 合并进 `info`，并累加每一步的 reward。
 
 默认奖励包括以下项：
@@ -152,7 +154,7 @@ ScenarioEnv 使用 [RewardCalculator](../../../streetworld/misc/reward_calculato
 | `success_bonus` | 到达目标的奖励，默认为 `75` |
 | `living_cost` | 每次计算时加入的固定项，当前默认值为 `0.05` |
 
-修改已有项的权重或阈值，在 Config 中设置 `progress_reward_weight`、`collision_penalty_weight` 等字段即可，完整字段见 [ScenarioEnv 配置](../reference/environment.md#api-1-2)。新增计算逻辑，可以在 ScenarioEnv 子类中覆写 `_reward_function()`。例如，设计一个保留默认奖励，再对大幅转向扣分的reward：
+修改已有项的权重或阈值，在 Config 中设置 `progress_reward_weight`、`collision_penalty_weight` 等字段即可，完整字段见 [ScenarioEnv 配置](../reference/environment.md#api-1-2)。新增计算逻辑时，可以在 ScenarioEnv 子类中覆写 `_reward_function()`。下面的例子保留默认奖励，并按转向力度追加扣分：
 
 ```python
 from streetworld.envs.scenario_env import ScenarioEnv
@@ -185,7 +187,7 @@ from streetworld.envs.scenario_env import ScenarioEnv
 InteractiveScenarioEnv = make_interactive_env(ScenarioEnv)
 ```
 
-返回的类仍有原环境的 `reset()`、`step()`、`close()`接口，并管理下面三个UI示例：
+返回的类保留原环境的 `reset()`、`step()`、`close()` 接口，并管理以下组件：
 
 | 类 | 提供的功能 | 开关与主要配置 |
 | --- | --- | --- |
@@ -194,11 +196,14 @@ InteractiveScenarioEnv = make_interactive_env(ScenarioEnv)
 | VideoExporter | 按场景保存 MP4，可在相机画面旁显示速度、角速度历史和控制量 | `video_output_dir`，默认 `videos`；设为 `None` 不录制，`video_hud` 控制附加状态显示 |
 
 每一步完成后，交互环境从 `observation` 取相机图像，按 `image_layout` 拼接，再把画面和车辆状态交给这些类。场景结束时，终端显示结束原因和评测结果，视频写入文件。调用 `close()` 时关闭界面并保存尚未写出的录像。
-网页服务在创建环境时启动，场景刚 reset 时会等待第一步画面；执行 `step()` 后才显示新的相机图像。手动驾驶需要持续接收按键的运行方式，见[浏览器驾驶示例](../getting-started/web-controller.md#section-1-2)。交互环境的完整配置见[组件参考](../reference/environment.md#api-1-3)。
+
+网页服务在创建环境时启动，调用 `reset()` 后会等待第一步画面；执行 `step()` 后才显示新的相机图像。手动驾驶需要持续接收按键输入，见[浏览器驾驶示例](../getting-started/web-controller.md#section-1-2)。交互环境的完整配置见[组件参考](../reference/environment.md#api-1-3)。
 
 ## 远程调用
-AD policy与仿真器往往存在环境依赖的冲突，所以最好的实践是将AD policy与仿真器分别配置在两个环境中，并通过进程间通信完成仿真与推理的闭环。
-模型与仿真分别运行时，先按[第一章](../getting-started/environment-server.md#section-1-3)启动 Environment Server，再用 GrpcClientEnv 连接。客户端仍然调用 `reset()`、`step()`、`close()`；加载场景、运行车辆和计算奖励都在服务端完成。
+
+AD policy 与仿真器的依赖版本可能冲突。可将它们分别安装在两个 Python 环境中，通过 gRPC 交换观测与动作，完成闭环仿真。
+
+先按[第一章](../getting-started/environment-server.md#section-1-3)启动 Environment Server，再用 GrpcClientEnv 连接。客户端仍然调用 `reset()`、`step()`、`close()`；加载场景、运行车辆和计算奖励都在服务端完成。
 
 ```python
 import numpy as np
@@ -213,7 +218,7 @@ finally:
     env.close()
 ```
 
-这个例子对应服务端默认的轨迹策略，提交六个未来位置点。模型接入后，根据 `observation` 生成自己的轨迹，替换 `trajectory` 并循环调用即可。
+这个例子对应服务端默认的轨迹策略，提交六个未来位置点。接入 AD policy 后，根据 `observation` 生成轨迹，替换 `trajectory` 并循环调用即可。
 
 远程场景由服务端配置选择。客户端 `reset()` 的 `seed` 和 `options` 当前不会发往服务端，也不提供指定 `scene_id` 的参数。远程连续控制可提交 `[steering, throttle_brake]`；服务端把它恢复成一行两列，EnvInputPolicy 取这一行作为控制量。离散动作编号当前不适用这条传输接口，非空动作的元素总数必须是偶数。传 `None` 时，服务端也收到 `None`。
 

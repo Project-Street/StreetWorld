@@ -4,11 +4,11 @@
 
 [English](../../en/guides/simulator-interface.md)
 
-[总目录](../../DOCUMENTATION_ZH.md) · [上一页：3.1 Environment：本地与远程调用](environment-interface.md) · [下一页：3.3 渲染后端示例](rendering-backends.md)
+[总目录](../../DOCUMENTATION_ZH.md) · [上一页：3.1 Environment：本地与远程调用](environment-interface.md) · [下一页：3.3 SimulatorInterface 示例](rendering-backends.md)
 
 SimulatorInterface 是 StreetWorld 对场景加载和图像渲染的接口约定。不同数据集的场景资产按这套约定提供轨迹、相机参数、地图和地形，就能以相同的数据格式交给 Environment。不同渲染器实现这套接口后，也可以根据仿真中的对象位置和相机位置生成画面。
 
-Environment 按约定调用这些方法，具体实现自行读取数据文件、加载资产和渲染图像。接入新的数据集或渲染器时，实现下面四个方法，再把实例传给 Environment。仓库已有后端的创建与启动方法见[渲染后端示例](rendering-backends.md#section-3-3)。
+Environment 按约定调用这些方法，具体实现自行读取数据文件、加载资产和渲染图像。接入新的数据集或渲染器时，实现下面四个方法，再把实例传给 Environment。仓库已有后端的创建与启动方法见 [SimulatorInterface 示例](rendering-backends.md#section-3-3)。
 
 ## SimulatorInterface 的四个调用
 
@@ -106,4 +106,4 @@ NuRec 的部分相机使用 `ftheta` 鱼眼模型。它们的成像需要额外�
 
 ---
 
-[总目录](../../DOCUMENTATION_ZH.md) · [上一页：3.1 Environment：本地与远程调用](environment-interface.md) · [下一页：3.3 渲染后端示例](rendering-backends.md)
+[总目录](../../DOCUMENTATION_ZH.md) · [上一页：3.1 Environment：本地与远程调用](environment-interface.md) · [下一页：3.3 SimulatorInterface 示例](rendering-backends.md)

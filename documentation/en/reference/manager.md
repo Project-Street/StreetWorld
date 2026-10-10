@@ -18,7 +18,7 @@ On this page
 
 ### Purpose and construction
 
-BaseManager provides object registration, creation, and destruction for Managers. Subclasses can use it to manage multiple physical objects during a scene and release them together when scenes change.
+BaseManager is the base class for Managers and provides object registration, creation, and destruction. A Manager may create one or more physical objects during a scene and must release them together when scenes change. Subclasses can use these methods to implement their own scene or Agent management logic.
 
 It uses [Randomizable](randomizable.md#api-9-3), stores objects by ID in `spawned_objects`, and calls their `destroy()` during cleanup. Environment calls each concrete Manager's `reset()`, `step()`, and `update_state()` directly; it does not automatically run every before/after hook.
 

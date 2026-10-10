@@ -1,18 +1,16 @@
 <a id="section-3-3"></a>
 
-# 3.3 Rendering backend examples
+# 3.3 SimulatorInterface examples
 
 [简体中文](../../zh/guides/rendering-backends.md)
 
 [Contents](../../DOCUMENTATION_EN.md) · [Previous: 3.2 3D assets and SimulatorInterface](simulator-interface.md) · [Next: 4.1 Using Config](configuration/config.md)
 
-nuScenes and Waymo use ST Renderer on the local GPU. NuRec scenes use a separate rendering service. Pass the selected backend's interface instance to Environment.
-
 <a id="st-renderer"></a>
 
 ## ST Renderer
 
-ST Renderer renders reconstructed nuScenes or Waymo Gaussian scenes on the local GPU. Create a nuScenes interface as follows:
+ST Renderer renders StreetWorld's reconstructed nuScenes and Waymo Gaussian scenes on the local GPU and interacts with Environment through SimulatorInterface. Create a nuScenes interface as follows:
 
 ```python
 from st_renderer import SimulatorInterface
@@ -20,48 +18,17 @@ from st_renderer import SimulatorInterface
 simulator = SimulatorInterface("nuscenes")
 ```
 
-Use `SimulatorInterface("waymo")` for Waymo. Files are read from the repository's dataset directories by default. For data elsewhere, set `root` to the directory containing scene NPZ files, for example SimulatorInterface("nuscenes", `root`="/path/to/nuscenes").
-
-See [NuRec](#nurec) for its scene format, rendering service installation, and startup.
-
-<a id="scene-files"></a>
-
-## Scene asset directories
-
-The default scene paths under the StreetWorld root are:
-
-```text
-data/processed/benchmark/
-├── nuscenes/
-│   ├── 0007.npz
-│   ├── <other_scene_name>.npz
-│   └── map_cache.npz
-├── waymo/
-│   ├── <scene_name>.npz
-│   └── ground/<scene_name>.obj
-└── NuRec/sample_set/25.07_release/
-    └── Batch<number>/<scene_directory>/
-        ├── <uuid>.usdz
-        └── <uuid>/
-            ├── rig_trajectories.json
-            ├── sequence_tracks.json
-            ├── map.xodr
-            └── mesh_ground.ply
-```
-
-nuScenes and Waymo scene IDs are NPZ filenames without extensions, for example `0007` and 001-segment-1422926405879888210.
-
-NuRec scene IDs are relative paths beginning with Batch followed by digits, such as Batch0001/<scene_directory>, relative to nurec_root. Each scene directory contains a USDZ file and a UUID subdirectory of the same name with unpacked data.
+Use `SimulatorInterface("waymo")` for Waymo. Files are read from the repository's dataset directories by default. For data elsewhere, set `root` to the directory containing scene NPZ files, for example `SimulatorInterface("nuscenes", root="/path/to/nuscenes")`.
 
 <a id="nurec"></a>
 
 ## NuRec
 
-[NuRec](https://docs.nvidia.com/nurec/index.html) is NVIDIA's scene reconstruction and rendering tool. It reconstructs camera and lidar recordings into 3D scenes stored as USDZ files. Rendering can change camera and participant poses to generate new views of those scenes.
+[The NuRec driving dataset](https://huggingface.co/datasets/nvidia/PhysicalAI-Autonomous-Vehicles-NuRec) consists of real driving scenes reconstructed by NVIDIA using 3DGUT.
 
-StreetWorld uses reconstructed NuRec scenes. The [NuRec SimulatorInterface](../../../submodules/nurec_interface/simulator_interface.py) reads local trajectories, camera parameters, and XODR maps, then requests images from the [gRPC rendering service](https://docs.nvidia.com/nurec/api/grpc_api_guide.html).
+StreetWorld reads NuRec trajectories, camera parameters, and XODR maps through the [NuRec SimulatorInterface](../../../submodules/nurec_interface/simulator_interface.py) and requests camera images from the [gRPC rendering service](https://docs.nvidia.com/nurec/api/grpc_api_guide.html) to run closed-loop simulation in these reconstructed scenes.
 
-Run two services: NuRec rendering on port `8080` for SimulatorInterface, and StreetWorld Environment Server on port `50052` for AD policy observations and actions. The renderer uses the `nre-ga:26.04` image; see [NuRec server setup](../../../submodules/nurec_interface/NUREC_GRPC_SERVER_SETUP.md).
+Start the NuRec rendering service first. It listens on port `8080` by default for image requests from SimulatorInterface. StreetWorld Environment Server listens on port `50052` for AD policy observations and actions.
 
 ### Enable GPU access in Docker
 
@@ -93,10 +60,10 @@ docker run --rm --gpus all --entrypoint nvidia-smi nvcr.io/nvidia/nre/nre-ga:26.
 
 ### Start the NuRec rendering service
 
-Prepare data under the [scene asset directories](#scene-files). This example uses `Batch0005/7e11dcb8-7bce-4972-b998-8626857e92aa` from the submodule guide. Run from the StreetWorld root:
+StreetWorld currently supports the `25.07_release` data. Prepare it under the [scene asset directories](#scene-files). This example uses `Batch0005/7e11dcb8-7bce-4972-b998-8626857e92aa`. Run from the StreetWorld root:
 
 ```bash
-NUREC_HOST_ROOT="$PWD/data/processed/benchmark/NuRec"
+NUREC_HOST_ROOT="/path/to/NuRec"
 SCENE_USDZ="sample_set/25.07_release/Batch0005/7e11dcb8-7bce-4972-b998-8626857e92aa/7e11dcb8-7bce-4972-b998-8626857e92aa.usdz"
 
 docker run -d --name nurec-grpc \
@@ -117,7 +84,9 @@ docker run -d --name nurec-grpc \
 
 `NUREC_HOST_ROOT` is the host's NuRec data directory, mounted at `/workdir/NuRec` inside the container. `SCENE_USDZ` is the USDZ path relative to that directory; replace it with your scene's actual file.
 
-`--test-scenes-are-valid` loads and checks scenes before the service starts. `--enable-editing-actors` permits StreetWorld to update participant poses and is required; without it, render requests with object updates return INVALID_ARGUMENT. Port `8081` is for health checks; SimulatorInterface connects to 8080.
+`--test-scenes-are-valid` loads and checks scenes before the service starts. `--enable-editing-actors` permits StreetWorld to update participant poses.
+
+Port `8081` is for health checks; SimulatorInterface connects to `8080`.
 
 Read the startup logs:
 
@@ -139,7 +108,7 @@ channel.close()
 PY
 ```
 
-The service scene ID is clipgt- followed by the USDZ filename without its extension. This example should return clipgt-7e11dcb8-7bce-4972-b998-8626857e92aa. SimulatorInterface derives the same ID from the local USDZ filename, so local data must match the loaded service scene. Requests for unloaded scenes return NOT_FOUND.
+The NuRec rendering service uses `clipgt-<USDZ filename without its extension>` as the scene ID. This example should return `clipgt-7e11dcb8-7bce-4972-b998-8626857e92aa`. SimulatorInterface derives the corresponding rendering scene ID from the local USDZ filename. Local data must match the loaded service scene; requests for unloaded scenes return `NOT_FOUND`.
 
 ### Start the StreetWorld Environment Server
 
@@ -160,9 +129,9 @@ python -m streetworld.examples.env_server_scene_config \
 
 You can also run [env_server_easydrive.py](../../../streetworld/examples/env_server_easydrive.py) and select NuRec and the scene in the terminal. Both scripts read `data/processed/benchmark/NuRec/sample_set/25.07_release` and load the camera layout/navigation settings from [NUREC_CONFIG](../../../streetworld/configs/nurec_config.py).
 
-The AD policy connects to 127.0.0.1:50052. Open `http://127.0.0.1:18080` to view images in a browser. Simulation begins when the client calls `reset()` and step(). Both scripts currently use EnvInputPolicy for NuRec, accepting `[steering, throttle_brake]`; for example, `[0.0, 0.2]` keeps steering centered with 20% throttle.
+The AD policy connects to `127.0.0.1:50052`. Open `http://127.0.0.1:18080` to view images in a browser. Simulation begins when the client calls `reset()` and `step()`. Both scripts currently use EnvInputPolicy for NuRec, accepting `[steering, throttle_brake]`; for example, `[0.0, 0.2]` keeps steering centered with 20% throttle.
 
-The NuRec branch does not currently apply --ad-policy-config. For a trajectory-predicting AD policy, select EnvInputILQRPolicy or EnvInputPIDPolicy when constructing the environment and match `trajectory_dt` to the model's point interval. See the [configuration example](configuration/policy-controller.md#section-4-5).
+For an AD policy that outputs trajectories, change the ego Policy to EnvInputILQRPolicy or EnvInputPIDPolicy in the environment construction code and match `trajectory_dt` to the AD policy's waypoint interval. The two examples do not currently provide this setting; see the [configuration example](configuration/policy-controller.md#section-4-5) for the required changes.
 
 To change scenes, stop the Environment Server, remove the rendering container, restart with a new `SCENE_USDZ`, and update the scene list:
 
@@ -185,7 +154,40 @@ simulator = SimulatorInterface(
 )
 ```
 
-`nurec_root` points to the local release directory. `grpc_host` and `grpc_port` identify the NuRec rendering service; `grpc_timeout_s` is in seconds. `resolution_scale` scales image resolution and defaults to 1.0. Also merge [NUREC_CONFIG](../../../streetworld/configs/nurec_config.py) so the interactive layout matches NuRec camera names.
+`nurec_root` points to the local release directory. `grpc_host` and `grpc_port` specify the address and port of the NuRec rendering service.
+
+`grpc_timeout_s` sets the maximum wait for each gRPC rendering request, in seconds, and defaults to `600.0`. In this example, each request can wait up to 600 seconds. If no result arrives within that time, the call raises a gRPC `DEADLINE_EXCEEDED` error.
+
+Also merge [NUREC_CONFIG](../../../streetworld/configs/nurec_config.py) when constructing the environment so the interactive layout matches NuRec camera names.
+
+<a id="scene-files"></a>
+
+## Scene asset directories
+
+The default scene paths under the StreetWorld root are:
+
+```text
+data/processed/benchmark/
+├── nuscenes/
+│   ├── 0007.npz
+│   ├── <other_scene_name>.npz
+│   └── map_cache.npz
+├── waymo/
+│   ├── <scene_name>.npz
+│   └── ground/<scene_name>.obj
+└── NuRec/sample_set/25.07_release/
+    └── Batch<number>/<scene_directory>/
+        ├── <uuid>.usdz
+        └── <uuid>/
+            ├── rig_trajectories.json
+            ├── sequence_tracks.json
+            ├── map.xodr
+            └── mesh_ground.ply
+```
+
+nuScenes and Waymo scene IDs are NPZ filenames without extensions, for example `0007` and `001-segment-1422926405879888210`.
+
+NuRec scene IDs are paths beginning with `Batch` followed by digits, such as `Batch0001/<scene_directory>`, relative to `nurec_root`. Each scene directory contains a USDZ file and a UUID subdirectory of the same name with unpacked data.
 
 ---
 

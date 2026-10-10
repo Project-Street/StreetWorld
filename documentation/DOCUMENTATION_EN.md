@@ -21,7 +21,7 @@ StreetWorld is a closed-loop autonomous driving simulation platform. An AD polic
 - <a id="chapter-3"></a>[3. Interface contracts](en/guides/environment-interface.md)
     - [3.1 Environment: local and remote calls](en/guides/environment-interface.md#section-3-1)
     - [3.2 3D assets and SimulatorInterface](en/guides/simulator-interface.md#section-3-2)
-    - [3.3 Rendering backend examples](en/guides/rendering-backends.md#section-3-3)
+    - [3.3 SimulatorInterface examples](en/guides/rendering-backends.md#section-3-3)
 - <a id="chapter-4"></a>[4. Configuration system](en/guides/configuration/config.md)
     - [4.1 Using Config](en/guides/configuration/config.md#section-4-1)
     - [4.2 Configuration hierarchy and precedence](en/guides/configuration/hierarchy.md#section-4-2)
